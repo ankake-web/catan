@@ -348,9 +348,7 @@ h1 {
   100% { filter: brightness(1); }
 }
 /* アニメ抑制時はパルスを止め、産出ヘックスを静的に明るく示す（どこから出たか分かる）。 */
-@media (prefers-reduced-motion: reduce) {
-  .hex-tile.producing { animation: none; filter: brightness(1.5) drop-shadow(0 0 6px rgba(255,240,150,0.85)); }
-}
+html.reduce-motion .hex-tile.producing { animation: none; filter: brightness(1.5) drop-shadow(0 0 6px rgba(255,240,150,0.85)); }
 
 .hex-tile.forest   { fill: #2d6a2d; }
 .hex-tile.field    { fill: #c8a830; }
@@ -414,9 +412,7 @@ h1 {
   0%,100% { filter: drop-shadow(0 0 7px #ff3a1a) drop-shadow(0 0 15px #ff2a14); }
   50%     { filter: drop-shadow(0 0 14px #ff1a08) drop-shadow(0 0 28px #ff5a3a); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .building-downgrade { animation: none; filter: drop-shadow(0 0 12px #ff2a14) drop-shadow(0 0 24px #ff5a3a); }
-}
+html.reduce-motion .building-downgrade { animation: none; filter: drop-shadow(0 0 12px #ff2a14) drop-shadow(0 0 24px #ff5a3a); }
 
 /* ---- 港 ---- */
 .harbor-line {
@@ -530,9 +526,7 @@ h1 {
   cursor: pointer; stroke: #4ea3ff; stroke-width: 7;
   filter: brightness(1.5) drop-shadow(0 0 12px #4ea3ff) drop-shadow(0 0 24px #2f7fff);
 }
-@media (prefers-reduced-motion: reduce) {
-  .hex-tile.valid-robber { animation: none; filter: brightness(1.5) drop-shadow(0 0 14px #ffe24a) drop-shadow(0 0 26px #ffd02a); }
-}
+html.reduce-motion .hex-tile.valid-robber { animation: none; filter: brightness(1.5) drop-shadow(0 0 14px #ffe24a) drop-shadow(0 0 26px #ffd02a); }
 
 /* ---- タッチ用の透明な当たり判定（候補のみに重ねる） ----
    既定(マウス)では無効化し、見た目の点/線/タイルでそのまま操作する。
@@ -571,9 +565,7 @@ h1 {
   animation: roadDraw 0.45s ease-out;
 }
 @keyframes roadDraw { from { stroke-dashoffset: 80; } to { stroke-dashoffset: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  [data-vertex-id].just-built, .road-line-built.road-draw { animation: none; }
-}
+html.reduce-motion [data-vertex-id].just-built, html.reduce-motion .road-line-built.road-draw { animation: none; }
 
 /* ---- 仮置きプレビュー（確定待ち）のゴースト ----
    候補(緑のパルス)に紛れて「どこを選んだか」分かりにくかったので、
@@ -609,9 +601,7 @@ h1 {
   0%,100% { filter: drop-shadow(0 0 3px rgba(255,255,150,0.7)); }
   50%     { filter: drop-shadow(0 0 9px rgba(255,255,150,1)); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .vertex-preview, .edge-preview-casing { animation: none; filter: drop-shadow(0 0 5px rgba(255,255,150,0.9)); }
-}
+html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { animation: none; filter: drop-shadow(0 0 5px rgba(255,255,150,0.9)); }
 
 /* ---- 配置確認バー（盤面の直下に出す。top/left は JS が盤面実測で設定） ----
    質問テキストを上段・[確定][やめる]を下段に並べ、ボタンが改行/折返しせず
@@ -1832,7 +1822,7 @@ h1 {
   flex: 0 0 auto;
 }
 @keyframes lanSpin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .lan-spinner { animation-duration: 2.4s; } }
+html.reduce-motion .lan-spinner { animation-duration: 2.4s; }
 
 /* ---- 盤面シナリオ選択（ミニ盤面プレビュー付きカード）。ホーム/ロビー共通 ---- */
 .scenario-picker { display: flex; flex-direction: column; gap: 7px; width: 100%; min-width: 0; }
@@ -2179,9 +2169,7 @@ h1 {
   45% { transform: scale(1.05); }
   100% { transform: scale(1); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .player-panel.res-landed, .mini-panel.res-landed { animation: none; }
-}
+html.reduce-motion .player-panel.res-landed, html.reduce-motion .mini-panel.res-landed { animation: none; }
 
 /* ---- 盗賊の移動演出（スライド＋着地ハイライト） ---- */
 .robber-fly {
@@ -2220,9 +2208,7 @@ h1 {
 .turn-toast-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.7); }
 @keyframes turnToastIn { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes turnToastOut { to { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  #turn-toast { animation: none; }
-}
+html.reduce-motion #turn-toast { animation: none; }
 
 /* 盤面メッセージ（交易の申し込みなどの通知。中央上に短く表示） */
 #board-notice {
@@ -2242,9 +2228,7 @@ h1 {
   animation: boardNoticeIn 0.3s ease-out, turnToastOut 0.5s ease-in 1.7s forwards;
 }
 @keyframes boardNoticeIn { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
-@media (prefers-reduced-motion: reduce) {
-  #board-notice { animation: none; }
-}
+html.reduce-motion #board-notice { animation: none; }
 
 /* ---- 進歩カード使用時の盤面中央 大型表示（短時間） ---- */
 #played-progress {
@@ -2269,7 +2253,7 @@ h1 {
 }
 @keyframes playedPcIn  { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.55); } 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 @keyframes playedPcOut { 0% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -64%) scale(0.92); } }
-@media (prefers-reduced-motion: reduce) { #played-progress { animation: none; } }
+html.reduce-motion #played-progress { animation: none; }
 
 /* ---- 称号バッジの移動演出(C-7): 旧保持者→新保持者へ飛ぶ ---- */
 .badge-fly {
@@ -2669,10 +2653,8 @@ h1 {
 @keyframes barbAttackOut { to { opacity: 0; } }
 @keyframes barbTitlePulse { 0% { transform: scale(0.55); } 60% { transform: scale(1.14); } 100% { transform: scale(1); } }
 @keyframes barbShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-8px); } 40% { transform: translateX(7px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(4px); } }
-@media (prefers-reduced-motion: reduce) {
-  #barbarian-attack { animation: barbAttackIn 0.2s ease-out, barbAttackOut 0.4s ease-in 3.7s forwards; }
-  .barbarian-attack-title { animation: none; }
-}
+html.reduce-motion #barbarian-attack { animation: barbAttackIn 0.2s ease-out, barbAttackOut 0.4s ease-in 3.7s forwards; }
+html.reduce-motion .barbarian-attack-title { animation: none; }
 
 /* イベント結果パネル（蛮族前進 / 色別抽選の照合）。結果カードと調和する締まったデザイン。 */
 .dice-event-panel {
@@ -3034,17 +3016,15 @@ h1 {
 }
 
 /* 動きを抑える設定では点滅・派手な演出を止める（要素はJSのタイマーで消える） */
-@media (prefers-reduced-motion: reduce) {
-  .turn-banner.mine,
-  .player-panel.your-turn,
-  .vp-pop, .bonus-pop,
-  .player-panel.vp-gain-flash,
-  .mini-panel.vp-gain-flash,
-  .mini-panel.mine.vp-gain-flash,
-  .player-panel.bonus-flash,
-  .mini-panel.bonus-flash,
-  .mini-panel.mine.bonus-flash { animation: none; }
-}
+html.reduce-motion .turn-banner.mine,
+html.reduce-motion .player-panel.your-turn,
+html.reduce-motion .vp-pop, html.reduce-motion .bonus-pop,
+html.reduce-motion .player-panel.vp-gain-flash,
+html.reduce-motion .mini-panel.vp-gain-flash,
+html.reduce-motion .mini-panel.mine.vp-gain-flash,
+html.reduce-motion .player-panel.bonus-flash,
+html.reduce-motion .mini-panel.bonus-flash,
+html.reduce-motion .mini-panel.mine.bonus-flash { animation: none; }
 
 /* 横持ちコンパクト時: 手番バナーの高さを抑える（盤面を圧迫しない） */
 @media (orientation: landscape) and (max-height: 600px) and (max-width: 1199.98px) {
@@ -3120,5 +3100,5 @@ h1 {
   0%,100% { box-shadow: 0 0 6px var(--mini-color, #fff), 0 1px 4px rgba(0,0,0,0.5); }
   50%     { box-shadow: 0 0 15px var(--mini-color, #fff), 0 1px 4px rgba(0,0,0,0.5); }
 }
-@media (prefers-reduced-motion: reduce) { .mini-panel.mine { animation: none; } }
+html.reduce-motion .mini-panel.mine { animation: none; }
 

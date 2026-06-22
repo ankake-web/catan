@@ -780,6 +780,29 @@ function setDiceFxMode(m: DiceFxMode): void {
 }
 const DICE_FX_LABELS: Record<DiceFxMode, string> = { off: 'OFF（即結果）', slow: 'ゆっくり', normal: '普通', fast: '速い' };
 
+// アニメーション表示の設定（資源飛行・サイコロ回転・カード大表示・建設ポップ・紙吹雪等）。
+// 既定ON＝端末のOS「動きを減らす(prefers-reduced-motion)」設定に関係なく常に演出を出す。
+// オンライン対戦で各プレイヤーの端末のOS設定差により「出る端末/出ない端末」がバラつく
+// （省電力モードやアクセシビリティで知らぬ間にOFFになっている）問題への対策。OFFで省略可。
+type AnimFxMode = 'on' | 'off';
+const ANIM_FX_KEY = 'catan_anim_fx';
+function animFxMode(): AnimFxMode {
+  try { const v = localStorage.getItem(ANIM_FX_KEY); if (v === 'on' || v === 'off') return v; } catch { /* ignore */ }
+  return 'on'; // 既定ON: OSの reduced-motion を無視して演出を出す（全端末で箱出し表示）
+}
+function setAnimFxMode(m: AnimFxMode): void {
+  try { localStorage.setItem(ANIM_FX_KEY, m); } catch { /* ignore */ }
+  applyReduceMotionClass();
+}
+const ANIM_FX_LABELS: Record<AnimFxMode, string> = { on: 'ON（常に表示）', off: 'OFF（省略）' };
+// CSS側の演出抑制（@media ではなく html.reduce-motion クラスで判定）を、アプリ内設定に同期する。
+// 既定ON＝クラスなし＝OSの reduced-motion に関係なく全演出を出す。OFF時のみクラスを付けて抑制する。
+// （CSSメディアクエリはOS設定を直読みするため、JSの上書きだけでは各端末の設定差を解消できない。）
+function applyReduceMotionClass(): void {
+  try { document.documentElement.classList.toggle('reduce-motion', animFxMode() === 'off'); } catch { /* ignore */ }
+}
+applyReduceMotionClass(); // 起動時に現在の設定を反映
+
 // このターンにCPUがプレイヤー間交易を提案済みか（連続提案防止）
 let cpuPlayerTradeOfferedThisTurn = false;
 
@@ -1111,6 +1134,28 @@ function updateGameNav(): void {
     });
     speedRow.append(lbl, sel);
     dd.appendChild(speedRow);
+  }
+
+  // アニメーション表示（ON/OFF）。既定ON＝OSの「動きを減らす」に関係なく演出を出す。
+  // OFFで資源飛行・サイコロ回転・カード大表示などを省略（reduced-motion 相当）。即反映。
+  {
+    const animRow = document.createElement('div');
+    animRow.className = 'game-menu-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'game-menu-label';
+    lbl.textContent = 'アニメーション';
+    const sel = document.createElement('select');
+    sel.className = 'game-menu-select';
+    const cur = animFxMode();
+    (['on', 'off'] as AnimFxMode[]).forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = ANIM_FX_LABELS[m];
+      if (cur === m) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', () => setAnimFxMode(sel.value as AnimFxMode));
+    animRow.append(lbl, sel);
+    dd.appendChild(animRow);
   }
 
   // サイコロ演出の速さ（OFF/ゆっくり/普通/速い）。CPU速度とは独立・即反映。
@@ -2178,11 +2223,13 @@ function originForCommodity(diceTotal: number, pid: string, c: CommodityType): {
   return getBoardCenter();
 }
 
-// OSの「視差効果を減らす/アニメ抑制」設定を尊重する。trueなら派手な動きは省略し即時化する。
+// 演出を省略すべきか。trueなら派手な動きは省略し即時化する（資源飛行・サイコロ回転・
+// カード大表示・建設ポップ・紙吹雪など全演出の共通ゲート）。
+// 判定はアプリ内設定（animFxMode）を最優先する。既定はON＝OSの reduced-motion を無視して
+// 必ず演出を出す（オンライン対戦で各端末のOS設定差により演出がバラつくのを防ぐ）。
+// ユーザーが設定メニューで明示OFFにしたときだけ省略する。
 function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined'
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return animFxMode() === 'off';
 }
 
 // 初期配置2軒目（SETUP_BACKWARD）で配る初期資源を公開情報から導出して飛ばす。
