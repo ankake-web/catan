@@ -416,8 +416,9 @@ html.reduce-motion .building-downgrade { animation: none; filter: drop-shadow(0 
 
 /* ---- 港 ---- */
 .harbor-line {
-  stroke-dasharray: 5 3;
-  opacity: 0.95;
+  /* 港辺は道(stroke 7)と同じ辺に重なるため、点線を細く・隙間多めにして敷いた道が透けて見えるようにする。 */
+  stroke-dasharray: 3 9;
+  opacity: 0.75;
 }
 .harbor-label {
   font-size: 11px;

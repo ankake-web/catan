@@ -179,10 +179,10 @@ function renderHome(
   speedLabel.textContent = 'CPU の速度';
   const speedGroup = document.createElement('div');
   speedGroup.className = 'home-radio-group';
-  // 速度は3段階（ゆっくり/普通/速い）。旧「最速」(instant)保存値は「速い」へフォールバック。
-  const speedLabelMap: Record<CpuSpeed, string> = { slow: 'ゆっくり', normal: '普通', fast: '速い', instant: '速い' };
+  // 速度は4段階（ゆっくり/普通/速い/最速）。最速(instant)は演出を大幅に省いてテンポ最優先。
+  const speedLabelMap: Record<CpuSpeed, string> = { slow: 'ゆっくり', normal: '普通', fast: '速い', instant: '最速' };
   const defaultSpeed = speedLabelMap[lastConfig?.cpuSpeed ?? 'normal'];
-  speedGroup.appendChild(createRadioGroup('cpuSpeed', ['ゆっくり', '普通', '速い'], defaultSpeed));
+  speedGroup.appendChild(createRadioGroup('cpuSpeed', ['ゆっくり', '普通', '速い', '最速'], defaultSpeed));
   speedField.appendChild(speedLabel);
   speedField.appendChild(speedGroup);
   cpuForm.appendChild(speedField);
@@ -353,7 +353,7 @@ function renderHome(
     const cpuDifficulty: AiDifficulty = diffMap[diffVal] ?? 'strong';
 
     const speedVal = (speedGroup.querySelector('input[name="cpuSpeed"]:checked') as HTMLInputElement | null)?.value ?? '普通';
-    const speedMap: Record<string, CpuSpeed> = { 'ゆっくり': 'slow', '普通': 'normal', '速い': 'fast' };
+    const speedMap: Record<string, CpuSpeed> = { 'ゆっくり': 'slow', '普通': 'normal', '速い': 'fast', '最速': 'instant' };
     const cpuSpeed: CpuSpeed = speedMap[speedVal] ?? 'normal';
 
     // 盤面シナリオを読み取る（ドロップダウンの値＝ScenarioId）。
@@ -1128,9 +1128,9 @@ function updateGameNav(): void {
     lbl.textContent = 'CPU速度';
     const sel = document.createElement('select');
     sel.className = 'game-menu-select';
-    // 速度は3段階。旧「最速」(instant)保存値は「速い」を選択状態として表示する。
-    const curSpeed: CpuSpeed = lastConfig!.cpuSpeed === 'instant' ? 'fast' : lastConfig!.cpuSpeed;
-    (['slow', 'normal', 'fast'] as CpuSpeed[]).forEach(sp => {
+    // 速度は4段階（ゆっくり/普通/速い/最速）。ゲーム中でも変更でき、次のCPU行動から反映。
+    const curSpeed: CpuSpeed = lastConfig!.cpuSpeed;
+    (['slow', 'normal', 'fast', 'instant'] as CpuSpeed[]).forEach(sp => {
       const opt = document.createElement('option');
       opt.value = sp; opt.textContent = CPU_SPEED_LABELS[sp];
       if (curSpeed === sp) opt.selected = true;
@@ -2805,11 +2805,13 @@ function showBarbarianAttackOverlay(result?: DiceEventInfo['attackResult']): voi
   document.body.appendChild(ov);
   // 結果（撃退/敗北・誰が格下げ）を読めるよう長めに表示（タップは透過するので操作は妨げない）。
   // この演出が消えるまで資源/進歩カードの配布アニメは待たせる（pendingOverlayDelay）。
-  barbarianOverlayClearAt = (typeof performance !== 'undefined' ? performance.now() : 0) + BARB_OVERLAY_MS;
-  setTimeout(() => { ov.remove(); barbarianOverlayClearAt = 0; }, BARB_OVERLAY_MS);
+  // 最速(instant)では襲来演出も短くしてテンポ優先（出すが長くは止めない）。普通/速いは従来どおり。
+  const overlayMs = fxSpeed() === 'instant' ? 1500 : BARB_OVERLAY_MS;
+  barbarianOverlayClearAt = (typeof performance !== 'undefined' ? performance.now() : 0) + overlayMs;
+  setTimeout(() => { ov.remove(); barbarianOverlayClearAt = 0; }, overlayMs);
   // CPUの次手も、この全画面演出が消えるまで待たせる（演出スキップ防止）。ダイスの finishAll は
   // 演出より早く来る(約4.6s)ため、ここでゲートしないとCPUが襲来挿絵の途中で次へ進んでしまう。
-  holdResourceAnimating(BARB_OVERLAY_MS);
+  holdResourceAnimating(overlayMs);
 }
 
 /** イベント結果を演出へ接続: 船=蛮族前進（残り少は警告フラッシュ）/ 色ゲート=その色が画面に広がる。

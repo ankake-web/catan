@@ -351,11 +351,11 @@ function renderHarbor(
     ly = my + (dy / len) * off;
   }
 
-  // 港辺ライン（太く、色付き）
+  // 港辺ライン（色付き・細め）。道(stroke 7)と同じ辺に重なるので、敷いた道が見えるよう細くする。
   const line = svgEl('line');
   line.classList.add('harbor-line');
   setAttrs(line, { x1: ax, y1: ay, x2: bx, y2: by,
-    stroke: HARBOR_COLOR[harbor.type], 'stroke-width': touch ? 6 : 5 });
+    stroke: HARBOR_COLOR[harbor.type], 'stroke-width': touch ? 3.5 : 3 });
   g.appendChild(line);
 
   // 頂点マーカー（港がどの交点に対応しているかを表示）
