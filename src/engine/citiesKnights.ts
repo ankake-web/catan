@@ -324,7 +324,9 @@ export function buildImprovement(state: GameState, pid: PlayerId, track: CkTrack
       if (holder && holder.playerId !== pid) {
         const ov = vertices[holder.vertexId];
         if (ov?.building?.metropolis) {
-          vertices = { ...vertices, [holder.vertexId]: { ...ov, building: { type: 'city', playerId: holder.playerId } } };
+          // メトロポリスを失っても、元々建てていた城壁(wall)は平の都市に残す。
+          const keepWall = (ov.building as { wall?: boolean }).wall ? { wall: true } : {};
+          vertices = { ...vertices, [holder.vertexId]: { ...ov, building: { type: 'city', playerId: holder.playerId, ...keepWall } } };
         }
       }
       vertices = { ...vertices, [newVid]: { ...vertices[newVid]!, building: { ...vertices[newVid]!.building!, metropolis: true } } };

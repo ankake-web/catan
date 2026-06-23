@@ -1121,22 +1121,24 @@ describe('C&K ルール監査の修正', () => {
     expect(canBuildImprovement(s, 'player1', 'science')).toBe(false); // 平の都市が無い
   });
 
-  it('I: 相手の騎士は最長交易路を分断する', async () => {
+  it('I: 相手の騎士は最長交易路を分断しない（分断するのは相手の建物だけ）', async () => {
     const { calcLongestRoad } = await import('../src/engine/scoring');
     const g = ck();
     // 連続する3頂点 v1-v2-v3 を結ぶ2辺に player1 の道を敷く。
     const e1 = Object.keys(g.edges)[0]!;
-    const [v1, v2] = g.edges[e1]!.vertexIds;
+    const v2 = g.edges[e1]!.vertexIds[1]!;
     const e2 = g.vertices[v2]!.adjacentEdgeIds.find(e => e !== e1 && (g.edges[e]!.vertexIds.includes(v2)))!;
-    const v3 = g.edges[e2]!.vertexIds[0] === v2 ? g.edges[e2]!.vertexIds[1] : g.edges[e2]!.vertexIds[0];
     const base: GameState = {
       ...g,
       edges: { ...g.edges, [e1]: { ...g.edges[e1]!, road: { playerId: 'player1' } }, [e2]: { ...g.edges[e2]!, road: { playerId: 'player1' } } },
     };
     expect(calcLongestRoad(base, 'player1')).toBe(2); // 2本つながる
-    // v2 に相手の騎士 → 分断され最長1。
-    const blocked = { ...base, vertices: { ...base.vertices, [v2]: { ...base.vertices[v2]!, knight: { playerId: 'player2', strength: 1, active: false } } } } as GameState;
-    expect(calcLongestRoad(blocked, 'player1')).toBe(1);
+    // v2 に相手の騎士 → 公式ルール通り、騎士では分断されず最長2のまま。
+    const knightBlocked = { ...base, vertices: { ...base.vertices, [v2]: { ...base.vertices[v2]!, knight: { playerId: 'player2', strength: 1, active: false } } } } as GameState;
+    expect(calcLongestRoad(knightBlocked, 'player1')).toBe(2);
+    // v2 に相手の建物 → 分断され最長1。
+    const bldBlocked = { ...base, vertices: { ...base.vertices, [v2]: { ...base.vertices[v2]!, building: { type: 'settlement', playerId: 'player2' } } } } as GameState;
+    expect(calcLongestRoad(bldBlocked, 'player1')).toBe(1);
   });
 
   it('H: 勝利点カード(印刷機/憲法)は手札上限の対象外で、5枚目を引ける', async () => {

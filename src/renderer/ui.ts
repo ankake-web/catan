@@ -18,7 +18,7 @@ import type { CkTrack, CommodityType, CommodityHand, TradeKind, ProgressCard, Pr
 import type { BuildMode } from './events';
 
 // 画像参照は中央マニフェスト経由（単一の真実）。
-import { ASSETS, assetImg, houseImg, cityImg, type ColorKey } from '../assets/manifest';
+import { ASSETS, assetImg, houseImg, cityImg, metropolisImg, type ColorKey } from '../assets/manifest';
 
 const knightImg = ASSETS.knight.basic;
 // 騎士と商人: 商品アイコン画像（手札チップ等）。テキスト埋め込み箇所は絵文字のまま。
@@ -1588,7 +1588,7 @@ export function showAssetGallery(): void {
   item(g, ASSETS.knight.basic, '騎士（基本）', '強さ1。建設→麦で起動して防衛・行動');
   item(g, ASSETS.knight.strong, '騎士（強い）', '強さ2。鉱石+羊で昇格');
   item(g, ASSETS.knight.mighty, '騎士（最強）', '強さ3。要塞(政治Lv3)で昇格可');
-  item(g, ASSETS.piece.metropolisGate, 'メトロポリス門', '改善Lv4で都市に。4点・略奪されない');
+  item(g, metropolisImg('red'), 'メトロポリス', '改善Lv4で都市から昇格。4点・略奪されない');
   item(g, ASSETS.piece.cityWall, '城壁', 'レンガ2。7の手札上限+2（最大3）');
   item(g, ASSETS.piece.merchant, '商人コマ', '隣接地形を2:1で交易・保持中+1点');
   item(g, ASSETS.piece.defenderBadge, '守護者VP', '蛮族撃退の最大貢献者が+1点');
@@ -1706,9 +1706,16 @@ function appendCkBuildSection(
       knightRow.appendChild(modeBtn('🦹 盗賊を追い払う', 'chaseRobber', true, buildMode, setBuildMode));
     }
   }
-  const wallVid = firstV(v => canBuildCityWall(state, pid, v));
-  knightRow.appendChild(makeImgBtn(ASSETS.piece.cityWall ?? RESOURCE_IMG.brick, [costLabel('城壁', resCostParts(CK_COSTS.cityWall))], wallVid ? 'btn-build' : 'btn-disabled', !wallVid,
-    () => wallVid && dispatch({ type: 'BUILD_CITY_WALL', vertexId: wallVid })));
+  // 城壁: 建てられる都市が2つ以上なら盤面でどの都市に建てるか選ばせる（selectWallCity）。
+  // 1つだけなら従来どおり1タップで即建設。0なら無効。
+  const wallCands = Object.keys(state.vertices).filter(v => canBuildCityWall(state, pid, v));
+  if (wallCands.length >= 2) {
+    knightRow.appendChild(modeImgBtn(ASSETS.piece.cityWall ?? RESOURCE_IMG.brick, [costLabel('城壁', resCostParts(CK_COSTS.cityWall))], 'selectWallCity', true, buildMode, setBuildMode));
+  } else {
+    const wallVid = wallCands[0];
+    knightRow.appendChild(makeImgBtn(ASSETS.piece.cityWall ?? RESOURCE_IMG.brick, [costLabel('城壁', resCostParts(CK_COSTS.cityWall))], wallVid ? 'btn-build' : 'btn-disabled', !wallVid,
+      () => wallVid && dispatch({ type: 'BUILD_CITY_WALL', vertexId: wallVid })));
+  }
   sec.appendChild(knightRow);
 
   // 進歩カード（手札）。使えるものだけ有効。

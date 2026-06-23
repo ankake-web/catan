@@ -19,7 +19,7 @@ import type { BoardViewport } from './board';
 // 型定義
 // ============================================================
 
-export type BuildMode = 'idle' | 'road' | 'ship' | 'settlement' | 'city' | 'moveShip' | 'moveKnight' | 'chaseRobber' | 'buildKnight' | 'activateKnight' | 'upgradeKnight' | 'placeMerchant' | 'inventorSwap' | 'placeBishop' | 'selectDiplomatRoad' | 'selectDeserterKnight' | 'selectMedicineSettlement' | 'selectMetropolis' | 'selectSmithKnight' | 'selectEngineerCity' | 'selectIntrigueKnight';
+export type BuildMode = 'idle' | 'road' | 'ship' | 'settlement' | 'city' | 'moveShip' | 'moveKnight' | 'chaseRobber' | 'buildKnight' | 'activateKnight' | 'upgradeKnight' | 'placeMerchant' | 'inventorSwap' | 'placeBishop' | 'selectDiplomatRoad' | 'selectDeserterKnight' | 'selectMedicineSettlement' | 'selectMetropolis' | 'selectSmithKnight' | 'selectEngineerCity' | 'selectIntrigueKnight' | 'selectWallCity';
 
 // タップ命中の許容半径（盤面ピクセル単位。頂点間隔は HEX_SIZE=60）。
 // 見た目の点/線より広く取り、指でも外れにくくする。最近傍の合法ターゲットを選ぶため、
@@ -598,6 +598,15 @@ export function attachBoardEvents(
       const vid = pte ? nearestEngineerCityVertexId(state, pid, pte.x, pte.y) : null;
       const card = state.players[pid]?.progressCards?.find(c => c.type === 'engineer');
       if (vid && card) dispatch({ type: 'PLAY_PROGRESS', cardId: card.id, choice: { engineerVertexId: vid } });
+      return;
+    }
+
+    // ---- 騎士と商人: 城壁建設（都市が2つ以上の時、光った自分の都市をタップ → BUILD_CITY_WALL）----
+    // 候補集合は技師と同じ（都市・非メトロポリス・城壁なし）。reducer 側で資源/上限を最終検証する。
+    if (state.phase === 'MAIN' && state.turnPhase === 'TRADE_BUILD' && mode === 'selectWallCity') {
+      const ptw = clickToBoardPixel(svg, e.clientX, e.clientY);
+      const vid = ptw ? nearestEngineerCityVertexId(state, pid, ptw.x, ptw.y) : null;
+      if (vid) dispatch({ type: 'BUILD_CITY_WALL', vertexId: vid });
       return;
     }
 

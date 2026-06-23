@@ -40,7 +40,7 @@ import { buildActionLog, MAX_LOG_ENTRIES } from './engine/log';
 import { calcVP, calcPublicVP, victoryTarget } from './engine/scoring';
 import { buildPlayerRecap } from './engine/recap';
 import { computeDiceProduction } from './engine/dice';
-import { ASSETS } from './assets/manifest'; // 画像参照は中央マニフェスト経由
+import { ASSETS, metropolisImg } from './assets/manifest'; // 画像参照は中央マニフェスト経由
 
 // 資源取得アニメ用の画像（手札カードと同じ。既に読込済み＝追加負荷なし）。
 const RES_FLY_IMG: Record<ResourceType, string> = {
@@ -698,6 +698,9 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
       } else if (mode === 'selectEngineerCity') {
         // 騎士と商人・技師: 城壁を建てられる自分の都市を光らせる。
         opts.validVertexIds = new Set(engineerWallCities(state, pid));
+      } else if (mode === 'selectWallCity') {
+        // 騎士と商人・城壁建設: 城壁を建てられる自分の都市を光らせる（候補は技師と同じ）。
+        opts.validVertexIds = new Set(engineerWallCities(state, pid));
       } else if (mode === 'selectIntrigueKnight') {
         // 騎士と商人・陰謀: 退去させられる敵騎士（自分の道/船に隣接）を光らせる。
         opts.validVertexIds = new Set(intrigueKnightTargets(state, pid));
@@ -794,7 +797,7 @@ function setAnimFxMode(m: AnimFxMode): void {
   try { localStorage.setItem(ANIM_FX_KEY, m); } catch { /* ignore */ }
   applyReduceMotionClass();
 }
-const ANIM_FX_LABELS: Record<AnimFxMode, string> = { on: 'ON（常に表示）', off: 'OFF（省略）' };
+const ANIM_FX_LABELS: Record<AnimFxMode, string> = { on: 'ON', off: 'OFF' };
 // CSS側の演出抑制（@media ではなく html.reduce-motion クラスで判定）を、アプリ内設定に同期する。
 // 既定ON＝クラスなし＝OSの reduced-motion に関係なく全演出を出す。OFF時のみクラスを付けて抑制する。
 // （CSSメディアクエリはOS設定を直読みするため、JSの上書きだけでは各端末の設定差を解消できない。）
@@ -811,6 +814,9 @@ let diceAnimating = false;
 // 蛮族襲来の全画面演出が盤面を覆っている間は、資源/進歩カードの配布アニメを流さない
 // （演出が消えて盤面が見えてから飛ばす＝被りを防ぐ）。clearAt は演出の終了予定時刻(performance.now基準)。
 const BARB_OVERLAY_MS = 4200;
+// 進歩カードを「使用した瞬間」に中央へ大きく見せる時間（ms）。CPUの次手はこの間ゲートして
+// 「何のカードを使ったか」が見えてから次へ進ませる（演出スキップ防止）。out フェードは少し手前。
+const PROGRESS_CARD_FX_MS = 1700;
 let barbarianOverlayClearAt = 0;
 function pendingOverlayDelay(): number {
   const now = typeof performance !== 'undefined' ? performance.now() : 0;
@@ -1034,6 +1040,7 @@ function computeSheetStatus(): { text: string; alert: boolean } {
       if (buildMode === 'selectMetropolis') return { text: '🏛 メトロポリスにする都市をタップ', alert: true };
       if (buildMode === 'selectSmithKnight') return { text: smithFirstKnight ? '⚒ 昇格する2体目の騎士をタップ' : '⚒ 昇格する騎士をタップ（最大2体）', alert: true };
       if (buildMode === 'selectEngineerCity') return { text: '🧱 城壁を建てる都市をタップ', alert: true };
+      if (buildMode === 'selectWallCity') return { text: '🧱 城壁を建てる都市をタップ', alert: true };
       if (buildMode === 'selectIntrigueKnight') return { text: '🗡 退去させる敵騎士をタップ', alert: true };
       if (buildMode === 'settlement') return { text: '🏠 開拓地を配置', alert: false };
       if (buildMode === 'city')       return { text: '🏙 都市を配置', alert: false };
@@ -1886,7 +1893,7 @@ function buildVictoryScoreboard(): HTMLDivElement {
     if (plainCities > 0)   bd.appendChild(scoreChipIcon(ASSETS.piece.city, `×${plainCities}`, false, '都市（各2点）'));
     // 騎士と商人: メトロポリス（各4点：都市の基本2点＋発展ボーナス2点）。基本ゲームには存在しない。
     // 都市チップから除外している（plainCities）ため、ここで都市基本2点も含めた合計4点を表示し、★VPと内訳を一致させる。
-    if (r.metropolises > 0) bd.appendChild(scoreChipIcon(ASSETS.piece.metropolisGate, `×${r.metropolises}（+${r.metropolises * 4}）`, true, 'メトロポリス（各4点）'));
+    if (r.metropolises > 0) bd.appendChild(scoreChipIcon(metropolisImg(p.color), `×${r.metropolises}（+${r.metropolises * 4}）`, true, 'メトロポリス（各4点）'));
     if (r.hasLongestRoad)  bd.appendChild(scoreChipIcon(ASSETS.action.road, '最長+2', true, '最長交易路'));
     // 最大騎士力は基本ゲームのみ（騎士と商人は騎士コマ制のため非表示）。
     if (!r.isCk && r.hasLargestArmy) bd.appendChild(scoreChipIcon(ASSETS.knight.basic, '最大+2', true, '最大騎士力'));
@@ -2436,8 +2443,11 @@ function showPlayedProgressCard(prevState: GameState, newState: GameState, actio
   cap.textContent = `📜 ${PROGRESS_CARD_NAME[cardType]}`;
   wrap.append(img, cap);
   host.appendChild(wrap);
-  setTimeout(() => { wrap.classList.add('out'); }, 1250);
-  setTimeout(() => wrap.remove(), 1700);
+  setTimeout(() => { wrap.classList.add('out'); }, PROGRESS_CARD_FX_MS - 450);
+  setTimeout(() => wrap.remove(), PROGRESS_CARD_FX_MS);
+  // CPUが進歩カードを使った時は、このカード表示が見えてから次手へ進ませる（演出スキップ防止）。
+  // PLAY_PROGRESS はダイス演出を挟まないため、ゲートしないと aiDelayMs(最速30ms)で即次手に進む。
+  holdResourceAnimating(PROGRESS_CARD_FX_MS);
 }
 
 // 自分のプレイヤーID（LAN=viewer、単一端末=human）。手番強調・得点演出の基準。
@@ -2797,6 +2807,9 @@ function showBarbarianAttackOverlay(result?: DiceEventInfo['attackResult']): voi
   // この演出が消えるまで資源/進歩カードの配布アニメは待たせる（pendingOverlayDelay）。
   barbarianOverlayClearAt = (typeof performance !== 'undefined' ? performance.now() : 0) + BARB_OVERLAY_MS;
   setTimeout(() => { ov.remove(); barbarianOverlayClearAt = 0; }, BARB_OVERLAY_MS);
+  // CPUの次手も、この全画面演出が消えるまで待たせる（演出スキップ防止）。ダイスの finishAll は
+  // 演出より早く来る(約4.6s)ため、ここでゲートしないとCPUが襲来挿絵の途中で次へ進んでしまう。
+  holdResourceAnimating(BARB_OVERLAY_MS);
 }
 
 /** イベント結果を演出へ接続: 船=蛮族前進（残り少は警告フラッシュ）/ 色ゲート=その色が画面に広がる。

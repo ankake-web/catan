@@ -337,6 +337,20 @@ function renderHarbor(
 
   const touch = isTouchDevice();
 
+  // ラベル/バッジを「海側」へ少しオフセットして、港辺に敷かれた道(stroke-width 7)との被りを避ける。
+  // 港辺が属する沿岸の陸ヘックス（両頂点が共有する陸タイル）の中心→辺中点 が外向き法線（海方向）。
+  let lx = mx, ly = my;
+  const sharedTileId = vA.adjacentTileIds.find(t => vB.adjacentTileIds.includes(t));
+  const sharedTile = sharedTileId != null ? state.tiles[sharedTileId] : undefined;
+  if (sharedTile) {
+    const c = axialToPixel(sharedTile.coord);
+    let dx = mx - (c.x + ox), dy = my - (c.y + oy);
+    const len = Math.hypot(dx, dy) || 1;
+    const off = touch ? 22 : 18;
+    lx = mx + (dx / len) * off;
+    ly = my + (dy / len) * off;
+  }
+
   // 港辺ライン（太く、色付き）
   const line = svgEl('line');
   line.classList.add('harbor-line');
@@ -352,18 +366,24 @@ function renderHarbor(
     g.appendChild(dot);
   }
 
-  // 背景バッジ（タッチ端末では大きめに：中心(mx,my)基準なので拡大しても中央のまま）
+  // バッジ中心(lx,ly)と辺中点(mx,my)を細い線で結び、どの港辺のレートかを示す（オフセットで離れても対応が分かる）。
+  const lead = svgEl('line');
+  setAttrs(lead, { x1: mx, y1: my, x2: lx, y2: ly,
+    stroke: HARBOR_COLOR[harbor.type], 'stroke-width': 1.5, opacity: 0.7 });
+  g.appendChild(lead);
+
+  // 背景バッジ（タッチ端末では大きめに：中心(lx,ly)基準なので拡大しても中央のまま）
   const badgeW = touch ? 52 : 44;
   const badgeH = touch ? 22 : 18;
   const bg = svgEl('rect');
-  setAttrs(bg, { x: mx - badgeW / 2, y: my - badgeH / 2, width: badgeW, height: badgeH,
+  setAttrs(bg, { x: lx - badgeW / 2, y: ly - badgeH / 2, width: badgeW, height: badgeH,
     rx: 4, fill: 'rgba(0,0,0,0.82)', stroke: HARBOR_COLOR[harbor.type], 'stroke-width': 1.5 });
   g.appendChild(bg);
 
   // ラベルテキスト（大きめ）
   const label = svgEl('text');
   label.classList.add('harbor-label');
-  setAttrs(label, { x: mx, y: my,
+  setAttrs(label, { x: lx, y: ly,
     fill: HARBOR_COLOR[harbor.type],
     'text-anchor': 'middle', 'dominant-baseline': 'central' });
   label.textContent = HARBOR_LABEL[harbor.type];
@@ -537,7 +557,8 @@ function renderVertices(
       // 騎士と商人: 城壁付きの都市は「コマの形に沿った黒いフチ」で囲って壁ありを示す。
       // 同じ城画像を真っ黒(brightness 0)にして一回り大きく後ろへ敷く＝シルエットの黒縁。
       // ※ CSS filter の drop-shadow は viewBox 縮小で消えるため、画像サイズ基準のこの方式にする。
-      const hasWall = isCity && !isMetro && !!(vertex.building as { wall?: boolean }).wall;
+      // メトロポリス(城壁付きの都市から昇格)も都市と同様に黒縁で城壁を可視化する。
+      const hasWall = isCity && !!(vertex.building as { wall?: boolean }).wall;
       if (hasWall) {
         const ow = w * 1.18;
         const ocx = vx, ocy = iy + w / 2; // 本体画像の中心に合わせる
