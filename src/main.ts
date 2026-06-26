@@ -811,6 +811,9 @@ let cpuPlayerTradeOfferedThisTurn = false;
 
 // ダイスのロール演出中フラグ。演出中は新たなアクションを無視（多重ロール等を防止）。
 let diceAnimating = false;
+// ダイス演出を開始した時刻(performance.now)。想定時間を大きく超えてもフラグが落ちない場合
+// （WebGL例外等でフラグ固着）をウォッチドッグが検知して強制解除し、CPUの永久停止を防ぐ保険。
+let _diceAnimStart = 0;
 // 蛮族襲来の全画面演出が盤面を覆っている間は、資源/進歩カードの配布アニメを流さない
 // （演出が消えて盤面が見えてから飛ばす＝被りを防ぐ）。clearAt は演出の終了予定時刻(performance.now基準)。
 const BARB_OVERLAY_MS = 4200;
@@ -1558,7 +1561,18 @@ function armCpuWatchdog(): void {
   cpuWatchdog = setTimeout(() => {
     cpuWatchdog = null;
     if (gen !== gameGeneration) return;
-    if (diceAnimating || resourceAnimating) { armCpuWatchdog(); return; } // 演出/分配アニメ中は待つ
+    if (diceAnimating || resourceAnimating) {
+      // 通常は演出/分配アニメ中は待つ。ただし「想定終了時刻を大きく超えても落ちないフラグ」は
+      // 固着とみなし強制解除して進行を回復する（WebGL例外等でフラグが残り永久停止するのを防ぐ）。
+      const nowFx = (typeof performance !== 'undefined' ? performance.now() : 0);
+      const resStuck = resourceAnimating && _resAnimEndAt > 0 && nowFx > _resAnimEndAt + 2000;
+      const diceStuck = diceAnimating && _diceAnimStart > 0 && nowFx - _diceAnimStart > 15000;
+      if (!resStuck && !diceStuck) { armCpuWatchdog(); return; }
+      console.warn('[fx] 演出フラグの固着を検知。強制解除してCPU進行を回復します', { resStuck, diceStuck });
+      if (resStuck) { resourceAnimating = false; if (_resAnimTimer != null) { clearTimeout(_resAnimTimer); _resAnimTimer = null; } _resAnimEndAt = 0; }
+      if (diceStuck) { diceAnimating = false; _diceAnimStart = 0; }
+      // フォールスルー: 下の通常判定で、進んでいなければ安全行動で進める。
+    }
     if (!cpuIsResponsible()) return;                      // 人間の番になっていれば何もしない
     if (progressToken() !== token) { armCpuWatchdog(); return; } // 進んでいれば再武装
     // 一定時間進まなかった → 合法な安全行動で進める
@@ -1643,6 +1657,9 @@ function appendSystemLog(message: string): void {
 // 1個のアイコンを起点→対象パネルへ飛ばす。
 const RES_FLY_MS = 1300;       // 飛行時間（ゆっくり）
 const RES_FLY_STAGGER = 300;   // アイコン1個ずつの間隔（0.3秒）
+// 資源が大量に出た時、stagger の累積でゲート(CPU待ち)が10秒超に膨らむのを防ぐ上限。
+// この時間を超える分はアイコンを詰めて飛ばし、CPU進行が長時間止まらないようにする。
+const MAX_STAGGER_TOTAL = 2400; // stagger 累積の上限（ms）
 function spawnResFlyer(
   imgSrc: string,                     // 飛ばすアイコン画像（資源 or 商品）
   target: { x: number; y: number },   // 着地先（ビューポート座標。.res-fly は position:fixed）
@@ -2326,6 +2343,8 @@ function triggerResourceAnimation(
   // 蛮族襲来の全画面演出が出ている間は、それが消えて盤面が見えてから飛ばす（被り防止）。
   // delay は演出の残り時間から始めるため「飛ばしたか」は spawned で別に判定する。
   let delay = pendingOverlayDelay();
+  // stagger 累積の上限（大量産出でもCPUを長時間ブロックしないよう頭打ちにする）。
+  const staggerCeil = delay + MAX_STAGGER_TOTAL;
   let spawned = false;
   for (const pid of newState.playerOrder) {
     // 飛ばすアイコン群（資源・商品を統一して扱う）。hidden=種類非公開（札裏トークン）。
@@ -2366,7 +2385,7 @@ function triggerResourceAnimation(
       for (let i = 0; i < n && count < MAX_PER_PLAYER; i++) {
         const jitter = { x: origin.x + (Math.random() - 0.5) * 30, y: origin.y + (Math.random() - 0.5) * 20 };
         spawnResFlyer(img, target, jitter, delay, targetEl, 'res-fly-img', !!hidden);
-        delay += RES_FLY_STAGGER; // 1個ずつ間隔を空けて飛ばす（全プレイヤー通しで順番に）
+        delay = Math.min(delay + RES_FLY_STAGGER, staggerCeil); // 1個ずつ間隔を空ける（上限 staggerCeil で頭打ち＝大量時もCPUを長く止めない）
         count++; spawned = true;
       }
     }
@@ -3060,6 +3079,7 @@ function animateBuildPlacement(action: Action | undefined): void {
 function runWithDiceAnim(action: Action | undefined, prevState: GameState, finish: () => void): void {
   if (action?.type === 'ROLL_DICE' && state.lastDiceRoll) {
     diceAnimating = true;
+    _diceAnimStart = (typeof performance !== 'undefined' ? performance.now() : 0);
     const [d1, d2] = state.lastDiceRoll;
     playDiceRoll(d1, d2, buildDiceEventInfo(prevState, state), finish);
   } else {
