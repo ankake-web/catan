@@ -1279,7 +1279,7 @@ function showShipRulesHelp(state: GameState, pid: PlayerId): void {
   ul.className = 'help-list';
   for (const r of [
     '船は「木材＋羊毛」。海に面した辺に置けます。',
-    '道・船は自分の建物／道／船とつながっている必要があります。',
+    '船は自分の船か建物から、道は自分の道か建物からのみ伸ばせます（道と船は直接つながらず、建物でのみ切り替わります）。',
     '動かせるのは「行き止まり（片端が他とつながっていない）の船」だけ。',
     '船の移動は1ターンに1隻まで。',
     '新しい島に開拓地を建てると、そこから先へさらに船を伸ばせます。',
@@ -1557,9 +1557,9 @@ export function showAssetGallery(): void {
     const s = el('div', 'gallery-section-title'); s.textContent = titleTxt; body.appendChild(s);
     const grid = el('div', 'gallery-grid'); body.appendChild(grid); return grid;
   };
-  const item = (grid: HTMLElement, src: string | null, name: string, desc?: string): void => {
+  const item = (grid: HTMLElement, src: string | null, name: string, desc?: string, imgCls?: string): void => {
     const cell = el('div', 'gallery-cell');
-    cell.appendChild(assetImg(src, 'gallery-img', name, name));
+    cell.appendChild(assetImg(src, imgCls ? `gallery-img ${imgCls}` : 'gallery-img', name, name));
     const n = el('div', 'gallery-name'); n.textContent = name; cell.appendChild(n);
     if (desc) { const d = el('div', 'gallery-desc'); d.textContent = desc; cell.appendChild(d); }
     grid.appendChild(cell);
@@ -1588,7 +1588,7 @@ export function showAssetGallery(): void {
   item(g, ASSETS.knight.basic, '騎士（基本）', '強さ1。建設→麦で起動して防衛・行動');
   item(g, ASSETS.knight.strong, '騎士（強い）', '強さ2。鉱石+羊で昇格');
   item(g, ASSETS.knight.mighty, '騎士（最強）', '強さ3。要塞(政治Lv3)で昇格可');
-  item(g, metropolisImg('red'), 'メトロポリス', '改善Lv4で都市から昇格。4点・略奪されない');
+  item(g, metropolisImg('red'), 'メトロポリス', '改善Lv4で都市から昇格。4点・略奪されない', 'gallery-img-neutral');
   item(g, ASSETS.piece.cityWall, '城壁', 'レンガ2。7の手札上限+2（最大3）');
   item(g, ASSETS.piece.merchant, '商人コマ', '隣接地形を2:1で交易・保持中+1点');
   item(g, ASSETS.piece.defenderBadge, '守護者VP', '蛮族撃退の最大貢献者が+1点');
