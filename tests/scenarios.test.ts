@@ -161,6 +161,25 @@ describe('scenarios: 航海者「砂漠を越えて」(公式S4)', () => {
   });
 });
 
+describe('航海者: 海賊コマは開始時から海ヘクスに居る（盗賊＋海賊が1体ずつ）', () => {
+  it('新たな海岸: 開始時に piratePosition が海ヘクス、盗賊は砂漠', () => {
+    const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
+    expect(s.piratePosition).toBeTruthy();
+    expect(s.tiles[s.piratePosition!]!.type).toBe('sea');
+    expect(Object.values(s.tiles).some(t => t.hasRobber)).toBe(true); // 盗賊も盤上
+  });
+  it('基本ゲームには海賊コマはいない（海が無い）', () => {
+    const c = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'classic');
+    expect(c.piratePosition).toBeUndefined();
+  });
+  it('海賊の島々(S7)・七不思議(S8)では通常の海賊コマを置かない', () => {
+    const s7 = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_pirateislands');
+    expect(s7.piratePosition).toBeUndefined(); // 海賊艦隊が別途いる
+    const s8 = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_wonders');
+    expect(s8.piratePosition).toBeUndefined(); // 海賊不使用
+  });
+});
+
 describe('scenarios: 航海者「4つの島」(公式S2)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_fourislands');
   it('37ヘックス footprint で、海に隔てた4島に分かれる', () => {

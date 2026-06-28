@@ -47,6 +47,20 @@ export function createInitialGameState(
   const geo = buildBoardGeometry(scenario.coords());
   const { tiles, harbors, edgeTokens, villages, fortressVertices, fleetPath } = scenario.build(geo, rng);
 
+  // 航海者: 海賊コマは開始時から海ヘクスに置く（盗賊は砂漠、海賊は海＝1体ずつ・公式準拠）。
+  //   ※S7 海賊の島々（独自の海賊艦隊）と S8 七不思議（海賊不使用）では通常の海賊コマは置かない。
+  const usesPirate = Object.values(tiles).some(t => t.type === 'sea')
+    && !scenario.rules?.pirateIslands && !scenario.rules?.wonders;
+  const piratePosition = usesPirate
+    ? Object.values(tiles)
+        .filter(t => t.type === 'sea')
+        .sort((a, b) => {
+          const da = a.coord.q * a.coord.q + a.coord.r * a.coord.r;
+          const db = b.coord.q * b.coord.q + b.coord.r * b.coord.r;
+          return da !== db ? da - db : (a.id < b.id ? -1 : 1); // 最も中央寄りの海ヘクス（決定論）
+        })[0]?.id
+    : undefined;
+
   const ck = scenario.expansion === 'cities_knights';
   const players: GameState['players'] = {};
   const allIds: PlayerId[] = [];
@@ -125,6 +139,7 @@ export function createInitialGameState(
     ...(villages != null ? { villages, villageConn: {}, cloth: {} } : {}),
     ...(scenario.rules?.wonders ? { wonderOwner: {}, wonderLevel: {} } : {}),
     ...(fortresses ? { fortresses, pirateFleet: { path: fleetPath ?? [], pos: 0 } } : {}),
+    ...(piratePosition ? { piratePosition } : {}),
     ...(ck ? { expansion: 'cities_knights' as const, commodityBank: { ...COMMODITY_BANK_INITIAL }, barbarianPosition: 0, barbarianAttacks: 0, metropolis: {}, progressDecks: buildProgressDecks(rng), knightMovedThisTurn: false, knightChasedThisTurn: false } : {}),
     islandBonus: {},
     pendingTrade: null,
