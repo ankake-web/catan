@@ -18,9 +18,9 @@ const cloth = (): GameState =>
   createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_cloth');
 
 describe('S6 カタンの織物', () => {
-  it('開始時に村が5つ・各供給5・最長交易路は無効', () => {
+  it('開始時に村が8つ・各供給5・最長交易路は無効', () => {
     const s = cloth();
-    expect(Object.keys(s.villages ?? {})).toHaveLength(5);
+    expect(Object.keys(s.villages ?? {})).toHaveLength(8); // 公式コンポ: 村8
     for (const v of Object.values(s.villages ?? {})) expect(v).toBe(5);
     expect(s.useLongestRoute).toBe(false);
     expect(s.noIslandSettlement).toBe(true);
@@ -34,8 +34,8 @@ describe('S6 カタンの織物', () => {
     expect(next.villageConn![villageId]).toContain('player1');
     expect(next.cloth!.player1).toBe(1);
     expect(next.villages![villageId]).toBe(4);
-    // 同じ村への再接続では増えない
-    const again = connectVillagesAround(next, s.tileToEdges[villageId]![1]!, 'player1');
+    // 同じ辺で再接続しても増えない（接続済み村はスキップ）
+    const again = connectVillagesAround(next, e, 'player1');
     expect(again.cloth!.player1).toBe(1);
   });
 

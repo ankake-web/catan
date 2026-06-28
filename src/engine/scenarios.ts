@@ -512,13 +512,13 @@ const seafarersFourIslands: Scenario = {
   rules: { newIslandBonusVp: 2, setupAnywhere: true },
 };
 
-// ---- 公式S6「カタンの織物」: 本島(左15)＋小島の「村」5つ。自分の建物から航路（船）を村へ
+// ---- 公式S6「カタンの織物」: 本島(左15)＋小島の「村」8つ。自分の建物から航路（船）を村へ
 //   つなぐと織物トークン（接続で1枚＋村の数字が出るたび接続者へ1枚、各村5枚）。織物2枚=1VP。
 //   小島には開拓地建設不可・最長交易路タイル不使用。14点、または5村供給切れで最多VP。 ----
-// 初期配置は公式どおり開拓地3軒（最初の2軒は資源なし・3軒目で資源取得）。村は1タイルの小島として配置。
-// 村（1タイルの小島・互いに海で隔離）。各村に数字ディスク（生産で織物を産む）。
+// 初期配置は公式どおり開拓地3軒（最初の2軒は資源なし・3軒目で資源取得）。
+// 村（右の海域 q>=1 の小島・各村に数字ディスク）。公式コンポは村8。赤数字は互いに隣接しないよう配置。
 const CLOTH_VILLAGE_NUMBERS: Record<string, number> = {
-  '1,-2': 4, '1,0': 5, '1,2': 6, '3,-2': 9, '3,0': 10,
+  '1,-3': 5, '1,-2': 9, '1,0': 8, '1,2': 6, '3,-2': 4, '3,-1': 10, '3,0': 8, '2,1': 11,
 };
 function buildClothScenario(landMap: LandMap, villageNumbers: Record<string, number>): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
   const fullLand: LandMap = { ...landMap };
@@ -585,12 +585,17 @@ const seafarersWonders: Scenario = {
 //   勝利: 自分の要塞を制圧 かつ 10点以上。 ----
 // 公式準拠: 盗賊・最長交易路・最大騎士力は不使用（rules）。7は手札破棄のみ。騎士＝軍船化。
 //   海賊艦隊との戦闘は軍船数で解決（pirateIslands.moveFleet）。要塞奪取後はその頂点が自分の開拓地。
-// 要塞タイル（1タイルの小島・互いに海で隔離）。番号は奪取後の産出用。
-const PIRATE_FORTRESS_TILES: Record<string, number> = { '1,-2': 4, '1,2': 5, '3,-2': 9, '3,0': 10 };
+// 要塞タイル（1タイルの小島・互いに海で隔離）。地形は多様化（奪取後に各色が別資源を産む）。番号は産出用。
+const PIRATE_FORTRESS_TILES: Record<string, { type: TileType; number: number }> = {
+  '1,-2': { type: 'field',   number: 4 },
+  '1,2':  { type: 'pasture', number: 5 },
+  '3,-2': { type: 'forest',  number: 9 },
+  '3,0':  { type: 'hill',    number: 10 },
+};
 const PIRATE_FLEET_PATH: string[] = ['0,-2', '0,-1', '0,0', '0,1', '0,2']; // 中央の海を縦に巡回
-function buildPirateIslands(homeMap: LandMap, fortressTiles: Record<string, number>, fleetPath: string[]): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+function buildPirateIslands(homeMap: LandMap, fortressTiles: Record<string, { type: TileType; number: number }>, fleetPath: string[]): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
   const fullLand: LandMap = { ...homeMap };
-  for (const [tid, num] of Object.entries(fortressTiles)) fullLand[tid] = { type: 'pasture', number: num };
+  for (const [tid, ft] of Object.entries(fortressTiles)) fullLand[tid] = { type: ft.type, number: ft.number };
   const base = buildFromLandMap(fullLand);
   return (geo, rng) => {
     const board = base(geo, rng);
@@ -609,6 +614,7 @@ const seafarersPirateIslands: Scenario = {
   coords: BIG_COORDS,
   build: buildPirateIslands(BIG_MAIN_ISLAND, PIRATE_FORTRESS_TILES, PIRATE_FLEET_PATH),
   victoryTarget: 10,
+  recommendedPlayers: '3〜4人', // 要塞4＝最大4人。3人時は手番順で3要塞を割当（余りは小島）
   rules: { pirateIslands: true, newIslandBonusVp: 0, useRobber: false, useLongestRoute: false, useLargestArmy: false },
 };
 const seafarersGoldenIsles: Scenario = {
