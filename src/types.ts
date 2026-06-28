@@ -288,7 +288,13 @@ export interface ScenarioRules {
   /** 初期配置をどの島にも置けるか（既定false=本島=最大陸塊のみ）。S2 4つの島 / New World=true。
    *  trueのとき「自分が初期配置した島」が各プレイヤーのホーム島となり、それ以外への初入植で加点。 */
   setupAnywhere?: boolean;
+  /** 開拓地・盗賊を数字ディスクのあるヘクスにしか置けない/動かせないか（既定false）。S5 忘れられた部族=true。 */
+  numberHexOnly?: boolean;
 }
+
+// 航海者 S5「忘れられた部族」: 海の辺に事前配置されるトークンの種別。
+//   vp=VPトークン(+1点) / dev=開発カード(今ターン購入扱い) / harbor=港(沿岸の自分の建物隣に設置)。
+export type EdgeTokenKind = 'vp' | 'dev' | 'harbor';
 
 // ---- GameState ----
 
@@ -384,6 +390,13 @@ export interface GameState {
   useLongestRoute?: boolean;      // 最長交易路タイルを使うか（既定true。S6/S7=false）
   useRobber?: boolean;            // 7/盗賊・海賊を使うか（既定true。S7=false）
   setupAnywhere?: boolean;        // 初期配置をどの島にも置けるか（既定false。S2/New World=true）
+  numberHexOnly?: boolean;        // 開拓地・盗賊を数字ヘックスのみに制限（既定false。S5=true）
+  // 航海者 S5「忘れられた部族」: 海の辺に事前配置されたトークン（船で到達すると獲得）。辺ID→種別。
+  edgeTokens?: Record<string, EdgeTokenKind>;
+  // S5: 各プレイヤーが集めたVPトークン数（各+1VP・公開情報）。
+  tokenVp?: Record<string, number>;
+  // S5: 港トークンを得たが置き場（沿岸の自分の建物）が無く保留中の数。次の沿岸開拓地で設置。
+  heldHarbors?: Record<string, number>;
   // 航海者拡張: 各プレイヤーが初期配置した島の代表ID一覧（=自分のホーム島群）。
   // setupAnywhere のシナリオで「未探検島＝自分のホーム以外」をプレイヤー別に判定するために使う。
   // 初期配置中に BUILD_SETTLEMENT が記録する。基本/S1系では全員が本島のみ。

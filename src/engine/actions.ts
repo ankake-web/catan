@@ -270,6 +270,8 @@ export function canBuildSettlement(
   if (vertex.knight != null) return false;
   // 開拓地は陸に面した頂点のみ（航海者: 外洋だけに接する頂点には置けない）。基本ゲームは常に true。
   if (!isLandVertex(vertex, state.tiles)) return false;
+  // S5「忘れられた部族」: 数字ディスクのあるヘクスに隣接した頂点にしか開拓地を置けない。
+  if (state.numberHexOnly && !vertex.adjacentTileIds.some(t => state.tiles[t]?.number != null)) return false;
 
   if (!isDistanceRuleOk(vertex, state.vertices)) return false;
 

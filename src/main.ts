@@ -611,9 +611,16 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
   if (state.phase === 'MAIN') {
     if (state.turnPhase === 'ROBBER') {
       // 盗賊(陸)＋海賊(海)の移動先。現在地（盗賊タイル/海賊タイル）は除外。
+      // S5 忘れられた部族: 盗賊は数字ヘックスのみ（無数字の陸＝海賊用の海は別途タップで海賊移動）。
       const robberTile = Object.values(state.tiles).find(t => t.hasRobber)?.id;
       opts.validTileIds = new Set(
-        Object.keys(state.tiles).filter(tid => tid !== robberTile && tid !== state.piratePosition),
+        Object.keys(state.tiles).filter(tid => {
+          if (tid === robberTile || tid === state.piratePosition) return false;
+          const t = state.tiles[tid]!;
+          // numberHexOnly のとき、陸タイルは数字付きのみ強盗可（海タイルは海賊用なので常に候補）。
+          if (state.numberHexOnly && t.type !== 'sea' && t.number == null) return false;
+          return true;
+        }),
       );
       return opts;
     }

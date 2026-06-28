@@ -29,6 +29,7 @@ import { updateLongestRoad, updateLargestArmy, checkVictory, calcVP, victoryTarg
 import { newIslandBonusRep, islandRepOf } from './islands';
 import { edgeTileIds } from './board';
 import { revealFogAround } from './explore';
+import { collectEdgeToken, placeHeldHarborAt } from './seaTokens';
 
 // ============================================================
 // 内部ユーティリティ
@@ -315,6 +316,8 @@ export function applyAction(
 
       // 強盗は陸タイルのみ（海は海賊の領分）。これが無いと盗賊が海上で空振りになる。
       if (state.tiles[tileId]?.type === 'sea') throw new Error('MOVE_ROBBER: robber cannot move onto a sea tile (use the pirate)');
+      // S5 忘れられた部族: 盗賊は数字ディスクのあるヘクスにしか動かせない（砂漠等の無数字ヘックス不可）。
+      if (state.numberHexOnly && state.tiles[tileId]?.number == null) throw new Error('MOVE_ROBBER: robber can only move to a numbered hex in this scenario');
       // 強盗は必ず現在地とは別ヘクスへ移動する（標準ルール）。
       const currentRobberTileId = Object.keys(state.tiles).find(tid => state.tiles[tid]!.hasRobber);
       if (currentRobberTileId === tileId) throw new Error('MOVE_ROBBER: must move to a different tile');
@@ -415,6 +418,8 @@ export function applyAction(
       next = { ...next, shipsBuiltThisTurn: [...(next.shipsBuiltThisTurn ?? []), edgeId] };
       // S3 霧の島: 船の隣接ヘックスを探索公開（霧→陸なら資源1枚）。霧の無い盤では no-op。
       next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
+      // S5 忘れられた部族: この辺に海辺トークンがあれば獲得（VP/開発カード/港）。無い盤では no-op。
+      next = collectEdgeToken(next, edgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
 
@@ -443,6 +448,8 @@ export function applyAction(
       let next = moveShip(state, pid, fromEdgeId, toEdgeId);
       // S3 霧の島: 移動先の隣接ヘックスを探索公開（霧の無い盤では no-op）。
       next = revealFogAround(next, edgeTileIds(next.edges[toEdgeId]!, next.vertices), pid);
+      // S5 忘れられた部族: 移動先の辺に海辺トークンがあれば獲得。無い盤では no-op。
+      next = collectEdgeToken(next, toEdgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
       return next;
@@ -461,6 +468,8 @@ export function applyAction(
       let next = buildSettlement(state, pid, vertexId);
       // S3 霧の島: 開拓地の隣接ヘックスを探索公開（霧の無い盤では no-op）。
       next = revealFogAround(next, next.vertices[vertexId]!.adjacentTileIds, pid);
+      // S5 忘れられた部族: 港トークンを保留していれば、この沿岸開拓地に設置（無ければ no-op）。
+      next = placeHeldHarborAt(next, pid, vertexId);
 
       // SETUP 後半: 2個目の配置。
       const isSecondPlacement = state.phase === 'SETUP_BACKWARD' && state.setupSubPhase === 'PLACE_SETTLEMENT';

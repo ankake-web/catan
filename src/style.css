@@ -369,6 +369,12 @@ html.reduce-motion .hex-tile.producing { animation: none; filter: brightness(1.5
   fill: #5a3d00; font-weight: bold; pointer-events: none;
   paint-order: stroke; stroke: rgba(255,245,200,0.95); stroke-width: 2.4px; stroke-linejoin: round;
 }
+/* S5「忘れられた部族」: 海辺トークン（V=VP / D=開発カード / H=港）。 */
+.edge-token { fill: #2d2740; stroke: #ffd34d; stroke-width: 2; }
+.edge-token-label {
+  fill: #ffe9a8; font-weight: bold; font-size: 13px; pointer-events: none;
+  text-anchor: middle; dominant-baseline: central;
+}
 /* S3「霧の島」: 未探検（霧）ヘックス。海より明るい霧色で覆い「?」を表示する。 */
 .hex-tile.fog-tile { fill: #8fa6ad; stroke: #c8dde3; stroke-width: 1.5; opacity: 0.92; }
 .fog-mark {

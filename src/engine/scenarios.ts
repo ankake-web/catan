@@ -10,7 +10,7 @@
 //
 // 注意: 純粋関数（DOM非依存）。createInitialGameState から使う。
 
-import type { AxialCoord, Tile, TileId, TileType, Harbor, HarborType, ScenarioRules } from '../types';
+import type { AxialCoord, Tile, TileId, TileType, Harbor, HarborType, ScenarioRules, EdgeTokenKind } from '../types';
 import { getAllTileCoords, getHexRegion, tileId, parseTileId, edgeTileIds, type BoardGeometry } from './board';
 import { createRandomBoard } from './setup';
 
@@ -19,6 +19,7 @@ export type ScenarioId =
   | 'seafarers_newshores'      // 公式S1 新たな海岸を目指して
   | 'seafarers_fogislands'     // 公式S3 霧の島
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
+  | 'seafarers_forgottentribe' // 公式S5 忘れられた部族
   | 'seafarers_newworld'       // 公式 New World（自由構築）
   | 'seafarers_archipelago'    // 非公式
   | 'seafarers_goldenisles'    // 非公式
@@ -29,6 +30,8 @@ export type ScenarioId =
 export interface ScenarioBoard {
   tiles: Record<TileId, Tile>;
   harbors: Harbor[];
+  /** S5 忘れられた部族: 海の辺に事前配置するトークン（辺ID→種別）。 */
+  edgeTokens?: Record<string, EdgeTokenKind>;
 }
 
 export interface Scenario {
@@ -393,6 +396,58 @@ const seafarersFogIslands: Scenario = {
   victoryTarget: 12,
   rules: { newIslandBonusVp: 0 }, // 探索の報酬は資源（島ボーナスVPは無し）
 };
+
+// ---- 公式S5「忘れられた部族」: 本島(左14・全数字)＋右の海域に VP/開発カード/港 トークン。
+//   船で到達して獲得。開拓地・盗賊は数字ヘックスのみ。13点。 ----
+const FORGOTTEN_TRIBE_LAND: LandMap = {
+  '-3,0':  { type: 'forest',   number: 8 },
+  '-3,1':  { type: 'field',    number: 5 },
+  '-3,2':  { type: 'pasture',  number: 10 },
+  '-2,-1': { type: 'hill',     number: 9 },
+  '-2,0':  { type: 'mountain', number: 4 },
+  '-2,1':  { type: 'forest',   number: 11 },
+  '-2,2':  { type: 'field',    number: 3 },
+  '-1,-2': { type: 'pasture',  number: 6 },
+  '-1,-1': { type: 'desert',   number: null, robber: true },
+  '-1,0':  { type: 'hill',     number: 2 },
+  '-1,1':  { type: 'mountain', number: 9 },
+  '-1,2':  { type: 'forest',   number: 10 },
+  '0,-1':  { type: 'field',    number: 4 },
+  '0,0':   { type: 'pasture',  number: 5 },
+};
+// 右の海域（q>=1）の開放海辺へトークンを散らす（決定論・等間隔サンプリング）。
+function buildForgottenTribe(landMap: LandMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  const base = buildFromLandMap(landMap);
+  return (geo, rng) => {
+    const board = base(geo, rng);
+    // 開放海辺（両側が海）かつ右側(q>=1のタイルに面する)を決定論順に集める。
+    const seaEdges = Object.values(geo.edges)
+      .filter(e => {
+        const tids = edgeTileIds(e, geo.vertices);
+        return tids.length > 0
+          && tids.every(t => board.tiles[t]?.type === 'sea')
+          && tids.some(t => parseTileId(t).q >= 1);
+      })
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+    const kinds: EdgeTokenKind[] = ['vp', 'dev', 'vp', 'harbor', 'vp', 'dev', 'harbor', 'vp'];
+    const edgeTokens: Record<string, EdgeTokenKind> = {};
+    const step = Math.max(1, Math.floor(seaEdges.length / kinds.length));
+    for (let i = 0; i < kinds.length && i * step < seaEdges.length; i++) {
+      edgeTokens[seaEdges[i * step]!.id] = kinds[i]!;
+    }
+    return { ...board, edgeTokens };
+  };
+}
+const seafarersForgottenTribe: Scenario = {
+  id: 'seafarers_forgottentribe',
+  name: '航海者：忘れられた部族',
+  description: '海に眠るVP・開発カード・港のトークンを船で回収。開拓地は数字ヘックスのみ（13点）。',
+  category: 'seafarers',
+  coords: SEAFARERS_COORDS,
+  build: buildForgottenTribe(FORGOTTEN_TRIBE_LAND),
+  victoryTarget: 13,
+  rules: { numberHexOnly: true, newIslandBonusVp: 0 },
+};
 const seafarersGoldenIsles: Scenario = {
   id: 'seafarers_goldenisles',
   name: '航海者：黄金諸島（非公式）',
@@ -439,6 +494,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   seafarers_newshores: seafarersNewShores,
   seafarers_fogislands: seafarersFogIslands,
   seafarers_throughdesert: seafarersThroughDesert,
+  seafarers_forgottentribe: seafarersForgottenTribe,
   seafarers_newworld: seafarersNewWorld,
   // 非公式オリジナルマップ
   seafarers_archipelago: seafarersArchipelago,

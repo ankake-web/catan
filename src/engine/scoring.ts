@@ -28,6 +28,7 @@ export function calcVP(state: GameState, playerId: PlayerId): number {
   if (player.hasLargestArmy) vp += VP_TABLE.largestArmy;
   vp += player.devCards.filter(c => c.type === 'victory_point').length * VP_TABLE.victoryPoint;
   vp += islandBonusVP(state, playerId);
+  vp += (state.tokenVp ?? {})[playerId] ?? 0; // 航海者 S5: 海辺VPトークン（各+1・公開）
   vp += player.defenderVP ?? 0; // 騎士と商人: 蛮族撃退の守護者VP
   vp += ckProgressVP(state, playerId); // 進歩カード(印刷/立憲)＋商人コマ
 
@@ -75,6 +76,7 @@ export function calcPublicVP(state: GameState, playerId: PlayerId): number {
   if (player.hasLargestArmy) vp += VP_TABLE.largestArmy;
   // 新島入植ボーナスは盤面で見える公開情報なので公開VPにも算入する。
   vp += islandBonusVP(state, playerId);
+  vp += (state.tokenVp ?? {})[playerId] ?? 0; // 航海者 S5: 海辺VPトークンも公開情報
   vp += player.defenderVP ?? 0; // 守護者VPも公開情報
   vp += ckProgressVP(state, playerId); // 進歩カード恒久VP・商人コマも公開
 

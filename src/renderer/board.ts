@@ -519,6 +519,20 @@ function renderEdges(
         g.appendChild(hit);
       }
     }
+
+    // S5「忘れられた部族」: 海辺トークン（V=VP / D=開発カード / H=港）を辺の中点に表示。
+    const token = state.edgeTokens?.[edge.id];
+    if (token) {
+      const badge = svgEl('circle');
+      badge.classList.add('edge-token');
+      setAttrs(badge, { cx: mx, cy: my, r: 11 });
+      g.appendChild(badge);
+      const label = svgEl('text');
+      label.classList.add('edge-token-label');
+      setAttrs(label, { x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'central' });
+      label.textContent = token === 'vp' ? 'V' : token === 'dev' ? 'D' : 'H';
+      g.appendChild(label);
+    }
   }
   return g;
 }
