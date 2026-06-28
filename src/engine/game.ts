@@ -771,7 +771,13 @@ export function applyAction(
       const newCards = player.devCards.filter((_, i) => i !== cardIdx);
       const usedCard = player.devCards[cardIdx]!;
 
-      const roadsAvailable = Math.min(2, player.remainingRoads);
+      // 航海者: 街道建設カードは「道2／船2／道1+船1」のいずれか。無料配置できる本数は
+      // 道コマ在庫だけでなく船コマ在庫も加味する（海のある盤のみ。基本ゲームは海辺が無く
+      // 船を置けないので船在庫は数えない＝従来挙動を維持）。各配置時の在庫は
+      // canBuildRoad/canBuildShip がそれぞれ remainingRoads/remainingShips で担保する。
+      const hasSeaForRb = Object.values(state.tiles).some(t => t.type === 'sea');
+      const freePieces = player.remainingRoads + (hasSeaForRb ? (player.remainingShips ?? 0) : 0);
+      const roadsAvailable = Math.min(2, freePieces);
       return {
         ...state,
         devCardPlayedThisTurn: true,
