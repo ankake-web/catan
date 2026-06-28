@@ -281,7 +281,9 @@ export interface ScenarioRules {
   startingSettlements?: number;
   /** 最長交易路タイルを使うか。既定true。S6 織物 / S7 海賊の島々=false。 */
   useLongestRoute?: boolean;
-  /** 7・盗賊・海賊を使うか。既定true。S7 海賊の島々=false。 */
+  /** 最大騎士力タイルを使うか。既定true。S7 海賊の島々=false。 */
+  useLargestArmy?: boolean;
+  /** 7・盗賊・海賊を使うか。既定true。S7 海賊の島々=false（7は手札破棄のみ・騎士は使用不可）。 */
   useRobber?: boolean;
   /** 新しい島への初入植ボーナスVP。既定2。S8 七不思議 / New World=1。0で無効。 */
   newIslandBonusVp?: number;
@@ -393,8 +395,10 @@ export interface GameState {
   // 航海者拡張: シナリオ固有ルールのトグル（既定値は基本/航海者共通）。createInitialGameState が
   // ScenarioRules から配線する。未設定はそれぞれ 2 / true / true の既定で扱う。
   startingSettlements?: number;   // 初期配置の開拓地数（既定2。S6 織物=3）
+  setupRound?: number;            // 初期配置スネークドラフトの現ラウンド番号（1始まり。advanceSetupが進行）
   useLongestRoute?: boolean;      // 最長交易路タイルを使うか（既定true。S6/S7=false）
-  useRobber?: boolean;            // 7/盗賊・海賊を使うか（既定true。S7=false）
+  useLargestArmy?: boolean;       // 最大騎士力タイルを使うか（既定true。S7=false）
+  useRobber?: boolean;            // 7/盗賊・海賊を使うか（既定true。S7=false。騎士も使用不可）
   setupAnywhere?: boolean;        // 初期配置をどの島にも置けるか（既定false。S2/New World=true）
   numberHexOnly?: boolean;        // 開拓地・盗賊を数字ヘックスのみに制限（既定false。S5=true）
   noIslandSettlement?: boolean;   // 小島（本島以外）に開拓地を建てられない（既定false。S6=true）

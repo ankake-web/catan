@@ -873,6 +873,7 @@ describe('SETUP phase progression', () => {
     let s = makeGameState({
       phase: 'SETUP_BACKWARD',
       setupSubPhase: 'PLACE_ROAD',
+      setupRound: 2, // 標準2軒の最終ラウンド（後半）
       currentPlayerIndex: 0,
       playerOrder: ['player1', 'player2'],
       players: {

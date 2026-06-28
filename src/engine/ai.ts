@@ -555,8 +555,9 @@ function choosePreRollAction(state: GameState, pid: PlayerId): Action {
     if (alch) return { type: 'PLAY_PROGRESS', cardId: alch.id };
   }
 
-  // 1ターン1枚制限を尊重（devCardPlayedThisTurn を見ないと2枚目で例外→停止する）
-  if (difficulty !== 'weak' && !state.devCardPlayedThisTurn) {
+  // 1ターン1枚制限を尊重（devCardPlayedThisTurn を見ないと2枚目で例外→停止する）。
+  // S7（useRobber=false）は騎士が使用不可なので使わない。
+  if (difficulty !== 'weak' && !state.devCardPlayedThisTurn && state.useRobber !== false) {
     const knight = player.devCards.find(
       c => c.type === 'knight' && c.purchasedOnTurn < state.globalTurnNumber,
     );

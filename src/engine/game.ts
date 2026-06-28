@@ -174,7 +174,9 @@ export function applyAction(
           const h = state.players[p]!.hand;
           return RESOURCE_TYPES.reduce((s, r) => s + h[r], 0) >= 8;
         });
-        next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : 'ROBBER' };
+        // S7 海賊の島々（useRobber=false）: 盗賊不使用。7は手札破棄のみで盗賊移動・盗みは無し。
+        const afterDiscard = state.useRobber === false ? 'TRADE_BUILD' : 'ROBBER';
+        next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : afterDiscard };
       } else {
         next = distributeResources({ ...next, turnPhase: 'TRADE_BUILD' }, total);
         // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
@@ -272,7 +274,8 @@ export function applyAction(
       // まだ捨てが必要なプレイヤーがいるか（資源＋商品で判定・既に捨てた人は除外）。
       // 騎士と商人で初回襲来前は盗賊が凍結＝捨て後は ROBBER ではなく TRADE_BUILD へ。
       if (!findPendingDiscarder(next)) {
-        const robberFrozen = isCk(next) && (next.barbarianAttacks ?? 0) < 1;
+        // 盗賊凍結: CKは初回襲来前、S7（useRobber=false）は常に盗賊不使用 → 捨て後は TRADE_BUILD。
+        const robberFrozen = (isCk(next) && (next.barbarianAttacks ?? 0) < 1) || next.useRobber === false;
         next = { ...next, turnPhase: robberFrozen ? 'TRADE_BUILD' : 'ROBBER', discardedThisRound: [] };
       }
 
@@ -638,6 +641,9 @@ export function applyAction(
       // 「7の捨て札待ちで騎士→ROBBERへ遷移」で全員の捨て札を踏み倒せてしまう（不正クライアント対策）。
       if (state.phase !== 'MAIN' || (state.turnPhase !== 'PRE_ROLL' && state.turnPhase !== 'TRADE_BUILD'))
         throw new Error('PLAY_KNIGHT: must be in MAIN PRE_ROLL or TRADE_BUILD phase');
+      // S7 海賊の島々（useRobber=false）: 盗賊不使用のため騎士は盗賊を動かせない。
+      // 公式では騎士＝軍船化だが本デジタル版では軍船戦闘を未実装のため、騎士は使用不可とする。
+      if (state.useRobber === false) throw new Error('PLAY_KNIGHT: knights are disabled in this scenario');
       if (state.devCardPlayedThisTurn) throw new Error('PLAY_KNIGHT: already played a dev card this turn');
       const player = state.players[pid]!;
       const cardIdx = player.devCards.findIndex(
@@ -1015,10 +1021,7 @@ function advanceSetup(state: GameState): GameState {
   const idx = state.currentPlayerIndex;
   // 初期配置の開拓地数（既定2。S6 織物=3）。スネークドラフトを target ラウンド繰り返す。
   const target = state.startingSettlements ?? 2;
-  // いま手番を終えたプレイヤーがこのセットアップで置いた建物数（= そのプレイヤーのラウンド番号）。
-  // CK は2軒目を都市へ昇格させるため settlement 限定ではなく全建物で数える。
-  const pidJust = state.playerOrder[idx]!;
-  const placed = Object.values(state.vertices).filter(v => v.building?.playerId === pidJust).length;
+  const round = state.setupRound ?? 1; // 現在のラウンド番号（1始まり）。
 
   const toMain: GameState = {
     ...state,
@@ -1035,18 +1038,18 @@ function advanceSetup(state: GameState): GameState {
       // 同一ラウンド内: 次のプレイヤーへ
       return { ...state, currentPlayerIndex: idx + 1, setupSubPhase: 'PLACE_SETTLEMENT' };
     }
-    // 順方向ラウンドの最後のプレイヤー。目標数に達していたら終了、未達なら逆方向へ折り返す（同プレイヤー続行）。
-    if (placed >= target) return toMain;
-    return { ...state, phase: 'SETUP_BACKWARD', setupSubPhase: 'PLACE_SETTLEMENT' };
+    // 順方向ラウンドの最後のプレイヤー。目標ラウンドに達していたら終了、未達なら逆方向へ折り返す（同プレイヤー続行）。
+    if (round >= target) return toMain;
+    return { ...state, phase: 'SETUP_BACKWARD', setupRound: round + 1, setupSubPhase: 'PLACE_SETTLEMENT' };
   }
 
   if (state.phase === 'SETUP_BACKWARD') {
     if (idx > 0) {
       return { ...state, currentPlayerIndex: idx - 1, setupSubPhase: 'PLACE_SETTLEMENT' };
     }
-    // 逆方向ラウンドの先頭プレイヤー。目標数に達したら MAIN、未達なら3軒目以降の順方向ラウンドへ（同プレイヤー続行）。
-    if (placed >= target) return toMain;
-    return { ...state, phase: 'SETUP_FORWARD', setupSubPhase: 'PLACE_SETTLEMENT' };
+    // 逆方向ラウンドの先頭プレイヤー。目標ラウンドに達したら MAIN、未達なら3軒目以降の順方向ラウンドへ（同プレイヤー続行）。
+    if (round >= target) return toMain;
+    return { ...state, phase: 'SETUP_FORWARD', setupRound: round + 1, setupSubPhase: 'PLACE_SETTLEMENT' };
   }
 
   return state;
