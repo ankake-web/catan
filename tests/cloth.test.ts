@@ -94,6 +94,24 @@ describe('S6 カタンの織物', () => {
     expect(next.villages![villageId]).toBe(4);
   });
 
+  it('[D6] 海賊は最初の村接続まで動かせない（村接続後は解除）', () => {
+    const g = cloth();
+    const seaTile = Object.keys(g.tiles).find(id => g.tiles[id]!.type === 'sea' && id !== g.piratePosition)!;
+    const base: GameState = {
+      ...g, phase: 'MAIN', turnPhase: 'ROBBER', setupSubPhase: null,
+      currentPlayerIndex: 0, diceRolledThisTurn: true, villageConn: {},
+    };
+    // 村未接続: 海賊は凍結（移動不可）
+    expect(() => applyAction(base, { type: 'MOVE_PIRATE', tileId: seaTile })).toThrow(/frozen/);
+    // 村接続後: 凍結エラーは出ない
+    const villageId = Object.keys(g.villages!)[0]!;
+    const connected: GameState = { ...base, villageConn: { [villageId]: ['player1'] } };
+    let frozen = false;
+    try { applyAction(connected, { type: 'MOVE_PIRATE', tileId: seaTile }); }
+    catch (e) { if (String(e).includes('frozen')) frozen = true; }
+    expect(frozen).toBe(false);
+  });
+
   it('[D7] 村につないだ航路は closed（移動できない）', () => {
     const g = cloth();
     const villageId = Object.keys(g.villages!)[0]!;

@@ -364,6 +364,9 @@ export function applyAction(
     // ----------------------------------------------------------
     case 'MOVE_PIRATE': {
       if (state.turnPhase !== 'ROBBER') throw new Error('MOVE_PIRATE: not in ROBBER phase');
+      // S6 カタンの織物: 海賊は「最初の村接続」が出来るまで動かせない（公式）。それまでは盗賊(陸)のみ。
+      if (state.villages && !Object.values(state.villageConn ?? {}).some(arr => arr.length > 0))
+        throw new Error('MOVE_PIRATE: pirate is frozen until the first village connection (S6)');
       const { tileId, stealFromPlayerId } = action;
       const tile = state.tiles[tileId];
       if (!tile || tile.type !== 'sea') throw new Error('MOVE_PIRATE: must target a sea tile');
