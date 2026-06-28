@@ -3,6 +3,8 @@ import { createInitialGameState } from '../src/engine/createState';
 import type { PlayerSpec } from '../src/engine/createState';
 import { createRng } from '../src/engine/setup';
 import { applyAction } from '../src/engine/game';
+import { chooseAction } from '../src/engine/ai';
+import { findPendingDiscarder } from '../src/engine/robber';
 import { canAttackFortress, attackFortress, moveFleet, bestFortressShip } from '../src/engine/pirateIslands';
 import { checkVictory } from '../src/engine/scoring';
 import { makeHand } from '../src/constants';
@@ -87,4 +89,35 @@ describe('S7 海賊の島々', () => {
     // 経路が存在すれば船辺を返す（盤構成上は本島↔要塞が海で繋がるため非null期待）。
     expect(ship == null || typeof ship === 'string').toBe(true);
   });
+});
+
+describe('S7 海賊の島々: 複数seedでソフトロックせず完走する', () => {
+  // 回帰: 海賊艦隊の略奪が「資源収集前」に手札を8→7へ減らした人がいると、捨て札要否を
+  // 略奪前の手札で判定していたため DISCARD フェーズに入って手詰まりになる不具合があった
+  // （捨て札要否は略奪後の手札で判定するよう修正済み）。複数seedで GAME_OVER 到達を担保する。
+  const SPECS3: PlayerSpec[] = [
+    { id: 'player1', name: 'A', color: 'red',    type: 'ai', aiDifficulty: 'strong' },
+    { id: 'player2', name: 'B', color: 'blue',   type: 'ai', aiDifficulty: 'strong' },
+    { id: 'player3', name: 'C', color: 'purple', type: 'ai', aiDifficulty: 'strong' },
+  ];
+  function playToEnd(seed: number): GameState {
+    const rng = createRng(seed);
+    let s = createInitialGameState(SPECS3, 'fixed', ['player1', 'player2', 'player3'], rng, 'seafarers_pirateislands');
+    for (let i = 0; i < 120_000 && s.phase !== 'GAME_OVER'; i++) {
+      let pid = s.playerOrder[s.currentPlayerIndex]!;
+      if (s.phase === 'MAIN' && s.turnPhase === 'DISCARD') pid = findPendingDiscarder(s) ?? pid;
+      else if (s.phase === 'MAIN' && s.turnPhase === 'GOLD') pid = s.playerOrder.find(p => ((s.pendingGoldChoice ?? {})[p] ?? 0) > 0) ?? pid;
+      const action = chooseAction(s, pid, { rng });
+      if (!action) break;
+      s = applyAction(s, action, rng);
+    }
+    return s;
+  }
+  for (const seed of [2024, 1, 2, 3, 7]) {
+    it(`seed=${seed} で GAME_OVER まで進む`, () => {
+      const s = playToEnd(seed);
+      expect(s.phase).toBe('GAME_OVER');
+      expect(s.winner).not.toBeNull();
+    });
+  }
 });

@@ -170,8 +170,11 @@ export function applyAction(
       if (state.pirateFleet) next = moveFleet(next, Math.min(d1, d2), rng);
 
       if (total === 7) {
-        const needsDiscard = state.playerOrder.some(p => {
-          const h = state.players[p]!.hand;
+        // S7 海賊の島々では上の moveFleet が「資源収集前」に略奪して手札を減らしうる。
+        // 捨て札要否は略奪後の手札(next)で判定する（state だと8→7に減った人がいても DISCARD に
+        // 入り、実際は誰も捨てる必要が無く手詰まりになる）。非艦隊シナリオでは next===state で不変。
+        const needsDiscard = next.playerOrder.some(p => {
+          const h = next.players[p]!.hand;
           return RESOURCE_TYPES.reduce((s, r) => s + h[r], 0) >= 8;
         });
         // S7 海賊の島々（useRobber=false）: 盗賊不使用。7は手札破棄のみで盗賊移動・盗みは無し。
