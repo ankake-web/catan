@@ -48,28 +48,38 @@ const SEAFARERS_IDS = listScenarios().filter(s => s.category === 'seafarers').ma
 
 describe('全シナリオ: 構造の健全性', () => {
   for (const id of SEAFARERS_IDS) {
-    it(`${id}: 本島(最大の陸塊)が一意・全5資源あり・29タイル`, () => {
+    it(`${id}: 盤footprint・島構成・全5資源`, () => {
+      const scenario = getScenario(id);
       const s = createInitialGameState(SPECS3, 'fixed', ['player1', 'player2', 'player3'], createRng(1), id);
-      expect(Object.keys(s.tiles)).toHaveLength(29);
+      // タイル数はシナリオ自身の footprint と一致する（シナリオ別フットプリント）。
+      expect(Object.keys(s.tiles)).toHaveLength(scenario.coords().length);
 
-      // 島サイズ。最大の陸塊（本島）が他より厳密に大きい＝初期配置が一意に定まる。
       const repOf = computeIslandReps(s.tiles);
       const sizes = [...new Set(Object.values(repOf))]
         .map(r => Object.values(repOf).filter(x => x === r).length)
         .sort((a, b) => b - a);
-      expect(sizes[0]).toBeGreaterThan(sizes[1] ?? 0); // 本島が最大で一意
 
-      // 本島に全5資源（開始時に資源が偏って詰まないこと）。
-      const home = (() => {
-        const counts: Record<string, number> = {};
-        for (const r of Object.values(repOf)) counts[r] = (counts[r] ?? 0) + 1;
-        return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0];
-      })();
-      const homeTypes = new Set(
-        Object.entries(repOf).filter(([, r]) => r === home).map(([tid]) => s.tiles[tid]!.type),
-      );
-      for (const t of ['forest', 'hill', 'pasture', 'field', 'mountain']) {
-        expect(homeTypes.has(t as never)).toBe(true);
+      // 盤に全5資源があること（霧シナリオは公開前で偏るため除外。設置時の type で判定）。
+      // setupAnywhere（S2/New World）以外は「本島=最大の陸塊」が一意で、その本島に全5資源。
+      if (scenario.rules?.setupAnywhere) {
+        // 複数ホーム島: 盤全体で全5資源が存在すれば良い（各自どこかの島から始められる）。
+        const allTypes = new Set(Object.values(s.tiles).map(t => t.type));
+        for (const t of ['forest', 'hill', 'pasture', 'field', 'mountain']) {
+          expect(allTypes.has(t as never)).toBe(true);
+        }
+      } else {
+        expect(sizes[0]).toBeGreaterThan(sizes[1] ?? 0); // 本島が最大で一意
+        const home = (() => {
+          const counts: Record<string, number> = {};
+          for (const r of Object.values(repOf)) counts[r] = (counts[r] ?? 0) + 1;
+          return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]![0];
+        })();
+        const homeTypes = new Set(
+          Object.entries(repOf).filter(([, r]) => r === home).map(([tid]) => s.tiles[tid]!.type),
+        );
+        for (const t of ['forest', 'hill', 'pasture', 'field', 'mountain']) {
+          expect(homeTypes.has(t as never)).toBe(true);
+        }
       }
     });
   }

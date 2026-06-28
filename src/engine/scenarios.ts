@@ -17,6 +17,7 @@ import { createRandomBoard } from './setup';
 export type ScenarioId =
   | 'classic'
   | 'seafarers_newshores'      // 公式S1 新たな海岸を目指して
+  | 'seafarers_fourislands'    // 公式S2 4つの島
   | 'seafarers_fogislands'     // 公式S3 霧の島
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
   | 'seafarers_forgottentribe' // 公式S5 忘れられた部族
@@ -65,6 +66,8 @@ const classic: Scenario = {
 
 // 航海者マップは大きめの footprint（半径3＝29ヘックス）を使う。盤面は自動縮小して収まる。
 const SEAFARERS_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 2, 3);
+// S2「4つの島」用のやや大きい footprint（37ヘックス）。4島を海で分離して配置できる広さ。
+const FOUR_ISLANDS_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 3, 3);
 
 // ---- 航海者「新たな海岸を求めて」 ----
 // 本島(左 q=-3..-1 = 12タイル)＋海峡(q=0列)＋新しい島(右 q=1..3 = 9タイル)。
@@ -448,6 +451,45 @@ const seafarersForgottenTribe: Scenario = {
   victoryTarget: 13,
   rules: { numberHexOnly: true, newIslandBonusVp: 0 },
 };
+
+// ---- 公式S2「4つの島」: 海で隔てた4つの島。どの島にも初期配置でき(setupAnywhere)、
+//   自分の出発島以外への初入植ごとに+2点。各自にとって未探検の島が異なる。13点。 ----
+// 37ヘックス footprint に、互いに海で隔てた4島(A西5/B北5/C東4/D南5＝陸19)を配置。
+const FOUR_ISLANDS_LAND: LandMap = {
+  // 島A（西）
+  '-3,1': { type: 'forest',   number: 8 },
+  '-3,2': { type: 'field',    number: 5 },
+  '-2,1': { type: 'hill',     number: 9 },
+  '-2,2': { type: 'mountain', number: 4 },
+  '-3,3': { type: 'pasture',  number: 10 },
+  // 島B（北・砂漠=盗賊初期）
+  '0,-3': { type: 'forest',   number: 6 },
+  '1,-3': { type: 'field',    number: 3 },
+  '0,-2': { type: 'desert',   number: null, robber: true },
+  '1,-2': { type: 'hill',     number: 5 },
+  '2,-3': { type: 'mountain', number: 9 },
+  // 島C（東）
+  '2,-1': { type: 'forest',   number: 4 },
+  '3,-2': { type: 'field',    number: 10 },
+  '3,-1': { type: 'pasture',  number: 8 },
+  '3,0':  { type: 'hill',     number: 6 },
+  // 島D（南）
+  '0,1':  { type: 'forest',   number: 9 },
+  '0,2':  { type: 'field',    number: 5 },
+  '0,3':  { type: 'mountain', number: 4 },
+  '1,1':  { type: 'pasture',  number: 3 },
+  '1,2':  { type: 'hill',     number: 11 },
+};
+const seafarersFourIslands: Scenario = {
+  id: 'seafarers_fourislands',
+  name: '航海者：4つの島',
+  description: '海で隔てた4つの島。どの島から始めてもよく、出発島以外への初入植ごとに+2点（13点）。',
+  category: 'seafarers',
+  coords: FOUR_ISLANDS_COORDS,
+  build: buildFromLandMap(FOUR_ISLANDS_LAND),
+  victoryTarget: 13,
+  rules: { newIslandBonusVp: 2, setupAnywhere: true },
+};
 const seafarersGoldenIsles: Scenario = {
   id: 'seafarers_goldenisles',
   name: '航海者：黄金諸島（非公式）',
@@ -492,6 +534,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
   // 公式航海者シナリオ
   seafarers_newshores: seafarersNewShores,
+  seafarers_fourislands: seafarersFourIslands,
   seafarers_fogislands: seafarersFogIslands,
   seafarers_throughdesert: seafarersThroughDesert,
   seafarers_forgottentribe: seafarersForgottenTribe,

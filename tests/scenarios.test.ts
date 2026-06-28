@@ -161,6 +161,31 @@ describe('scenarios: 航海者「砂漠を越えて」(公式S4)', () => {
   });
 });
 
+describe('scenarios: 航海者「4つの島」(公式S2)', () => {
+  const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_fourislands');
+  it('37ヘックス footprint で、海に隔てた4島に分かれる', () => {
+    expect(Object.keys(s.tiles)).toHaveLength(37);
+    const repOf = computeIslandReps(s.tiles);
+    const islands = [...new Set(Object.values(repOf))];
+    expect(islands).toHaveLength(4);
+    // 各島がプレイ可能なサイズ（4タイル以上）
+    for (const r of islands) {
+      expect(Object.values(repOf).filter(x => x === r).length).toBeGreaterThanOrEqual(4);
+    }
+  });
+  it('公式S2: 勝利点13・新島ボーナス+2・どの島にも初期配置可(setupAnywhere)', () => {
+    expect(s.victoryTarget).toBe(13);
+    expect(s.newIslandBonusVp).toBe(2);
+    expect(s.setupAnywhere).toBe(true);
+  });
+  it('盤全体で全5資源が存在する（各自どこかの島から始められる）', () => {
+    const types = new Set(Object.values(s.tiles).map(t => t.type));
+    for (const t of ['forest', 'hill', 'pasture', 'field', 'mountain'] as const) {
+      expect(types.has(t)).toBe(true);
+    }
+  });
+});
+
 describe('scenarios: 航海者「新世界」(New World)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newworld');
   it('公式: 勝利点12・新島ボーナス+1・どの島にも初期配置可(setupAnywhere)', () => {
