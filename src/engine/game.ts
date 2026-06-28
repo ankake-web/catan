@@ -26,7 +26,13 @@ import {
 } from './citiesKnights';
 import { executeBankTrade, canBankTrade, offerTrade, respondTrade, confirmTrade, cancelTrade } from './trade';
 import { updateLongestRoad, updateLargestArmy, checkVictory, calcVP, victoryTarget } from './scoring';
-import { newIslandBonusRep } from './islands';
+import { newIslandBonusRep, islandRepOf } from './islands';
+import { edgeTileIds } from './board';
+import { revealFogAround } from './explore';
+import { collectEdgeToken, placeHeldHarborAt } from './seaTokens';
+import { connectVillagesAround, produceCloth, checkClothEnd } from './cloth';
+import { canBuildWonder, buildWonder } from './wonders';
+import { canAttackFortress, attackFortress, moveFleet } from './pirateIslands';
 
 // ============================================================
 // 内部ユーティリティ
@@ -160,6 +166,9 @@ export function applyAction(
         return checkVictory(ckPostEventTransition(next, total), pid);
       }
 
+      // S7 海賊の島々: ダイス後・資源収集前に海賊艦隊が「小さい目」の数だけ前進し、隣接建物から略奪。
+      if (state.pirateFleet) next = moveFleet(next, Math.min(d1, d2), rng);
+
       if (total === 7) {
         const needsDiscard = state.playerOrder.some(p => {
           const h = state.players[p]!.hand;
@@ -168,6 +177,8 @@ export function applyAction(
         next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : 'ROBBER' };
       } else {
         next = distributeResources({ ...next, turnPhase: 'TRADE_BUILD' }, total);
+        // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
+        next = produceCloth(next, total);
         // 航海者: 金タイル産出があれば、任意資源の選択待ち(GOLD)へ。無ければ通常どおり TRADE_BUILD。
         // 複数人が同時に owed になりうるため、選択枚数は「逐次的に減るバンク総在庫」で頭打ちにする。
         // 全体総和が在庫を超えないよう playerOrder 順に bankLeft から差し引くことで、どの順に
@@ -184,6 +195,7 @@ export function applyAction(
           : { ...next, turnPhase: 'TRADE_BUILD' };
       }
 
+      next = checkClothEnd(next); // S6: 織物生産後、5村供給切れなら終了（無い盤では no-op）
       return next;
     }
 
@@ -313,6 +325,8 @@ export function applyAction(
 
       // 強盗は陸タイルのみ（海は海賊の領分）。これが無いと盗賊が海上で空振りになる。
       if (state.tiles[tileId]?.type === 'sea') throw new Error('MOVE_ROBBER: robber cannot move onto a sea tile (use the pirate)');
+      // S5 忘れられた部族: 盗賊は数字ディスクのあるヘクスにしか動かせない（砂漠等の無数字ヘックス不可）。
+      if (state.numberHexOnly && state.tiles[tileId]?.number == null) throw new Error('MOVE_ROBBER: robber can only move to a numbered hex in this scenario');
       // 強盗は必ず現在地とは別ヘクスへ移動する（標準ルール）。
       const currentRobberTileId = Object.keys(state.tiles).find(tid => state.tiles[tid]!.hasRobber);
       if (currentRobberTileId === tileId) throw new Error('MOVE_ROBBER: must move to a different tile');
@@ -380,6 +394,8 @@ export function applyAction(
       if (!canBuildRoad(state, pid, edgeId)) throw new Error('BUILD_ROAD: invalid');
 
       let next = buildRoad(state, pid, edgeId);
+      // S3 霧の島: 道の隣接ヘックスを探索公開（霧の無い盤では no-op）。
+      next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
 
@@ -409,8 +425,20 @@ export function applyAction(
       let next = buildShip(state, pid, edgeId);
       // 建てたばかりの船は同じターンに移動できない（航海者の標準ルール）。建設した辺を記録。
       next = { ...next, shipsBuiltThisTurn: [...(next.shipsBuiltThisTurn ?? []), edgeId] };
+      // S3 霧の島: 船の隣接ヘックスを探索公開（霧→陸なら資源1枚）。霧の無い盤では no-op。
+      next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
+      // S5 忘れられた部族: この辺に海辺トークンがあれば獲得（VP/開発カード/港）。無い盤では no-op。
+      next = collectEdgeToken(next, edgeId, pid);
+      // S6 カタンの織物: この辺が村に隣接していれば航路接続（接続成立で即織物1枚）。無い盤では no-op。
+      next = connectVillagesAround(next, edgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
+      next = checkClothEnd(next); // S6: 5村供給切れで終了（無い盤では no-op）
+
+      // 街道建設カード使用中: 船も道と同じく無料配置の1本として残数をデクリメント（船2/道1+船1）。
+      if (next.roadBuildingRoadsRemaining > 0) {
+        next = { ...next, roadBuildingRoadsRemaining: next.roadBuildingRoadsRemaining - 1 };
+      }
 
       // セットアップでは2個目のコマ（道 or 船）として進行。anchor 解除。
       if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
@@ -430,8 +458,15 @@ export function applyAction(
       if (!canMoveShip(state, pid, fromEdgeId, toEdgeId)) throw new Error('MOVE_SHIP: invalid');
 
       let next = moveShip(state, pid, fromEdgeId, toEdgeId);
+      // S3 霧の島: 移動先の隣接ヘックスを探索公開（霧の無い盤では no-op）。
+      next = revealFogAround(next, edgeTileIds(next.edges[toEdgeId]!, next.vertices), pid);
+      // S5 忘れられた部族: 移動先の辺に海辺トークンがあれば獲得。無い盤では no-op。
+      next = collectEdgeToken(next, toEdgeId, pid);
+      // S6 カタンの織物: 移動先が村に隣接していれば航路接続（無い盤では no-op）。
+      next = connectVillagesAround(next, toEdgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
+      next = checkClothEnd(next);
       return next;
     }
 
@@ -446,6 +481,10 @@ export function applyAction(
       if (!canBuildSettlement(state, pid, vertexId)) throw new Error('BUILD_SETTLEMENT: invalid');
 
       let next = buildSettlement(state, pid, vertexId);
+      // S3 霧の島: 開拓地の隣接ヘックスを探索公開（霧の無い盤では no-op）。
+      next = revealFogAround(next, next.vertices[vertexId]!.adjacentTileIds, pid);
+      // S5 忘れられた部族: 港トークンを保留していれば、この沿岸開拓地に設置（無ければ no-op）。
+      next = placeHeldHarborAt(next, pid, vertexId);
 
       // SETUP 後半: 2個目の配置。
       const isSecondPlacement = state.phase === 'SETUP_BACKWARD' && state.setupSubPhase === 'PLACE_SETTLEMENT';
@@ -473,9 +512,22 @@ export function applyAction(
       // 海タイルの無い基本ゲームでは newIslandBonusRep が常に null を返し no-op。
       // checkVictory より前に付与し、島ボーナスで 10VP に到達したら勝てるようにする。
       if (state.phase === 'MAIN') {
-        const rep = newIslandBonusRep(next, vertexId);
-        if (rep && !(next.islandBonus ?? {})[rep]) {
-          next = { ...next, islandBonus: { ...(next.islandBonus ?? {}), [rep]: pid } };
+        const rep = newIslandBonusRep(next, vertexId, pid);
+        if (rep) {
+          const owners = (next.islandBonus ?? {})[rep] ?? [];
+          // 公式: 各プレイヤーが「自分の初入植」で +VP（他人が先でも可）。同一プレイヤーの重複のみ排除。
+          if (!owners.includes(pid)) {
+            next = { ...next, islandBonus: { ...(next.islandBonus ?? {}), [rep]: [...owners, pid] } };
+          }
+        }
+      } else {
+        // 初期配置: 置いた島を「自分のホーム島」として記録（S2/New World のプレイヤー別未探検判定に使う）。
+        const homeRep = islandRepOf(next, vertexId);
+        if (homeRep) {
+          const cur = (next.playerHomeIslands ?? {})[pid] ?? [];
+          if (!cur.includes(homeRep)) {
+            next = { ...next, playerHomeIslands: { ...(next.playerHomeIslands ?? {}), [pid]: [...cur, homeRep] } };
+          }
         }
       }
 
@@ -502,6 +554,31 @@ export function applyAction(
       if (!canBuildCity(state, pid, vertexId)) throw new Error('BUILD_CITY: invalid');
 
       let next = buildCity(state, pid, vertexId);
+      next = checkVictory(next, pid);
+      return next;
+    }
+
+    // ----------------------------------------------------------
+    // BUILD_WONDER（航海者 S8 七不思議）。不思議のレベルを1段建設（必要ならクレーム）。
+    // ----------------------------------------------------------
+    case 'BUILD_WONDER': {
+      if (state.phase !== 'MAIN' || state.turnPhase !== 'TRADE_BUILD')
+        throw new Error('BUILD_WONDER: must be in MAIN TRADE_BUILD phase');
+      const { wonderId } = action;
+      if (!canBuildWonder(state, pid, wonderId)) throw new Error('BUILD_WONDER: invalid');
+      let next = buildWonder(state, pid, wonderId);
+      next = checkVictory(next, pid);
+      return next;
+    }
+
+    // ----------------------------------------------------------
+    // ATTACK_FORTRESS（航海者 S7 海賊の島々）。隣接する自分の要塞をラホ1つ分攻撃。
+    // ----------------------------------------------------------
+    case 'ATTACK_FORTRESS': {
+      if (state.phase !== 'MAIN' || state.turnPhase !== 'TRADE_BUILD')
+        throw new Error('ATTACK_FORTRESS: must be in MAIN TRADE_BUILD phase');
+      if (!canAttackFortress(state, pid)) throw new Error('ATTACK_FORTRESS: invalid');
+      let next = attackFortress(state, pid);
       next = checkVictory(next, pid);
       return next;
     }

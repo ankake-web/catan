@@ -95,7 +95,8 @@ export function canBuildShip(state: GameState, playerId: PlayerId, edgeId: EdgeI
   // 航海者: 海賊コマのいる海タイルに面した辺には船を建設できない（建設封鎖）。
   if (state.piratePosition != null && edgeTileIds(edge, state.vertices).includes(state.piratePosition)) return false;
 
-  const free = isSetupPhase(state);
+  // セットアップ or 街道建設カード使用中は資源コスト不要（航海者: 街道建設は道2/船2/道1+船1）。
+  const free = isSetupPhase(state) || state.roadBuildingRoadsRemaining > 0;
   if (!free && !hasEnoughResources(player.hand, BUILD_COSTS.ship)) return false;
 
   if (isSetupPhase(state) && state.setupRoadAnchor) {
@@ -108,7 +109,7 @@ export function canBuildShip(state: GameState, playerId: PlayerId, edgeId: EdgeI
 /** 船を建設して新しい GameState を返す（バリデーション済み前提）。 */
 export function buildShip(state: GameState, playerId: PlayerId, edgeId: EdgeId): GameState {
   const player = state.players[playerId]!;
-  const free = isSetupPhase(state);
+  const free = isSetupPhase(state) || state.roadBuildingRoadsRemaining > 0;
   const newHand = free ? player.hand : deductCost(player.hand, BUILD_COSTS.ship);
   const newBank = free ? state.bank : returnToBank(state.bank, BUILD_COSTS.ship);
 
@@ -142,8 +143,9 @@ function isOpenShipEnd(
   if (v.building != null) return false; // 建物がある端は開放端ではない
   return !v.adjacentEdgeIds.some(eid => {
     if (eid === fromEdgeId) return false;
-    const e = state.edges[eid];
-    return e?.road?.playerId === playerId || e?.ship?.playerId === playerId;
+    // 建物の無い頂点では道は船の連続性に寄与しない（道↔船は自分の建物経由でのみ連結）。
+    // よって開放端を塞ぐのは「自分の船」のみ（仕様: オープン=その端が自分の船/建物に隣接していない）。
+    return state.edges[eid]?.ship?.playerId === playerId;
   });
 }
 
@@ -169,6 +171,12 @@ export function canMoveShip(
   if (to.road != null || to.ship != null) return false;
   if (!isSeaEdge(to, state.vertices, state.tiles)) return false;
 
+  // 海賊のいる海ヘクスに面した辺へ/から船は移動できない（建設の封鎖 canBuildShip:96 と対称）。
+  if (state.piratePosition != null) {
+    if (edgeTileIds(from, state.vertices).includes(state.piratePosition)) return false;
+    if (edgeTileIds(to, state.vertices).includes(state.piratePosition)) return false;
+  }
+
   // 行き止まり（開放端）の船だけ動かせる。
   if (!from.vertexIds.some(v => isOpenShipEnd(state, playerId, v, fromEdgeId))) return false;
 
@@ -183,7 +191,12 @@ export function canMoveShip(
 /** その船（自分の船）を今ターン動かせるか（開放端があり、合法な移動先が1つ以上ある）。 */
 export function isShipMovable(state: GameState, playerId: PlayerId, fromEdgeId: EdgeId): boolean {
   if (state.shipMovedThisTurn) return false;
-  if (state.edges[fromEdgeId]?.ship?.playerId !== playerId) return false;
+  const from = state.edges[fromEdgeId];
+  if (from?.ship?.playerId !== playerId) return false;
+  // 高コストな移動先探索の前に cheap-fail（描画毎の playerHasMovableShip 連打を軽くする）。
+  if (state.shipsBuiltThisTurn?.includes(fromEdgeId)) return false;          // 今ターン建設は不可
+  if (state.piratePosition != null && edgeTileIds(from, state.vertices).includes(state.piratePosition)) return false; // 海賊封鎖
+  if (!from.vertexIds.some(v => isOpenShipEnd(state, playerId, v, fromEdgeId))) return false; // 開放端なし
   return Object.keys(state.edges).some(to => canMoveShip(state, playerId, fromEdgeId, to));
 }
 
@@ -257,6 +270,12 @@ export function canBuildSettlement(
   if (vertex.knight != null) return false;
   // 開拓地は陸に面した頂点のみ（航海者: 外洋だけに接する頂点には置けない）。基本ゲームは常に true。
   if (!isLandVertex(vertex, state.tiles)) return false;
+  // S5「忘れられた部族」: 数字ディスクのあるヘクスに隣接した頂点にしか開拓地を置けない。
+  if (state.numberHexOnly && !vertex.adjacentTileIds.some(t => state.tiles[t]?.number != null)) return false;
+  // S6「カタンの織物」: 小島（本島以外）には開拓地を建てられない（村は航路で接続する）。
+  if (state.noIslandSettlement && !isHomeIslandVertex(state, vertexId)) return false;
+  // S7「海賊の島々」: 海賊要塞の頂点には（奪取前は）開拓地を建てられない（攻撃で奪取する）。
+  if (state.fortresses && Object.values(state.fortresses).some(f => !f.captured && f.vertexId === vertexId)) return false;
 
   if (!isDistanceRuleOk(vertex, state.vertices)) return false;
 

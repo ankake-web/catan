@@ -45,9 +45,10 @@ function wantsRoad(state: GameState, mode: BuildMode): boolean {
   return state.phase === 'MAIN' && state.turnPhase === 'TRADE_BUILD'
     && (mode === 'road' || state.roadBuildingRoadsRemaining > 0);
 }
-// 航海者: 船の配置を受け付けるか（MAIN の船モードのみ。セットアップは陸辺の道で足りる）。
+// 航海者: 船の配置を受け付けるか（MAIN の船モード、または街道建設カード使用中＝道2/船2/道1+船1）。
 function wantsShip(state: GameState, mode: BuildMode): boolean {
-  return state.phase === 'MAIN' && state.turnPhase === 'TRADE_BUILD' && mode === 'ship';
+  return state.phase === 'MAIN' && state.turnPhase === 'TRADE_BUILD'
+    && (mode === 'ship' || state.roadBuildingRoadsRemaining > 0);
 }
 
 // ============================================================

@@ -43,6 +43,8 @@ export interface BoardRenderOptions {
   validTileIds?: Set<string>;
   // 航海者: 船の配置候補（海に面した辺）。
   validShipEdgeIds?: Set<string>;
+  // 航海者 S6 カタンの織物: 村タイルID（「村」マーカーを描く）。
+  villageTileIds?: Set<string>;
   // 仮置きプレビュー（確定待ち）のターゲット。ゴースト表示する。
   previewVertexId?: string;
   previewEdgeId?: string;
@@ -201,6 +203,25 @@ function renderTile(
   if (isChosen) poly.classList.add('tile-chosen');
   else if (isValidRobber) poly.classList.add('valid-robber');
   g.appendChild(poly);
+
+  // S6「カタンの織物」: 村タイルに「村」ラベルを表示（航路でつないで織物を得る対象）。
+  if (opts?.villageTileIds?.has(tile.id)) {
+    const tag = svgEl('text');
+    tag.classList.add('village-tag');
+    setAttrs(tag, { x: cx, y: cy + size * 0.58, 'text-anchor': 'middle', 'font-size': String(size * 0.26) });
+    tag.textContent = '村';
+    g.appendChild(tag);
+  }
+
+  // S3「霧の島」: 未探検（霧）ヘックスは霧で覆い「?」を表示（type は海だが視覚的に区別）。
+  if (tile.fog) {
+    poly.classList.add('fog-tile');
+    const q = svgEl('text');
+    q.classList.add('fog-mark');
+    setAttrs(q, { x: cx, y: cy, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': String(size * 0.7) });
+    q.textContent = '?';
+    g.appendChild(q);
+  }
 
   // 金タイル: 麦(field)と色が紛らわしいので、光沢ゴールド＋発光（CSS）に加えて
   // 下部に「任意資源」ラベルで明示する。絵文字マーカーは環境差で崩れるため使わない。
@@ -509,6 +530,20 @@ function renderEdges(
         g.appendChild(hit);
       }
     }
+
+    // S5「忘れられた部族」: 海辺トークン（V=VP / D=開発カード / H=港）を辺の中点に表示。
+    const token = state.edgeTokens?.[edge.id];
+    if (token) {
+      const badge = svgEl('circle');
+      badge.classList.add('edge-token');
+      setAttrs(badge, { cx: mx, cy: my, r: 11 });
+      g.appendChild(badge);
+      const label = svgEl('text');
+      label.classList.add('edge-token-label');
+      setAttrs(label, { x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'central' });
+      label.textContent = token === 'vp' ? 'V' : token === 'dev' ? 'D' : 'H';
+      g.appendChild(label);
+    }
   }
   return g;
 }
@@ -744,9 +779,11 @@ export function renderBoard(
   // --- タイル（最下層） ---
   // 騎士と商人: 商人コマの位置・所有者色を opts に注入（renderTile で描画）。
   const merchant = state.merchant;
-  const tileOpts: BoardRenderOptions | undefined = merchant
-    ? { ...(opts ?? {}), merchantTileId: merchant.tileId, merchantColor: PLAYER_HEX_COLOR[merchant.playerId] ?? '#caa14a' }
-    : opts;
+  const tileOpts: BoardRenderOptions = {
+    ...(opts ?? {}),
+    ...(merchant ? { merchantTileId: merchant.tileId, merchantColor: PLAYER_HEX_COLOR[merchant.playerId] ?? '#caa14a' } : {}),
+    ...(state.villages ? { villageTileIds: new Set(Object.keys(state.villages)) } : {}),
+  };
   const tileGroup = svgEl('g');
   tileGroup.setAttribute('class', 'tiles');
   for (const tile of Object.values(state.tiles)) {
@@ -767,6 +804,35 @@ export function renderBoard(
 
   // --- 頂点（建物。最前面） ---
   content.appendChild(renderVertices(state, ox, oy, opts));
+
+  // --- 航海者 S7「海賊の島々」: 海賊要塞（🏰＋ラホ数）と海賊艦隊（🏴‍☠️）のマーカー（最前面） ---
+  if (state.fortresses || state.pirateFleet) {
+    const ov = svgEl('g');
+    ov.setAttribute('class', 'pirate-islands-overlay');
+    for (const f of Object.values(state.fortresses ?? {})) {
+      if (f.captured) continue;
+      const v = state.vertices[f.vertexId];
+      if (!v) continue;
+      const t = svgEl('text');
+      t.classList.add('fortress-mark');
+      setAttrs(t, { x: v.pixel.x + ox, y: v.pixel.y + oy, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': String(size * 0.34) });
+      t.textContent = `🏰${f.raho}`;
+      ov.appendChild(t);
+    }
+    const fleet = state.pirateFleet;
+    if (fleet && fleet.path.length > 0) {
+      const tile = state.tiles[fleet.path[fleet.pos % fleet.path.length]!];
+      if (tile) {
+        const p = axialToPixel(tile.coord, size);
+        const t = svgEl('text');
+        t.classList.add('fleet-mark');
+        setAttrs(t, { x: p.x + ox, y: p.y + oy, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': String(size * 0.5) });
+        t.textContent = '🏴‍☠️';
+        ov.appendChild(t);
+      }
+    }
+    content.appendChild(ov);
+  }
 
   viewport.appendChild(content);
   svgEl_.appendChild(viewport);

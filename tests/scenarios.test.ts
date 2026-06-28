@@ -46,15 +46,20 @@ describe('scenarios: classic は従来どおり（非破壊）', () => {
   });
 });
 
-describe('scenarios: 航海者「新たな海岸を求めて」', () => {
+describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
 
-  it('大きめ footprint（29ヘックス）で陸21・海8・砂漠1・金1', () => {
+  it('大きめ footprint（29ヘックス）で陸21・海8・砂漠1・金2（公式S1は金タイル2枚）', () => {
     expect(Object.keys(s.tiles)).toHaveLength(29);
     expect(count(s.tiles, 'sea')).toBe(8);
-    expect(count(s.tiles, 'gold')).toBe(1);
+    expect(count(s.tiles, 'gold')).toBe(2);
     expect(count(s.tiles, 'desert')).toBe(1);
     expect(29 - 8).toBe(21); // 海以外＝陸21（金タイルも陸に含む）
+  });
+
+  it('公式S1: 勝利点は14・新島初入植ボーナスは+2', () => {
+    expect(s.victoryTarget).toBe(14);
+    expect(s.newIslandBonusVp ?? 2).toBe(2);
   });
 
   it('本島12＋新島9 の二島に分かれる', () => {
@@ -138,5 +143,60 @@ describe('scenarios: 航海者「群島」', () => {
     expect(s.tiles['3,0']?.type).toBe('sea');
     // 金は新島Aの玄関口(1,-1)
     expect(s.tiles['1,-1']?.type).toBe('gold');
+  });
+});
+
+describe('scenarios: 航海者「砂漠を越えて」(公式S4)', () => {
+  const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_throughdesert');
+  it('公式S4: 勝利点14・金2・砂漠2（本島の盗賊砂漠＋新天地の砂漠）', () => {
+    expect(s.victoryTarget).toBe(14);
+    expect(count(s.tiles, 'gold')).toBe(2);
+    expect(count(s.tiles, 'desert')).toBe(2);
+  });
+  it('本島(最大12)と新天地が海で分かれる2島', () => {
+    const repOf = computeIslandReps(s.tiles);
+    const sizes = [...new Set(Object.values(repOf))]
+      .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
+    expect(sizes).toEqual([12, 6]);
+  });
+});
+
+describe('scenarios: 航海者「4つの島」(公式S2)', () => {
+  const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_fourislands');
+  it('37ヘックス footprint で、海に隔てた4島に分かれる', () => {
+    expect(Object.keys(s.tiles)).toHaveLength(37);
+    const repOf = computeIslandReps(s.tiles);
+    const islands = [...new Set(Object.values(repOf))];
+    expect(islands).toHaveLength(4);
+    // 各島がプレイ可能なサイズ（4タイル以上）
+    for (const r of islands) {
+      expect(Object.values(repOf).filter(x => x === r).length).toBeGreaterThanOrEqual(4);
+    }
+  });
+  it('公式S2: 勝利点13・新島ボーナス+2・どの島にも初期配置可(setupAnywhere)', () => {
+    expect(s.victoryTarget).toBe(13);
+    expect(s.newIslandBonusVp).toBe(2);
+    expect(s.setupAnywhere).toBe(true);
+  });
+  it('盤全体で全5資源が存在する（各自どこかの島から始められる）', () => {
+    const types = new Set(Object.values(s.tiles).map(t => t.type));
+    for (const t of ['forest', 'hill', 'pasture', 'field', 'mountain'] as const) {
+      expect(types.has(t)).toBe(true);
+    }
+  });
+});
+
+describe('scenarios: 航海者「新世界」(New World)', () => {
+  const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newworld');
+  it('公式: 勝利点12・新島ボーナス+1・どの島にも初期配置可(setupAnywhere)', () => {
+    expect(s.victoryTarget).toBe(12);
+    expect(s.newIslandBonusVp).toBe(1);
+    expect(s.setupAnywhere).toBe(true);
+  });
+  it('3島に分かれ、本島が一意に最大', () => {
+    const repOf = computeIslandReps(s.tiles);
+    const sizes = [...new Set(Object.values(repOf))]
+      .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
+    expect(sizes).toEqual([8, 6, 3]);
   });
 });

@@ -7,6 +7,8 @@ import { RESOURCE_TYPES, BUILD_COSTS, CK_COSTS, VP_TABLE } from '../constants';
 import { calcVP, calcPublicVP, victoryTarget } from '../engine/scoring';
 import { LONGEST_ROAD_MIN, LARGEST_ARMY_MIN } from '../constants';
 import { hasEnoughResources, playerHasMovableShip } from '../engine/actions';
+import { canAttackFortress } from '../engine/pirateIslands';
+import { bestWonderAction } from '../engine/wonders';
 import { canBankTrade, getEffectiveTradeRate, isCommodity } from '../engine/trade';
 import { findPendingDiscarder, discardCount, robbableCardCount } from '../engine/robber';
 import {
@@ -757,6 +759,9 @@ interface VPBreakdown {
   la: boolean;
   vpCards: number;
   islandBonus: number; // 航海者: 獲得した新島入植ボーナスの件数（各 +2VP）
+  tokenVp: number;     // 航海者 S5: 海辺VPトークン数（各 +1VP）
+  cloth: number;       // 航海者 S6: 織物トークン数（2枚で +1VP）
+  wonderLevel: number; // 航海者 S8: 不思議の建設レベル（0..4・勝利進捗）
 }
 
 function calcVPBreakdown(state: GameState, pid: PlayerId): VPBreakdown {
@@ -773,7 +778,10 @@ function calcVPBreakdown(state: GameState, pid: PlayerId): VPBreakdown {
     lr: player?.hasLongestRoad ?? false,
     la: player?.hasLargestArmy ?? false,
     vpCards: player?.devCards.filter(c => c.type === 'victory_point').length ?? 0,
-    islandBonus: Object.values(state.islandBonus ?? {}).filter(o => o === pid).length,
+    islandBonus: Object.values(state.islandBonus ?? {}).flat().filter(o => o === pid).length,
+    tokenVp: (state.tokenVp ?? {})[pid] ?? 0,
+    cloth: (state.cloth ?? {})[pid] ?? 0,
+    wonderLevel: (state.wonderLevel ?? {})[pid] ?? 0,
   };
 }
 
@@ -1909,6 +1917,20 @@ function buildActionButtons(
   }
   div.appendChild(modeImgBtn(houseImg(ckey), [costLabel('開拓地', resCostParts(BUILD_COSTS.settlement))], 'settlement', canSettl, buildMode, setBuildMode));
   div.appendChild(modeImgBtn(cityImg(ckey), [costLabel('都市', resCostParts(BUILD_COSTS.city))], 'city', canCity, buildMode, setBuildMode));
+  // 航海者 S7 海賊の島々: 隣接する自分の要塞を攻撃（ラホを1つ除去・3で奪取）。
+  if (state.fortresses && canAttackFortress(state, pid)) {
+    const raho = state.fortresses[pid]?.raho ?? 0;
+    div.appendChild(makeBtn(`🏰 要塞を攻撃（ラホ${raho}）`, 'btn-primary', false, () => dispatch({ type: 'ATTACK_FORTRESS' })));
+  }
+  // 航海者 S8 七不思議: 不思議を建設（要件を満たせばクレーム→レベルアップ）。
+  if (state.wonderLevel !== undefined) {
+    const wa = bestWonderAction(state, pid);
+    if (wa && wa.type === 'BUILD_WONDER') {
+      const lvl = state.wonderLevel[pid] ?? 0;
+      const wid = wa.wonderId;
+      div.appendChild(makeBtn(`🏛 不思議を建設（Lv${lvl}→${lvl + 1}）`, 'btn-primary', false, () => dispatch({ type: 'BUILD_WONDER', wonderId: wid })));
+    }
+  }
   // 発展カードは騎士と商人では使わない（進歩カードに置換）。基本/航海者のみ表示。
   if (!isCk(state)) {
     div.appendChild(makeImgBtn(glyph('ic-cards'), [costLabel('発展カード', resCostParts(BUILD_COSTS.dev_card))], canDev ? 'btn-build' : 'btn-disabled', !canDev,
@@ -2326,12 +2348,30 @@ function buildPlayerPanel(
   // ボーナスVP内訳（最長/最大/VPカード）。開拓地・都市数は stat-row に集約済み。
   // GAME_OVER時は勝者のVPカード枚数も開示する（他プレイヤーは非公開のまま）。
   const showVpCards = (isSelf || isWinner) && bd.vpCards > 0;
-  if (bd.lr || bd.la || bd.islandBonus > 0 || showVpCards) {
+  if (bd.lr || bd.la || bd.islandBonus > 0 || showVpCards || bd.tokenVp > 0 || bd.cloth > 0 || bd.wonderLevel > 0) {
     const vpRow = el('div', 'vp-breakdown');
     if (bd.islandBonus > 0) {
       const item = el('span', 'vp-item bonus');
-      item.textContent = `🏝+${bd.islandBonus * 2}`;
-      item.title = `新しい島への入植 ${bd.islandBonus}件（+${bd.islandBonus * 2}点）`;
+      item.textContent = `🏝+${bd.islandBonus * (state.newIslandBonusVp ?? 2)}`;
+      item.title = `新しい島への入植 ${bd.islandBonus}件（+${bd.islandBonus * (state.newIslandBonusVp ?? 2)}点）`;
+      vpRow.appendChild(item);
+    }
+    if (bd.tokenVp > 0) {
+      const item = el('span', 'vp-item bonus');
+      item.textContent = `🗿+${bd.tokenVp}`;
+      item.title = `海辺VPトークン ${bd.tokenVp}個（+${bd.tokenVp}点）`;
+      vpRow.appendChild(item);
+    }
+    if (bd.cloth > 0) {
+      const item = el('span', 'vp-item bonus');
+      item.textContent = `🧵${bd.cloth}（+${Math.floor(bd.cloth / 2)}）`;
+      item.title = `織物 ${bd.cloth}枚（2枚=1点 → +${Math.floor(bd.cloth / 2)}点）`;
+      vpRow.appendChild(item);
+    }
+    if (bd.wonderLevel > 0) {
+      const item = el('span', 'vp-item bonus');
+      item.textContent = `🏛Lv${bd.wonderLevel}`;
+      item.title = `不思議の建設レベル ${bd.wonderLevel}/4`;
       vpRow.appendChild(item);
     }
     if (bd.lr) {

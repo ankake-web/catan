@@ -32,6 +32,10 @@ export interface Tile {
   type: TileType;
   number: number | null; // 砂漠は null
   hasRobber: boolean;
+  // 航海者 S3「霧の島」: 未探検(霧)ヘックス。霧の間は type='sea' として扱われ（配置/産出/島判定で海）、
+  // 船/道/開拓地を隣接マスに置いて探索すると公開され、本来の type/number が確定する。
+  // 公開された地形が陸なら、探索したプレイヤーが資源1枚を即獲得。
+  fog?: { type: TileType; number: number | null };
 }
 
 // ---- 頂点（Vertex） ----
@@ -268,6 +272,36 @@ export interface PendingTrade {
   selectedResponderId: PlayerId | null;
 }
 
+// ---- シナリオ固有ルール（航海者・公式準拠リビルド計画 §1） ----
+// 各シナリオが既定値（基本/航海者共通）から差し替えたいルールを宣言する。
+// createInitialGameState がこれを GameState の対応フィールドへ配線する。
+// 後続フェーズで onExplore/seaEdgeTokens/clothTrade/pirateFleet/wonders を追加予定。
+export interface ScenarioRules {
+  /** 初期配置の開拓地数。既定2。S6 カタンの織物=3。 */
+  startingSettlements?: number;
+  /** 最長交易路タイルを使うか。既定true。S6 織物 / S7 海賊の島々=false。 */
+  useLongestRoute?: boolean;
+  /** 7・盗賊・海賊を使うか。既定true。S7 海賊の島々=false。 */
+  useRobber?: boolean;
+  /** 新しい島への初入植ボーナスVP。既定2。S8 七不思議 / New World=1。0で無効。 */
+  newIslandBonusVp?: number;
+  /** 初期配置をどの島にも置けるか（既定false=本島=最大陸塊のみ）。S2 4つの島 / New World=true。
+   *  trueのとき「自分が初期配置した島」が各プレイヤーのホーム島となり、それ以外への初入植で加点。 */
+  setupAnywhere?: boolean;
+  /** 開拓地・盗賊を数字ディスクのあるヘクスにしか置けない/動かせないか（既定false）。S5 忘れられた部族=true。 */
+  numberHexOnly?: boolean;
+  /** 小島（本島以外）に開拓地を建てられないか（既定false）。S6 カタンの織物=true。 */
+  noIslandSettlement?: boolean;
+  /** 七不思議モードを有効化するか（既定false）。S8 カタンの七不思議=true。 */
+  wonders?: boolean;
+  /** 海賊の島々モードを有効化するか（既定false）。S7=true（各自の要塞を攻略）。 */
+  pirateIslands?: boolean;
+}
+
+// 航海者 S5「忘れられた部族」: 海の辺に事前配置されるトークンの種別。
+//   vp=VPトークン(+1点) / dev=開発カード(今ターン購入扱い) / harbor=港(沿岸の自分の建物隣に設置)。
+export type EdgeTokenKind = 'vp' | 'dev' | 'harbor';
+
 // ---- GameState ----
 
 export interface GameState {
@@ -349,9 +383,45 @@ export interface GameState {
   // 勝利に必要な勝利点。シナリオ別（基本=10／航海者の大きい盤=13）。未設定は VP_TABLE.target。
   victoryTarget?: number;
 
-  // 航海者拡張: 「新しい島への最初の入植」ボーナス。島の代表タイルID → 最初に入植したプレイヤー。
-  // 各エントリ +2VP（calcVP で加算）。基本ゲームでは常に空（海タイルが無く発生しない）。
-  islandBonus?: Record<string, PlayerId>;
+  // 航海者拡張: 「新しい島への最初の入植」ボーナス。島の代表タイルID → その島で自分の初入植
+  // ボーナスを獲得済みのプレイヤー一覧。各プレイヤーが「自分が初めてその島へ建てた」とき +newIslandBonusVp
+  // を得る（公式: 他人が先に建てていても各自獲得可。よって1島に複数人が載りうる）。
+  // 基本ゲームでは常に空（海タイルが無く発生しない）。
+  islandBonus?: Record<string, PlayerId[]>;
+  // 航海者拡張: 新島初入植ボーナスのVP値（既定2。七不思議/New World は1）。未設定は VP_TABLE.island。
+  newIslandBonusVp?: number;
+  // 航海者拡張: シナリオ固有ルールのトグル（既定値は基本/航海者共通）。createInitialGameState が
+  // ScenarioRules から配線する。未設定はそれぞれ 2 / true / true の既定で扱う。
+  startingSettlements?: number;   // 初期配置の開拓地数（既定2。S6 織物=3）
+  useLongestRoute?: boolean;      // 最長交易路タイルを使うか（既定true。S6/S7=false）
+  useRobber?: boolean;            // 7/盗賊・海賊を使うか（既定true。S7=false）
+  setupAnywhere?: boolean;        // 初期配置をどの島にも置けるか（既定false。S2/New World=true）
+  numberHexOnly?: boolean;        // 開拓地・盗賊を数字ヘックスのみに制限（既定false。S5=true）
+  noIslandSettlement?: boolean;   // 小島（本島以外）に開拓地を建てられない（既定false。S6=true）
+  // 航海者 S5「忘れられた部族」: 海の辺に事前配置されたトークン（船で到達すると獲得）。辺ID→種別。
+  edgeTokens?: Record<string, EdgeTokenKind>;
+  // S5: 各プレイヤーが集めたVPトークン数（各+1VP・公開情報）。
+  tokenVp?: Record<string, number>;
+  // S5: 港トークンを得たが置き場（沿岸の自分の建物）が無く保留中の数。次の沿岸開拓地で設置。
+  heldHarbors?: Record<string, number>;
+  // 航海者 S6「カタンの織物」: 村（小島の数字ヘックス）の残り織物供給。タイルID→残数（初期5）。
+  villages?: Record<string, number>;
+  // S6: 各村に航路（船）接続済みのプレイヤー一覧。
+  villageConn?: Record<string, string[]>;
+  // S6: 各プレイヤーの織物トークン数（2枚で1VP・公開情報）。
+  cloth?: Record<string, number>;
+  // 航海者 S8「カタンの七不思議」: 各不思議のクレーム者（不思議ID→PlayerId・1人1つ早い者勝ち）。
+  wonderOwner?: Record<string, PlayerId>;
+  // S8: 各プレイヤーの不思議建設レベル（0..4・レベル4で完成）。存在＝七不思議シナリオ。
+  wonderLevel?: Record<string, number>;
+  // 航海者 S7「海賊の島々」: 各プレイヤーの要塞（攻略対象の頂点＋ラホHP＋奪取済みフラグ）。存在＝S7。
+  fortresses?: Record<string, { vertexId: string; raho: number; captured: boolean }>;
+  // S7: 海賊艦隊。固定経路 path（タイルID列）上を pos の位置で巡回し、ダイス後に小さい目の数だけ前進。
+  pirateFleet?: { path: string[]; pos: number };
+  // 航海者拡張: 各プレイヤーが初期配置した島の代表ID一覧（=自分のホーム島群）。
+  // setupAnywhere のシナリオで「未探検島＝自分のホーム以外」をプレイヤー別に判定するために使う。
+  // 初期配置中に BUILD_SETTLEMENT が記録する。基本/S1系では全員が本島のみ。
+  playerHomeIslands?: Record<string, string[]>;
 
   // 航海者拡張: 金タイル産出で「任意資源を選ぶ権利」の残数。PlayerId → 選ぶ枚数。
   // turnPhase==='GOLD' の間だけ非空。各プレイヤーが CHOOSE_GOLD で解決し、全員空になると
@@ -443,6 +513,8 @@ export type Action =
   | { type: 'CHOOSE_GOLD';         playerId: PlayerId; resources: Partial<ResourceHand> }
   | { type: 'BUILD_SETTLEMENT';    vertexId: VertexId }
   | { type: 'BUILD_CITY';          vertexId: VertexId }
+  | { type: 'BUILD_WONDER';        wonderId: string } // 航海者 S8: 不思議のレベルを1段建設（必要ならクレーム）
+  | { type: 'ATTACK_FORTRESS' }                       // 航海者 S7: 隣接する自分の要塞をラホ1つ分攻撃
   | { type: 'BUY_DEV_CARD' }
   | { type: 'PLAY_KNIGHT' }
   | { type: 'PLAY_ROAD_BUILDING' }

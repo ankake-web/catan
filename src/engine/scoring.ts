@@ -28,6 +28,8 @@ export function calcVP(state: GameState, playerId: PlayerId): number {
   if (player.hasLargestArmy) vp += VP_TABLE.largestArmy;
   vp += player.devCards.filter(c => c.type === 'victory_point').length * VP_TABLE.victoryPoint;
   vp += islandBonusVP(state, playerId);
+  vp += (state.tokenVp ?? {})[playerId] ?? 0; // 航海者 S5: 海辺VPトークン（各+1・公開）
+  vp += Math.floor(((state.cloth ?? {})[playerId] ?? 0) / 2); // 航海者 S6: 織物2枚=1VP（公開）
   vp += player.defenderVP ?? 0; // 騎士と商人: 蛮族撃退の守護者VP
   vp += ckProgressVP(state, playerId); // 進歩カード(印刷/立憲)＋商人コマ
 
@@ -50,9 +52,10 @@ function buildingVp(b: { type: 'settlement' | 'city'; metropolis?: boolean }): n
 
 /** 航海者: このプレイヤーが獲得した新島入植ボーナスの合計VP（公開情報）。基本ゲームは常に0。 */
 function islandBonusVP(state: GameState, playerId: PlayerId): number {
+  const per = state.newIslandBonusVp ?? VP_TABLE.island;
   let n = 0;
-  for (const owner of Object.values(state.islandBonus ?? {})) {
-    if (owner === playerId) n += VP_TABLE.island;
+  for (const owners of Object.values(state.islandBonus ?? {})) {
+    if (owners.includes(playerId)) n += per;
   }
   return n;
 }
@@ -74,6 +77,8 @@ export function calcPublicVP(state: GameState, playerId: PlayerId): number {
   if (player.hasLargestArmy) vp += VP_TABLE.largestArmy;
   // 新島入植ボーナスは盤面で見える公開情報なので公開VPにも算入する。
   vp += islandBonusVP(state, playerId);
+  vp += (state.tokenVp ?? {})[playerId] ?? 0; // 航海者 S5: 海辺VPトークンも公開情報
+  vp += Math.floor(((state.cloth ?? {})[playerId] ?? 0) / 2); // 航海者 S6: 織物2枚=1VPも公開
   vp += player.defenderVP ?? 0; // 守護者VPも公開情報
   vp += ckProgressVP(state, playerId); // 進歩カード恒久VP・商人コマも公開
 
@@ -173,6 +178,19 @@ export function calcLongestRoad(state: GameState, playerId: PlayerId): number {
  *   D) maxLen < LONGEST_ROAD_MIN → 場外（null）。
  */
 export function updateLongestRoad(state: GameState): GameState {
+  // 航海者: 最長交易路タイルを使わないシナリオ（S6 織物 / S7 海賊の島々）では誰も保持しない。
+  // 長さ自体は表示用に保持しつつ、ボーナス保持者は常に null・全員 hasLongestRoad=false。
+  if (state.useLongestRoute === false) {
+    let ns = state;
+    for (const pid of state.playerOrder) {
+      ns = {
+        ...ns,
+        players: { ...ns.players, [pid]: { ...ns.players[pid]!, longestRoadLength: calcLongestRoad(state, pid as PlayerId), hasLongestRoad: false } },
+      };
+    }
+    return { ...ns, longestRoadHolder: null };
+  }
+
   // 全プレイヤーの実際の最長道路長を計算
   const lengths: Record<string, number> = {};
   let newState = state;
@@ -288,6 +306,27 @@ export function victoryTarget(state: GameState): number {
  * 満たしていれば winner と phase を更新した GameState を返す。
  */
 export function checkVictory(state: GameState, playerId: PlayerId): GameState {
+  // 航海者 S7「海賊の島々」: 自分の要塞を制圧 かつ victoryTarget(=10)以上で勝利。
+  if (state.fortresses !== undefined) {
+    const f = state.fortresses[playerId];
+    if (f?.captured && calcVP(state, playerId) >= victoryTarget(state)) {
+      return { ...state, winner: playerId, phase: 'GAME_OVER' };
+    }
+    return state;
+  }
+  // 航海者 S8「カタンの七不思議」: 不思議完成（Lv4）or 10VP以上かつ単独で最高レベル。
+  if (state.wonderLevel !== undefined) {
+    const myLevel = state.wonderLevel[playerId] ?? 0;
+    if (myLevel >= 4) return { ...state, winner: playerId, phase: 'GAME_OVER' };
+    if (calcVP(state, playerId) >= victoryTarget(state)) {
+      const maxOther = state.playerOrder
+        .filter(p => p !== playerId)
+        .reduce((m, p) => Math.max(m, state.wonderLevel![p] ?? 0), 0);
+      if (myLevel > maxOther) return { ...state, winner: playerId, phase: 'GAME_OVER' };
+    }
+    return state;
+  }
+
   const vp = calcVP(state, playerId);
   if (vp < victoryTarget(state)) return state;
 

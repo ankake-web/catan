@@ -5,7 +5,7 @@ import { createRng } from '../src/engine/setup';
 import { applyAction } from '../src/engine/game';
 import { canMoveShip, isShipMovable } from '../src/engine/actions';
 import { nearestMoveShipEdgeId } from '../src/renderer/events';
-import { isSeaEdge, isLandVertex, isLandEdge } from '../src/engine/board';
+import { isSeaEdge, isLandVertex, isLandEdge, edgeTileIds } from '../src/engine/board';
 import { makeHand } from '../src/constants';
 import type { GameState, EdgeId, VertexId } from '../src/types';
 
@@ -114,6 +114,74 @@ describe('航海者: 船の移動（航海・Phase 4）', () => {
     expect(nearestMoveShipEdgeId(s, 'player1', null, p1.x, p1.y)).toBe(e1); // 動かせる船
     const p2 = mid(e2);
     expect(nearestMoveShipEdgeId(s, 'player1', e1, p2.x, p2.y)).toBe(e2); // 移動先
+  });
+});
+
+describe('航海者: 海賊のいる海ヘクスの辺へ/から船は移動できない（A2/D1 回帰）', () => {
+  it('海賊が移動先の辺に面していると canMoveShip=false（移動先封鎖）', () => {
+    const { s, e1, e2 } = setupMovableShip();
+    expect(canMoveShip(s, 'player1', e1, e2)).toBe(true); // 海賊不在なら可
+    const toTile = edgeTileIds(s.edges[e2]!, s.vertices).find(t => s.tiles[t]?.type === 'sea')!;
+    const blocked: GameState = { ...s, piratePosition: toTile };
+    expect(canMoveShip(blocked, 'player1', e1, e2)).toBe(false);
+    expect(() => applyAction(blocked, { type: 'MOVE_SHIP', fromEdgeId: e1, toEdgeId: e2 })).toThrow();
+  });
+
+  it('海賊が移動元の辺に面していると canMoveShip=false（封鎖された船は逃がせない）', () => {
+    const { s, e1, e2 } = setupMovableShip();
+    const fromTile = edgeTileIds(s.edges[e1]!, s.vertices).find(t => s.tiles[t]?.type === 'sea')!;
+    const blocked: GameState = { ...s, piratePosition: fromTile };
+    expect(canMoveShip(blocked, 'player1', e1, e2)).toBe(false);
+  });
+});
+
+describe('航海者: 自分の道は船の開放端を塞がない（A3 回帰・道↔船は建物経由でのみ連結）', () => {
+  it('開放端 farV に自分の道が隣接していても、その船は移動できる', () => {
+    const g = base();
+    let found = false;
+    for (const e of Object.values(g.edges)) {
+      if (!isSeaEdge(e, g.vertices, g.tiles)) continue;
+      const [a, b] = e.vertexIds;
+      const va = g.vertices[a]!, vb = g.vertices[b]!;
+      if (!isLandVertex(va, g.tiles) || !isLandVertex(vb, g.tiles)) continue; // 沿岸辺=両端陸
+      // farV(=b) に置ける land 辺（道）と、移動先となる別の空き海辺（a 側に錨）を確保。
+      const roadEdge = vb.adjacentEdgeIds.find(eid =>
+        eid !== e.id && isLandEdge(g.edges[eid]!, g.vertices, g.tiles) && !g.edges[eid]!.road && !g.edges[eid]!.ship);
+      const toSea = va.adjacentEdgeIds.find(eid =>
+        eid !== e.id && isSeaEdge(g.edges[eid]!, g.vertices, g.tiles) && !g.edges[eid]!.ship && !g.edges[eid]!.road);
+      if (!roadEdge || !toSea) continue;
+      const s: GameState = {
+        ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null, currentPlayerIndex: 0, diceRolledThisTurn: true,
+        vertices: { ...g.vertices, [a]: { ...va, building: { type: 'settlement', playerId: 'player1' } } },
+        edges: {
+          ...g.edges,
+          [e.id]: { ...e, ship: { playerId: 'player1' } },
+          [roadEdge]: { ...g.edges[roadEdge]!, road: { playerId: 'player1' } },
+        },
+      };
+      // b は建物も他の船も無い → 道があっても船の開放端のまま → e は toSea へ移動できる。
+      expect(canMoveShip(s, 'player1', e.id, toSea)).toBe(true);
+      found = true;
+      break;
+    }
+    expect(found).toBe(true);
+  });
+});
+
+describe('航海者: 街道建設カードで船を無料配置できる（A1 回帰・道2/船2/道1+船1）', () => {
+  it('roadBuildingRoadsRemaining>0 のとき資源0でも BUILD_SHIP でき、残数が減りコマも減る', () => {
+    const { s, e2 } = setupMovableShip();
+    const card: GameState = {
+      ...s,
+      roadBuildingRoadsRemaining: 2,
+      players: { ...s.players, player1: { ...s.players.player1!, hand: makeHand() } }, // 資源なし
+    };
+    const before = card.players.player1!.remainingShips ?? 0;
+    const next = applyAction(card, { type: 'BUILD_SHIP', edgeId: e2 });
+    expect(next.edges[e2]!.ship?.playerId).toBe('player1');
+    expect(next.roadBuildingRoadsRemaining).toBe(1);                 // 1本消費
+    expect(next.players.player1!.hand).toEqual(makeHand());          // 資源は減らない（無料）
+    expect(next.players.player1!.remainingShips).toBe(before - 1);   // コマは減る
   });
 });
 

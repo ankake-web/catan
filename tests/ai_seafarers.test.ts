@@ -77,7 +77,7 @@ describe('AI 航海者: 海峡を渡る船の建設（Phase 5・基本AI）', ()
       const v = s.vertices[action.vertexId]!;
       expect(v.adjacentTileIds.some(t => repOf[t] === NEW_REP)).toBe(true);
       const next = applyAction(s, action);
-      expect(next.islandBonus?.[NEW_REP]).toBe('player1');
+      expect(next.islandBonus?.[NEW_REP]).toContain('player1');
     }
   });
 });

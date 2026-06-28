@@ -12,6 +12,8 @@ import {
 } from './citiesKnights';
 import { isSeaEdge, isLandVertex, isDistanceRuleOk } from './board';
 import { isUnclaimedNewIslandVertex } from './islands';
+import { bestWonderAction } from './wonders';
+import { canAttackFortress, bestFortressShip } from './pirateIslands';
 import { canBankTrade, getEffectiveTradeRate } from './trade';
 import { calcVP, victoryTarget, calcLongestRoad } from './scoring';
 import { applyAction } from './game';
@@ -805,6 +807,21 @@ function chooseTradeBuildAction(state: GameState, pid: PlayerId, skipPlayerTrade
   }
 
   const difficulty = getDifficulty(state, pid);
+
+  // 航海者 S8 七不思議: 建設可能なら不思議を最優先（クレーム→レベル建設で完成＝勝利へ直行）。
+  // 要件未達のうちは bestWonderAction が null を返すため、通常の都市/開拓地建設で要件(2都市/6VP等)を満たす。
+  if (state.wonderLevel !== undefined && difficulty !== 'weak') {
+    const w = bestWonderAction(state, pid);
+    if (w) return w;
+  }
+
+  // 航海者 S7 海賊の島々: 自色の要塞攻略を優先（隣接で攻撃→未到達なら船を延ばす）。奪取後は通常建設で10点へ。
+  if (state.fortresses !== undefined && difficulty !== 'weak') {
+    if (canAttackFortress(state, pid)) return { type: 'ATTACK_FORTRESS' };
+    const ship = bestFortressShip(state, pid);
+    if (ship) return { type: 'BUILD_SHIP', edgeId: ship };
+  }
+
   if (difficulty === 'weak') return chooseTradeBuildWeak(state, pid, rng);
   if (difficulty === 'elite') return chooseTradeBuildElite(state, pid, skipPlayerTrade, rng);
   if (difficulty === 'strong') return chooseTradeBuildStrong(state, pid, skipPlayerTrade, rng);

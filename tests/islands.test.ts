@@ -90,7 +90,7 @@ describe('newIslandBonusRep: 新島への最初の入植判定', () => {
     expect(newIslandBonusRep(s, v)).toBe(NEW_REP);
   });
 
-  it('新島に既に他の建物があれば（2個目）null（ボーナスは初回のみ）', () => {
+  it('新島に既に他人の建物があっても、別プレイヤーの初入植は新島の代表IDを返す（公式: 他人が先でも各自獲得可）', () => {
     const base = seafarers();
     const v1 = vertexOnIsland(base, NEW_REP);
     const v2 = vertexOnIsland(base, NEW_REP, new Set([v1]));
@@ -102,7 +102,8 @@ describe('newIslandBonusRep: 新島への最初の入植判定', () => {
         [v2]: { ...base.vertices[v2]!, building: { type: 'settlement', playerId: 'player2' } },
       },
     };
-    expect(newIslandBonusRep(s, v2)).toBeNull();
+    // 同定は島単位（本島以外の陸島）。プレイヤーごとの重複排除は呼び出し側(islandBonus)の責務。
+    expect(newIslandBonusRep(s, v2)).toBe(NEW_REP);
   });
 
   it('本島に既存建物（セットアップ相当）があれば、本島へのMAIN入植はボーナス対象外', () => {
@@ -118,6 +119,19 @@ describe('newIslandBonusRep: 新島への最初の入植判定', () => {
       },
     };
     expect(newIslandBonusRep(s, h2)).toBeNull();
+  });
+
+  it('setupAnywhere: プレイヤー別ホーム島以外への初入植のみ対象（自分の出発島は対象外）', () => {
+    const base = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newworld');
+    const reps = [...new Set(Object.values(computeIslandReps(base.tiles)))];
+    expect(reps.length).toBeGreaterThanOrEqual(2);
+    const [repA, repB] = reps as string[];
+    const vA = vertexOnIsland(base, repA!);
+    const vB = vertexOnIsland(base, repB!);
+    // player1 のホーム島を repA とする（初期配置で記録される想定）。
+    const s: GameState = { ...base, playerHomeIslands: { player1: [repA!] } };
+    expect(newIslandBonusRep(s, vA!, 'player1')).toBeNull();   // 自分のホーム島は対象外
+    expect(newIslandBonusRep(s, vB!, 'player1')).toBe(repB);   // ホーム外への初入植は対象
   });
 
   it('基本ゲームでは常に null（海タイルが無いため新島ボーナスは発生しない）', () => {
@@ -154,10 +168,35 @@ describe('island VP: applyAction(BUILD_SETTLEMENT) で新島入植に +2VP', () 
 
     const next = applyAction(s, { type: 'BUILD_SETTLEMENT', vertexId: v });
 
-    expect(next.islandBonus).toEqual({ [NEW_REP]: 'player1' });
+    expect(next.islandBonus).toEqual({ [NEW_REP]: ['player1'] });
     // 開拓地1 + 島ボーナス2 = 3（公開・内部とも）
     expect(calcVP(next, 'player1')).toBe(3);
     expect(calcPublicVP(next, 'player1')).toBe(3);
     expect(calcVP(next, 'player2')).toBe(0);
+  });
+
+  it('公式: 同じ新島へ2人目が初入植しても、その2人目にも +2VP が付く（島ごと・他人が先でも可）', () => {
+    const base = seafarers();
+    const v = vertexOnIsland(base, NEW_REP);
+    const edgeId = base.vertices[v]!.adjacentEdgeIds[0]!;
+
+    const s: GameState = {
+      ...base,
+      phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null,
+      currentPlayerIndex: 1, // player2 の手番
+      diceRolledThisTurn: true,
+      // 既に player1 がこの新島でボーナス獲得済み（盤面の建物有無に依らず重複排除を確認）
+      islandBonus: { [NEW_REP]: ['player1'] },
+      edges: { ...base.edges, [edgeId]: { ...base.edges[edgeId]!, ship: { playerId: 'player2' } } },
+      players: {
+        ...base.players,
+        player2: { ...base.players.player2!, hand: { wood: 1, brick: 1, wool: 1, grain: 1, ore: 0 } },
+      },
+    };
+
+    const next = applyAction(s, { type: 'BUILD_SETTLEMENT', vertexId: v });
+    expect(next.islandBonus?.[NEW_REP]).toEqual(['player1', 'player2']);
+    // player2: 開拓地1 + 島ボーナス2 = 3
+    expect(calcVP(next, 'player2')).toBe(3);
   });
 });
