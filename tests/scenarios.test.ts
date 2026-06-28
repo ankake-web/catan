@@ -120,8 +120,9 @@ describe('scenarios: 航海者「群島」', () => {
   it('海岸線に港が配置され、沿岸の陸頂点に harborType が付く（両航海者マップ）', () => {
     for (const id of ['seafarers_newshores', 'seafarers_archipelago'] as const) {
       const st = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), id);
-      expect(st.harbors.length).toBeGreaterThan(0);
-      expect(st.harbors.length).toBeLessThanOrEqual(4);
+      // [D1] 港は公式に寄せて複数配置（旧実装の4個固定をやめた）。
+      expect(st.harbors.length).toBeGreaterThanOrEqual(5);
+      expect(st.harbors.length).toBeLessThanOrEqual(9);
       for (const h of st.harbors) {
         for (const v of h.vertexIds) {
           expect(st.vertices[v]?.harborType).toBe(h.type);
@@ -131,6 +132,18 @@ describe('scenarios: 航海者「群島」', () => {
         }
       }
     }
+  });
+
+  it('[D1] 大きな航海者盤では5種の専門港(2:1)と3:1港の両方が配置される', () => {
+    const st = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
+    const types = st.harbors.map(h => h.type);
+    const specific = new Set(types.filter(t => t !== 'generic'));
+    // 旧実装は木/レンガの2:1のみだった。5資源すべての2:1港が出ること。
+    for (const r of ['wood', 'brick', 'wool', 'grain', 'ore']) {
+      expect(specific.has(r as never)).toBe(true);
+    }
+    // 3:1（generic）港も少なくとも1つ。
+    expect(types.includes('generic')).toBe(true);
   });
 
   it('新島A・Bは本島と隣接しない（航海でのみ到達）', () => {

@@ -114,8 +114,11 @@ const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; r
 // 海岸線（陸1・海1 に面する辺）に港を決定論的に配置する。
 // 各辺の2頂点は陸の沿岸頂点なので、そこに港を持たせる。港が密集しないよう
 // 使用頂点とその隣接頂点を避けながら最大 max 個まで、種別をプールから順に割り当てる。
-const HARBOR_POOL: HarborType[] = ['generic', 'wood', 'brick', 'generic', 'wool', 'grain', 'ore'];
-function coastalHarbors(geo: BoardGeometry, tiles: Record<TileId, Tile>, max = 4): Harbor[] {
+// プールは公式航海者の港構成（2:1×各資源5＋3:1×複数）に寄せる。5種の専門港(2:1)を先頭に
+// 配置し、海岸線が短い盤でも全資源の2:1港が出るようにする（旧実装は max=4 で羊毛/麦/鉱の
+// 2:1港が生成されない不具合があった。docs/AUDIT_SEAFARERS.md [D1]）。
+const HARBOR_POOL: HarborType[] = ['generic', 'wood', 'brick', 'wool', 'grain', 'ore', 'generic', 'generic', 'generic'];
+function coastalHarbors(geo: BoardGeometry, tiles: Record<TileId, Tile>, max = 9): Harbor[] {
   const coastEdges = Object.values(geo.edges)
     .filter(e => {
       const tids = edgeTileIds(e, geo.vertices);
