@@ -13,7 +13,7 @@ import {
 import { isSeaEdge, isLandVertex, isDistanceRuleOk } from './board';
 import { isUnclaimedNewIslandVertex } from './islands';
 import { bestWonderAction } from './wonders';
-import { canAttackFortress, bestFortressShip } from './pirateIslands';
+import { canAttackFortress, bestFortressShip, canPlayWarship } from './pirateIslands';
 import { canBankTrade, getEffectiveTradeRate } from './trade';
 import { calcVP, victoryTarget, calcLongestRoad } from './scoring';
 import { applyAction } from './game';
@@ -556,12 +556,18 @@ function choosePreRollAction(state: GameState, pid: PlayerId): Action {
   }
 
   // 1ターン1枚制限を尊重（devCardPlayedThisTurn を見ないと2枚目で例外→停止する）。
-  // S7（useRobber=false）は騎士が使用不可なので使わない。
-  if (difficulty !== 'weak' && !state.devCardPlayedThisTurn && state.useRobber !== false) {
+  if (difficulty !== 'weak' && !state.devCardPlayedThisTurn) {
     const knight = player.devCards.find(
       c => c.type === 'knight' && c.purchasedOnTurn < state.globalTurnNumber,
     );
-    if (knight) return { type: 'PLAY_KNIGHT' };
+    if (knight) {
+      if (state.fortresses !== undefined) {
+        // S7 海賊の島々: 騎士＝軍船化。軍船化できる通常船がある時だけ使う（艦隊戦の戦力強化）。
+        if (canPlayWarship(state, pid)) return { type: 'PLAY_KNIGHT' };
+      } else if (state.useRobber !== false) {
+        return { type: 'PLAY_KNIGHT' };
+      }
+    }
   }
 
   return { type: 'ROLL_DICE' };

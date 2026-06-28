@@ -567,9 +567,8 @@ const seafarersWonders: Scenario = {
 // ---- 公式S7「海賊の島々」: 本島(資源豊富)＋各自の海賊要塞(小島)。本島から船で要塞へ航路を延ばし
 //   3回攻撃して奪取（=自分の開拓地に）。海賊艦隊が中央の海を巡回し隣接建物から略奪。
 //   勝利: 自分の要塞を制圧 かつ 10点以上。 ----
-// ※デジタル版簡略: 公式の軍船による艦隊戦は省略（艦隊は確定的な脅威）。盗賊/最長交易路/最大騎士力は
-//   現状そのまま使用（公式は不使用だが、軍船未実装の本盤では外すとAIが要塞制圧＋10点に到達できないため）。
-//   ルール基盤(useRobber/useLargestArmy/useLongestRoute)は実装済みで、盤・軍船の整備後に有効化可能。
+// 公式準拠: 盗賊・最長交易路・最大騎士力は不使用（rules）。7は手札破棄のみ。騎士＝軍船化。
+//   海賊艦隊との戦闘は軍船数で解決（pirateIslands.moveFleet）。要塞奪取後はその頂点が自分の開拓地。
 // 要塞タイル（1タイルの小島・互いに海で隔離）。番号は奪取後の産出用。
 const PIRATE_FORTRESS_TILES: Record<string, number> = { '1,-2': 4, '1,2': 5, '3,-2': 9, '3,0': 10 };
 const PIRATE_FLEET_PATH: string[] = ['0,-2', '0,-1', '0,0', '0,1', '0,2']; // 中央の海を縦に巡回
@@ -594,7 +593,7 @@ const seafarersPirateIslands: Scenario = {
   coords: BIG_COORDS,
   build: buildPirateIslands(BIG_MAIN_ISLAND, PIRATE_FORTRESS_TILES, PIRATE_FLEET_PATH),
   victoryTarget: 10,
-  rules: { pirateIslands: true, newIslandBonusVp: 0 },
+  rules: { pirateIslands: true, newIslandBonusVp: 0, useRobber: false, useLongestRoute: false, useLargestArmy: false },
 };
 const seafarersGoldenIsles: Scenario = {
   id: 'seafarers_goldenisles',

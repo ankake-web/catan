@@ -32,7 +32,7 @@ import { revealFogAround } from './explore';
 import { collectEdgeToken, placeHeldHarborAt } from './seaTokens';
 import { connectVillagesAround, produceCloth, checkClothEnd } from './cloth';
 import { canBuildWonder, buildWonder } from './wonders';
-import { canAttackFortress, attackFortress, moveFleet } from './pirateIslands';
+import { canAttackFortress, attackFortress, moveFleet, playWarship } from './pirateIslands';
 
 // ============================================================
 // 内部ユーティリティ
@@ -644,9 +644,6 @@ export function applyAction(
       // 「7の捨て札待ちで騎士→ROBBERへ遷移」で全員の捨て札を踏み倒せてしまう（不正クライアント対策）。
       if (state.phase !== 'MAIN' || (state.turnPhase !== 'PRE_ROLL' && state.turnPhase !== 'TRADE_BUILD'))
         throw new Error('PLAY_KNIGHT: must be in MAIN PRE_ROLL or TRADE_BUILD phase');
-      // S7 海賊の島々（useRobber=false）: 盗賊不使用のため騎士は盗賊を動かせない。
-      // 公式では騎士＝軍船化だが本デジタル版では軍船戦闘を未実装のため、騎士は使用不可とする。
-      if (state.useRobber === false) throw new Error('PLAY_KNIGHT: knights are disabled in this scenario');
       if (state.devCardPlayedThisTurn) throw new Error('PLAY_KNIGHT: already played a dev card this turn');
       const player = state.players[pid]!;
       const cardIdx = player.devCards.findIndex(
@@ -657,6 +654,22 @@ export function applyAction(
       const newCards = player.devCards.filter((_, i) => i !== cardIdx);
       const usedCard = player.devCards[cardIdx]!;
 
+      // S7 海賊の島々: 騎士＝軍船化。起点に最も近い通常船を1隻軍船化する（盗賊・最大騎士力は無効）。
+      if (state.fortresses !== undefined) {
+        const warshipped = playWarship(state, pid);
+        if (!warshipped) throw new Error('PLAY_KNIGHT: no normal ship to convert into a warship');
+        return {
+          ...warshipped,
+          devCardPlayedThisTurn: true,
+          devDiscardPile: [...state.devDiscardPile, usedCard],
+          players: { ...warshipped.players, [pid]: { ...warshipped.players[pid]!, devCards: newCards } },
+        };
+      }
+
+      // それ以外で盗賊不使用のシナリオでは騎士は使用不可（現状 S7 以外に該当なし・防御的）。
+      if (state.useRobber === false) throw new Error('PLAY_KNIGHT: knights are disabled in this scenario');
+
+      // 通常（盗賊版）: 「盗賊か海賊を動かす」フェーズへ。最大騎士力を再計算。
       let next: GameState = {
         ...state,
         devCardPlayedThisTurn: true,

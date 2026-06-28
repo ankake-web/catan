@@ -5,10 +5,11 @@ import { createRng } from '../src/engine/setup';
 import { applyAction } from '../src/engine/game';
 import { chooseAction } from '../src/engine/ai';
 import { findPendingDiscarder } from '../src/engine/robber';
-import { canAttackFortress, attackFortress, moveFleet, bestFortressShip } from '../src/engine/pirateIslands';
+import { canAttackFortress, attackFortress, moveFleet, bestFortressShip, countWarships } from '../src/engine/pirateIslands';
 import { checkVictory } from '../src/engine/scoring';
-import { makeHand } from '../src/constants';
-import type { GameState } from '../src/types';
+import { isSeaEdge, isLandVertex } from '../src/engine/board';
+import { makeHand, RESOURCE_TYPES } from '../src/constants';
+import type { GameState, EdgeId } from '../src/types';
 
 const SPECS: PlayerSpec[] = [
   { id: 'player1', name: 'A', color: 'red',  type: 'human' },
@@ -120,4 +121,88 @@ describe('S7 海賊の島々: 複数seedでソフトロックせず完走する'
       expect(s.winner).not.toBeNull();
     });
   }
+});
+
+describe('S7 海賊の島々: 軍船と艦隊戦（公式準拠）', () => {
+  const totalHand = (s: GameState, pid: string) =>
+    RESOURCE_TYPES.reduce((a, r) => a + s.players[pid]!.hand[r], 0);
+
+  // player1 の沿岸建物＋隣接海辺に通常船を1隻置き、騎士カードを持たせた MAIN/TRADE_BUILD 状態。
+  function s7WithShip(): { s: GameState; shipEdge: EdgeId } {
+    const g = pirates();
+    const coastV = Object.values(g.vertices).find(v =>
+      isLandVertex(v, g.tiles) && v.adjacentEdgeIds.some(eid => isSeaEdge(g.edges[eid]!, g.vertices, g.tiles)))!.id;
+    const shipEdge = g.vertices[coastV]!.adjacentEdgeIds.find(eid => isSeaEdge(g.edges[eid]!, g.vertices, g.tiles))! as EdgeId;
+    const s: GameState = {
+      ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null, diceRolledThisTurn: true,
+      currentPlayerIndex: 0, globalTurnNumber: 5, devCardPlayedThisTurn: false,
+      vertices: { ...g.vertices, [coastV]: { ...g.vertices[coastV]!, building: { type: 'settlement', playerId: 'player1' } } },
+      edges: { ...g.edges, [shipEdge]: { ...g.edges[shipEdge]!, ship: { playerId: 'player1' } } },
+      players: { ...g.players, player1: { ...g.players.player1!, devCards: [{ id: 'k', type: 'knight', purchasedOnTurn: 0 }] } },
+    };
+    return { s, shipEdge };
+  }
+
+  // 海賊艦隊が player1 の建物に隣接停止する1マス経路の状態。
+  function fleetState(building: 'settlement' | 'city'): { s: GameState } {
+    const g = pirates();
+    const tile = g.pirateFleet!.path[0]!;
+    const v = (g.tileToVertices[tile] ?? [])[0]!;
+    const s: GameState = {
+      ...g, pirateFleet: { path: [tile], pos: 0 },
+      vertices: { ...g.vertices, [v]: { ...g.vertices[v]!, building: { type: building, playerId: 'player1' } } },
+    };
+    return { s };
+  }
+  function withWarships(s: GameState, n: number): GameState {
+    const ids = Object.keys(s.edges).slice(0, n);
+    const edges = { ...s.edges };
+    for (const e of ids) edges[e] = { ...s.edges[e]!, ship: { playerId: 'player1', warship: true } };
+    return { ...s, edges };
+  }
+
+  it('騎士で起点に最も近い通常船が軍船化される（盗賊フェーズに入らない）', () => {
+    const { s, shipEdge } = s7WithShip();
+    expect(countWarships(s, 'player1')).toBe(0);
+    const next = applyAction(s, { type: 'PLAY_KNIGHT' });
+    expect(next.edges[shipEdge]!.ship!.warship).toBe(true);
+    expect(countWarships(next, 'player1')).toBe(1);
+    expect(next.turnPhase).toBe('TRADE_BUILD'); // ROBBER に入らない
+    expect(next.largestArmyHolder).toBeNull(); // 最大騎士力は無効
+    expect(next.devCardPlayedThisTurn).toBe(true);
+  });
+
+  it('軍船化できる通常船が無ければ騎士は使えない（例外）', () => {
+    const g = pirates();
+    const s: GameState = {
+      ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null, diceRolledThisTurn: true,
+      currentPlayerIndex: 0, globalTurnNumber: 5, devCardPlayedThisTurn: false,
+      players: { ...g.players, player1: { ...g.players.player1!, devCards: [{ id: 'k', type: 'knight', purchasedOnTurn: 0 }] } },
+    };
+    expect(() => applyAction(s, { type: 'PLAY_KNIGHT' })).toThrow();
+  });
+
+  it('艦隊戦: 海賊が強い→ランダム1枚＋都市ごと1枚を破棄', () => {
+    const { s: base } = fleetState('city');
+    const s: GameState = { ...base, players: { ...base.players, player1: { ...base.players.player1!, hand: makeHand({ wood: 3, brick: 3 }) } } };
+    // 軍船0 vs 海賊強さ2 → 海賊勝ち。都市1つ → 1+1=2枚破棄。
+    const next = moveFleet(s, 2, () => 0);
+    expect(totalHand(next, 'player1')).toBe(6 - 2);
+  });
+
+  it('艦隊戦: 自分が強い→任意資源1枚を獲得', () => {
+    const { s: base } = fleetState('settlement');
+    const s = withWarships({ ...base, players: { ...base.players, player1: { ...base.players.player1!, hand: makeHand({ wood: 1 }) } } }, 2);
+    // 軍船2 vs 海賊強さ1 → 自分勝ち → +1枚。
+    const next = moveFleet(s, 1, () => 0);
+    expect(totalHand(next, 'player1')).toBe(2);
+  });
+
+  it('艦隊戦: 同点→何も起きない', () => {
+    const { s: base } = fleetState('settlement');
+    const s = withWarships({ ...base, players: { ...base.players, player1: { ...base.players.player1!, hand: makeHand({ wood: 2 }) } } }, 2);
+    // 軍船2 vs 海賊強さ2 → 同点 → 不変。
+    const next = moveFleet(s, 2, () => 0);
+    expect(totalHand(next, 'player1')).toBe(2);
+  });
 });

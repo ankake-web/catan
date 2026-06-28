@@ -141,6 +141,8 @@ export interface Road {
 // 航海者拡張: 船（海上の道）。
 export interface Ship {
   readonly playerId: PlayerId;
+  /** 航海者 S7 海賊の島々: 騎士カードで軍船化された船（艦隊戦の戦力＝軍船数）。通常船は未設定/false。 */
+  readonly warship?: boolean;
 }
 
 // ---- 港 ----
