@@ -16,7 +16,7 @@ import {
   canBuildCity, buildCity,
   hasEnoughResources,
 } from './actions';
-import { moveRobber, movePirate, discardResources, stealResource, getRobbablePlayerIds, getPirateRobbablePlayerIds, discardCount, robbableCardCount, findPendingDiscarder } from './robber';
+import { moveRobber, movePirate, discardResources, stealResource, stealResourceOrCloth, getRobbablePlayerIds, getPirateRobbablePlayerIds, discardCount, robbableCardCount, pirateRobbableCount, findPendingDiscarder } from './robber';
 import {
   isCk, applyEventDie, distributeCkProduction,
   canBuildKnight, buildKnight, canActivateKnight, activateKnight, canUpgradeKnight, upgradeKnight,
@@ -374,17 +374,28 @@ export function applyAction(
 
       let next = movePirate(state, tileId);
 
+      // S6 カタンの織物: 海賊移動時は「資源か織物」を強奪（公式）。村のある盤でのみ織物を含める。
+      const stealsCloth = !!state.villages;
+      const countFn = stealsCloth ? pirateRobbableCount : robbableCardCount;
       // 強奪は必須（盗賊と同様）: 海賊タイルに隣接して船を持ち手札のある相手がいるなら必ず盗む。
-      const pirateRobbable = getPirateRobbablePlayerIds(next, tileId, pid).filter(p => robbableCardCount(next, p) > 0);
+      const pirateRobbable = getPirateRobbablePlayerIds(next, tileId, pid).filter(p => countFn(next, p) > 0);
       if (stealFromPlayerId != null) {
         // 盗む相手は「海賊タイルに隣接する船を持つ相手」に限る。
         if (!getPirateRobbablePlayerIds(next, tileId, pid).includes(stealFromPlayerId))
           throw new Error('MOVE_PIRATE: steal target has no ship adjacent to the pirate tile');
         if (pirateRobbable.length > 0 && !pirateRobbable.includes(stealFromPlayerId))
           throw new Error('MOVE_PIRATE: must steal from an adjacent ship owner who holds cards');
-        next = stealResource(next, pid, stealFromPlayerId, rng);
+        next = stealsCloth
+          ? stealResourceOrCloth(next, pid, stealFromPlayerId, rng)
+          : stealResource(next, pid, stealFromPlayerId, rng);
       } else if (pirateRobbable.length > 0) {
         throw new Error('MOVE_PIRATE: must steal from an adjacent ship owner who holds cards');
+      }
+
+      // 織物強奪は VP を動かしうる（2枚=1VP）ため勝利判定（資源のみなら no-op 相当）。
+      if (stealsCloth) {
+        next = checkVictory(next, pid);
+        if (next.phase === 'GAME_OVER') return next;
       }
 
       const nextPhase = state.diceRolledThisTurn ? 'TRADE_BUILD' : 'PRE_ROLL';

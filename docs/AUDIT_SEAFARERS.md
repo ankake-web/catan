@@ -159,7 +159,7 @@
 | 最長交易路タイル不使用 | ✅ | `useLongestRoute:false` scenarios.ts:520→scoring.ts:183-192 |
 | **開始時 開拓地3軒（3軒目で資源）** | ❌ | **未実装**。advanceSetup は2軒固定（game.ts:1003-1047）で `startingSettlements` を読まない。S6 も `startingSettlements:3` を未設定（scenarios.ts:520）。コメントで簡略明記（scenarios.ts:494） |
 | 村航路は closed（移動・延長不可） | ❌ | canMoveShip は `isOpenShipEnd` のみ（actions.ts:180-181）。村頂点に建物が無く開放端扱い→村接続後の船を動かせる恐れ |
-| 海賊=最初の村接続まで凍結／移動時 資源or織物強奪 | ❌ | 凍結ガード無し（createState.ts:52-53で海賊配置）／強奪は資源のみ |
+| 海賊=最初の村接続まで凍結／移動時 資源or織物強奪 | ✅ | §6[D6]で実装: MOVE_PIRATE 凍結＋強奪を「資源か織物」の無作為プールに（`stealResourceOrCloth`/`pirateRobbableCount`） |
 | フック接続 | ✅ | game.ts:181/198/433/436/466/469 |
 
 ### S7 海賊の島々（seafarers_pirateislands, scenarios.ts:579）
@@ -212,7 +212,7 @@
 - **[D3] S6「初期配置3軒」未実装**（advanceSetup 2軒固定 game.ts:1003-1047）。公式は2軒は資源なし・3軒目で資源。要: advanceSetup を `startingSettlements` 対応に。
 - **[D4] 死フラグ `useRobber` / `startingSettlements`**（types.ts:281,285／createState.ts:132,134 にあるが消費コード皆無）。配線済みなのに効かない＝[D2][D3]の温床。消費実装するか、誤解を招くので一旦削るか判断要。
 - **[D5] S7 軍船・戦闘解決** → **✅実装済み（§5参照）**。騎士＝軍船化、艦隊戦は軍船数 vs 海賊の目で解決。
-- **[D6] S6 海賊「最初の村接続まで凍結」「織物強奪」未実装**（createState.ts:52-53で海賊配置・凍結ガード無し／強奪は資源のみ）。
+- **[D6] S6 海賊「最初の村接続まで凍結」「織物強奪」** → **✅実装済み（§6）**。凍結ガード＋強奪を「資源か織物」の無作為プールに。
 - **[N1] S3 霧の数字が固定・公式はランダム**（FOG_HIDDEN scenarios.ts:388-404、explore.ts:31-32）。陸公開時の地形資源1枚付与は公式準拠。
 - **[N2] S4 が「大砂漠で本島分断」でなく別島型の簡略**（scenarios.ts:288-301）。砂漠枚数も公式3に対し2。
 - **[N3] New World に制約付きランダム生成が未実装**（固定マップ scenarios.ts:352-362）。
@@ -264,7 +264,7 @@
 | S5 金欠落・トークン半減 | ✅修正 | 公式『金2』が無かった→海域に金小島2を追加。海上トークンを VP4/dev2→**VP8/dev4**/harbor2 へ。 |
 | 赤数字(6/8)隣接・金の赤数字 | ✅修正 | 公式盤ルール「6/8非隣接・金に赤数字なし」を全13シナリオで是正。tests/board_red.test.ts で恒久ガード。 |
 | **[N3]** New World 制約付きランダム生成 | ✅実装 | 固定マップ→毎ゲーム種別/数字をランダム化（島座標固定）。赤6/8非隣接・金に赤数字なしを満たすまでリトライ。 |
-| **[D6]** S6 海賊を初回村接続まで凍結 | ✅実装 | MOVE_PIRATE を凍結。※移動時の織物強奪は共有steal経路のため簡略据え置き。 |
+| **[D6]** S6 海賊を初回村接続まで凍結＋織物強奪 | ✅実装 | MOVE_PIRATE を凍結。移動時の強奪を「資源か織物」の無作為プールに（`stealResourceOrCloth`／`pirateRobbableCount` を robber.ts に追加・game.ts/events.ts で配線）。織物=VP のため奪取後に勝利判定。tests/cloth.test.ts +3 |
 | **[D7]** S6 村航路 closed | ✅実装 | 村タイルに面する自分の船は移動不可（isVillageLockedShip）。 |
 | **[D8]** S5 港トークン間隔 | ✅実装 | 港同士1辺以上空ける。 |
 | S6 村数・S7 要塞地形 | ✅改善 | S6 村5→**8**（公式コンポ）。S7 要塞4島の地形を多様化（牧草偏り解消）・recommendedPlayers 明示。 |

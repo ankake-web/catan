@@ -5,12 +5,16 @@
 import type { GameState, Action, PlayerId, CkTrack } from '../types';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from '../engine/actions';
 import { canMoveKnight, isKnightMovable, robberAdjacentChasableVertexIds, canBuildKnight, canActivateKnight, canUpgradeKnight, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, medicineSettlements, metropolisCityChoices, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from '../engine/citiesKnights';
-import { getPirateRobbablePlayerIds, robbableCardCount } from '../engine/robber';
+import { getPirateRobbablePlayerIds, robbableCardCount, pirateRobbableCount } from '../engine/robber';
 
 // 公開情報での奪取可能枚数（LANではマスクされ handCount/commodityCount に枚数が入る。
 // 騎士と商人では商品も奪取対象なので合算する）。エンジンの判定と一致させる。
 function publicCardCount(state: GameState, p: PlayerId): number {
   return robbableCardCount(state, p);
+}
+// 海賊の奪取可能枚数（S6「カタンの織物」では織物トークンも対象）。エンジンの MOVE_PIRATE と一致させる。
+function piratePublicCardCount(state: GameState, p: PlayerId): number {
+  return pirateRobbableCount(state, p);
 }
 import type { UIPhase } from './ui';
 import type { BoardViewport } from './board';
@@ -915,8 +919,8 @@ function handleTileClick(
   // ---- 海タイル: 海賊を移動（隣接船の所有者から奪う）----
   if (tile.type === 'sea') {
     if (state.piratePosition === tileId) return; // 同じ場所へは動かせない
-    // 奪えるのは手札を持つ相手だけ（強奪は必須・0枚相手は対象外）。
-    const opponents = getPirateRobbablePlayerIds(state, tileId, pid).filter(p => publicCardCount(state, p) > 0);
+    // 奪えるのは手札（S6では織物も）を持つ相手だけ（強奪は必須・0枚相手は対象外）。
+    const opponents = getPirateRobbablePlayerIds(state, tileId, pid).filter(p => piratePublicCardCount(state, p) > 0);
     if (opponents.length <= 1) {
       dispatch({ type: 'MOVE_PIRATE', tileId, stealFromPlayerId: opponents[0] ?? null });
     } else {

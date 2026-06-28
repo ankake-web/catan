@@ -235,3 +235,56 @@ export function stealResource(
     },
   };
 }
+
+/**
+ * 海賊の強奪対象として数える札枚数。S6「カタンの織物」（村のある盤）では
+ * 公式どおり織物トークンも奪取対象に含む（移動時は資源か織物を強奪）。
+ */
+export function pirateRobbableCount(state: GameState, playerId: PlayerId): number {
+  return robbableCardCount(state, playerId) + (state.villages ? ((state.cloth ?? {})[playerId] ?? 0) : 0);
+}
+
+/**
+ * S6「カタンの織物」: 海賊の強奪で「資源1枚 or 織物1枚」を無作為に1枚奪う。
+ * 対象の資源＋織物の合計プールから等確率で1枚を選ぶ（公式: 海賊移動時は資源か織物を強奪）。
+ * 資源も織物も無ければ不変。S6 は CK ではないため商品は扱わない。
+ */
+export function stealResourceOrCloth(
+  state: GameState,
+  activePlayerId: PlayerId,
+  targetPlayerId: PlayerId,
+  rng: () => number = Math.random,
+): GameState {
+  const target = state.players[targetPlayerId];
+  if (!target) return state;
+
+  const pool: Array<{ kind: 'res'; key: ResourceType } | { kind: 'cloth' }> = [];
+  for (const r of RESOURCE_TYPES) for (let i = 0; i < target.hand[r]; i++) pool.push({ kind: 'res', key: r });
+  const clothCount = (state.cloth ?? {})[targetPlayerId] ?? 0;
+  for (let i = 0; i < clothCount; i++) pool.push({ kind: 'cloth' });
+  if (pool.length === 0) return state;
+
+  const stolen = pool[Math.floor(rng() * pool.length)]!;
+  const active = state.players[activePlayerId]!;
+  if (stolen.kind === 'res') {
+    const r = stolen.key;
+    return {
+      ...state,
+      players: {
+        ...state.players,
+        [targetPlayerId]: { ...target, hand: { ...target.hand, [r]: target.hand[r] - 1 } },
+        [activePlayerId]: { ...active, hand: { ...active.hand, [r]: active.hand[r] + 1 } },
+      },
+    };
+  }
+  // 織物を1枚奪う（2枚=1VP なので VP を動かしうる → 呼び出し側で勝利判定する）。
+  const cloth = state.cloth ?? {};
+  return {
+    ...state,
+    cloth: {
+      ...cloth,
+      [targetPlayerId]: (cloth[targetPlayerId] ?? 0) - 1,
+      [activePlayerId]: (cloth[activePlayerId] ?? 0) + 1,
+    },
+  };
+}

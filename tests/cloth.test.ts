@@ -5,6 +5,7 @@ import { createRng } from '../src/engine/setup';
 import { applyAction } from '../src/engine/game';
 import { chooseAction } from '../src/engine/ai';
 import { connectVillagesAround, produceCloth, checkClothEnd, clothVp } from '../src/engine/cloth';
+import { stealResourceOrCloth, pirateRobbableCount } from '../src/engine/robber';
 import { calcVP } from '../src/engine/scoring';
 import { canBuildSettlement, isVillageLockedShip, isShipMovable } from '../src/engine/actions';
 import { isLandVertex } from '../src/engine/board';
@@ -110,6 +111,59 @@ describe('S6 カタンの織物', () => {
     try { applyAction(connected, { type: 'MOVE_PIRATE', tileId: seaTile }); }
     catch (e) { if (String(e).includes('frozen')) frozen = true; }
     expect(frozen).toBe(false);
+  });
+
+  it('[D6] 海賊の強奪対象に織物を含む（資源0でも織物があれば対象）', () => {
+    const s0 = cloth();
+    const s: GameState = { ...s0, cloth: { player2: 2 } };
+    // 資源0・織物2 の相手は、海賊の強奪対象としてカウントされる（陸の盗賊は資源のみ）。
+    expect(pirateRobbableCount(s, 'player2')).toBe(2);
+  });
+
+  it('[D6] stealResourceOrCloth: 資源も織物も無作為プールから1枚奪う', () => {
+    const g = cloth();
+    // 織物のみ → 織物を1枚奪う（rng 不問）。
+    const onlyCloth: GameState = { ...g, cloth: { player1: 0, player2: 2 } };
+    const a = stealResourceOrCloth(onlyCloth, 'player1', 'player2', () => 0);
+    expect(a.cloth!.player2).toBe(1);
+    expect(a.cloth!.player1).toBe(1);
+    // 資源のみ → 資源を1枚奪う（織物は動かない）。
+    const onlyRes: GameState = {
+      ...g,
+      cloth: { player1: 0, player2: 0 },
+      players: { ...g.players, player2: { ...g.players.player2!, hand: { wood: 1, brick: 0, wool: 0, grain: 0, ore: 0 } } },
+    };
+    const b = stealResourceOrCloth(onlyRes, 'player1', 'player2', () => 0);
+    expect(b.players.player1!.hand.wood).toBe(g.players.player1!.hand.wood + 1);
+    expect(b.players.player2!.hand.wood).toBe(0);
+    expect((b.cloth ?? {}).player1 ?? 0).toBe(0);
+    // 札なし → 不変。
+    const empty: GameState = { ...g, cloth: { player2: 0 }, players: { ...g.players, player2: { ...g.players.player2!, hand: { wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 } } } };
+    expect(stealResourceOrCloth(empty, 'player1', 'player2', () => 0)).toBe(empty);
+  });
+
+  it('[D6] MOVE_PIRATE で織物のみ持つ相手から織物を強奪（村接続後・エンドツーエンド）', () => {
+    const g = cloth();
+    const villageId = Object.keys(g.villages!)[0]!;
+    // 海賊の移動先となる海タイルを選び、その辺に player2 の船を置く（＝強奪対象）。
+    const seaTile = Object.keys(g.tiles).find(
+      id => g.tiles[id]!.type === 'sea' && id !== g.piratePosition && (g.tileToEdges[id]?.length ?? 0) > 0,
+    )!;
+    const victimEdge = g.tileToEdges[seaTile]![0]!;
+    const base: GameState = {
+      ...g, phase: 'MAIN', turnPhase: 'ROBBER', setupSubPhase: null,
+      currentPlayerIndex: 0, diceRolledThisTurn: true,
+      villageConn: { [villageId]: ['player1'] }, // 村接続済み → 海賊の凍結は解除
+      cloth: { player1: 0, player2: 2 },          // 相手は資源0・織物2
+      edges: { ...g.edges, [victimEdge]: { ...g.edges[victimEdge]!, ship: { playerId: 'player2' } } },
+    };
+    // 強奪は必須: 対象を指定しないと（織物保有の相手がいるので）エラー。
+    expect(() => applyAction(base, { type: 'MOVE_PIRATE', tileId: seaTile })).toThrow(/must steal/);
+    // 対象指定 → 織物を1枚奪う。
+    const next = applyAction(base, { type: 'MOVE_PIRATE', tileId: seaTile, stealFromPlayerId: 'player2' });
+    expect(next.cloth!.player2).toBe(1);
+    expect(next.cloth!.player1).toBe(1);
+    expect(next.piratePosition).toBe(seaTile);
   });
 
   it('[D7] 村につないだ航路は closed（移動できない）', () => {
