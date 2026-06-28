@@ -101,7 +101,8 @@ const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; r
   '-2,2':  { type: 'pasture',  number: 3 },
   '-2,3':  { type: 'hill',     number: 6 },
   '-1,-2': { type: 'field',    number: 4 },
-  '-1,-1': { type: 'desert',   number: null, robber: true },
+  // 公式S1は砂漠なし。盗賊初期はこの牧草(数字3・非赤)に置く＝盤上のヘックス数を公式(牧草5/砂漠0)に一致。
+  '-1,-1': { type: 'pasture',  number: 3, robber: true },
   '-1,0':  { type: 'mountain', number: 2 },
   '-1,1':  { type: 'pasture',  number: 9 },
   '-1,2':  { type: 'forest',   number: 10 },
@@ -110,7 +111,7 @@ const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; r
   '1,-2':  { type: 'field',    number: 4 },
   '1,-1':  { type: 'gold',     number: 5 },  // 金（任意資源）
   '1,0':   { type: 'pasture',  number: 11 },
-  '2,-2':  { type: 'forest',   number: 9 },
+  '2,-2':  { type: 'hill',     number: 9 },  // 公式の丘4/森3に合わせ森→丘
   '2,-1':  { type: 'hill',     number: 3 },
   '3,-2':  { type: 'gold',     number: 4 },  // 金2枚目
   '3,-1':  { type: 'mountain', number: 6 },
@@ -298,14 +299,19 @@ const BIG_MAIN_ISLAND: LandMap = {
 //   ※公式の「砂漠帯で陸を分断」は、デジタル版では大洋＋砂漠を含む別島として表現（地図画像があれば作り込む）。
 const THROUGH_DESERT_LAND: LandMap = {
   ...BIG_MAIN_ISLAND,                         // 本島15（全5資源＋砂漠 -1,-1=盗賊初期）
-  // 海を渡った新天地（右 7・連続）。砂漠を含み、金2。初入植+2点。
+  // 海を渡った新天地（右 10・連続）。砂漠帯を含み、金2。初入植+2点。
+  // 公式3人用の陸構成（砂漠3/森5/山4/丘3/牧草4/畑4/金2＝陸25・数字22）に一致させるため、
+  // 新天地を 7→10 へ拡張（海3枚を砂漠/森/山に。本島には触れない）。
   '1,-2': { type: 'field',    number: 4 },
   '1,-1': { type: 'gold',     number: 5 },    // 金1
   '1,0':  { type: 'pasture',  number: 11 },
-  '2,-2': { type: 'desert',   number: null }, // 砂漠（テーマ・盗賊なし）
+  '2,-2': { type: 'desert',   number: null }, // 砂漠帯（盗賊なし）
   '2,-1': { type: 'forest',   number: 9 },
   '3,-2': { type: 'gold',     number: 4 },    // 金2
   '3,-1': { type: 'hill',     number: 3 },
+  '1,-3': { type: 'forest',   number: 3 },    // 拡張: 森（公式森5へ）
+  '2,-3': { type: 'mountain', number: 11 },   // 拡張: 山（公式山4へ）
+  '3,-3': { type: 'desert',   number: null }, // 拡張: 砂漠帯（公式砂漠3へ）
 };
 
 // ---- 黄金諸島：右に2つの新島、合計3つの金タイル。ゴールドラッシュ。 ----
@@ -422,8 +428,14 @@ const seafarersFogIslands: Scenario = {
 };
 
 // ---- 公式S5「忘れられた部族」: 本島(左15・全数字)＋右の海域に VP/開発カード/港 トークン。
-//   船で到達して獲得。開拓地・盗賊は数字ヘックスのみ。13点。 ----
-// 右の海域（q>=1）の開放海辺へトークンを散らす（決定論・等間隔サンプリング）。
+//   船で到達して獲得。開拓地・盗賊は数字ヘックスのみ。金2。13点。 ----
+// 本島(BIG_MAIN_ISLAND)＋海域に金2(小島)。公式『金2』を満たす（船で到達・数字ヘックス=入植可）。
+const FORGOTTEN_TRIBE_LAND: LandMap = {
+  ...BIG_MAIN_ISLAND,
+  '1,-1': { type: 'gold', number: 5 }, // 金の小島1
+  '3,-1': { type: 'gold', number: 4 }, // 金の小島2
+};
+// 右の海域（q>=1）の開放海辺へトークンを散らす（決定論・等間隔サンプリング）。公式は VPトークン8・開発カード4・港ランダム。
 function buildForgottenTribe(landMap: LandMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
   const base = buildFromLandMap(landMap);
   return (geo, rng) => {
@@ -437,7 +449,8 @@ function buildForgottenTribe(landMap: LandMap): (geo: BoardGeometry, rng: () => 
           && tids.some(t => parseTileId(t).q >= 1);
       })
       .sort((a, b) => (a.id < b.id ? -1 : 1));
-    const kinds: EdgeTokenKind[] = ['vp', 'dev', 'vp', 'harbor', 'vp', 'dev', 'harbor', 'vp'];
+    // 公式コンポ: VPトークン8・開発カード4・港2（港は「ランダム枚数」のため2枚で代表）。計14。
+    const kinds: EdgeTokenKind[] = ['vp', 'dev', 'vp', 'harbor', 'vp', 'dev', 'vp', 'dev', 'vp', 'harbor', 'vp', 'dev', 'vp', 'vp'];
     const edgeTokens: Record<string, EdgeTokenKind> = {};
     const step = Math.max(1, Math.floor(seaEdges.length / kinds.length));
     for (let i = 0; i < kinds.length && i * step < seaEdges.length; i++) {
@@ -452,25 +465,28 @@ const seafarersForgottenTribe: Scenario = {
   description: '海に眠るVP・開発カード・港のトークンを船で回収。開拓地は数字ヘックスのみ（13点）。',
   category: 'seafarers',
   coords: BIG_COORDS,
-  build: buildForgottenTribe(BIG_MAIN_ISLAND),
+  build: buildForgottenTribe(FORGOTTEN_TRIBE_LAND),
   victoryTarget: 13,
   rules: { numberHexOnly: true, newIslandBonusVp: 0 },
 };
 
 // ---- 公式S2「4つの島」: 海で隔てた4つの島。どの島にも初期配置でき(setupAnywhere)、
 //   自分の出発島以外への初入植ごとに+2点。各自にとって未探検の島が異なる。13点。 ----
-// 37ヘックス footprint に、互いに海で隔てた4島(A西5/B北5/C東4/D南5＝陸19)を配置。
+// 37ヘックス footprint に、互いに海で隔てた4島を配置。公式3人用の陸構成（各資源4ずつ＝陸20・
+// 砂漠0・金0・数字20）に一致させる: 島Aを6タイルへ拡張（'-3,0'牧草・島Aのみに隣接）し、
+// 島Bの砂漠を山に置換（盗賊初期は維持）。島サイズ A6/B5/C4/D5（公式『大きさの近い4島』）。
 const FOUR_ISLANDS_LAND: LandMap = {
-  // 島A（西）
+  // 島A（西・6）
+  '-3,0': { type: 'pasture',  number: 11 }, // 拡張: 島Aのみに隣接する海→牧草（公式 牧草4へ）
   '-3,1': { type: 'forest',   number: 8 },
   '-3,2': { type: 'field',    number: 5 },
   '-2,1': { type: 'hill',     number: 9 },
   '-2,2': { type: 'mountain', number: 4 },
   '-3,3': { type: 'pasture',  number: 10 },
-  // 島B（北・砂漠=盗賊初期）
+  // 島B（北・5・盗賊初期）。公式S2は砂漠なし＝山に置換（盗賊はこの山に置く）。
   '0,-3': { type: 'forest',   number: 6 },
   '1,-3': { type: 'field',    number: 3 },
-  '0,-2': { type: 'desert',   number: null, robber: true },
+  '0,-2': { type: 'mountain', number: 2, robber: true }, // 砂漠→山（公式 山4へ・盗賊初期）
   '1,-2': { type: 'hill',     number: 5 },
   '2,-3': { type: 'mountain', number: 9 },
   // 島C（東）

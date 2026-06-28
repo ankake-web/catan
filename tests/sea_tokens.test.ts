@@ -28,6 +28,15 @@ describe('S5 忘れられた部族: 海辺トークン', () => {
     expect(kinds).toContain('harbor');
   });
 
+  it('[公式準拠] 金タイル2枚＋海上トークン VP8・開発カード4・港2', () => {
+    const s = tribe();
+    expect(Object.values(s.tiles).filter(t => t.type === 'gold')).toHaveLength(2);
+    const kinds = Object.values(s.edgeTokens ?? {});
+    expect(kinds.filter(k => k === 'vp')).toHaveLength(8);
+    expect(kinds.filter(k => k === 'dev')).toHaveLength(4);
+    expect(kinds.filter(k => k === 'harbor')).toHaveLength(2);
+  });
+
   it('VPトークンを獲得すると +1VP（公開）・盤から除去される', () => {
     const s = tribe();
     const e = edgeOf(s, 'vp');
