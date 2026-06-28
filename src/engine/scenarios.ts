@@ -122,8 +122,8 @@ const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; r
 // プールは公式航海者の港構成（2:1×各資源5＋3:1×複数）に寄せる。5種の専門港(2:1)を先頭に
 // 配置し、海岸線が短い盤でも全資源の2:1港が出るようにする（旧実装は max=4 で羊毛/麦/鉱の
 // 2:1港が生成されない不具合があった。docs/AUDIT_SEAFARERS.md [D1]）。
-const HARBOR_POOL: HarborType[] = ['generic', 'wood', 'brick', 'wool', 'grain', 'ore', 'generic', 'generic', 'generic'];
-function coastalHarbors(geo: BoardGeometry, tiles: Record<TileId, Tile>, max = 9): Harbor[] {
+const HARBOR_POOL: HarborType[] = ['wood', 'brick', 'wool', 'grain', 'ore', 'generic', 'generic', 'generic'];
+function coastalHarbors(geo: BoardGeometry, tiles: Record<TileId, Tile>, max = 7): Harbor[] {
   const coastEdges = Object.values(geo.edges)
     .filter(e => {
       const tids = edgeTileIds(e, geo.vertices);

@@ -3,7 +3,7 @@ import { createInitialGameState } from '../src/engine/createState';
 import type { PlayerSpec } from '../src/engine/createState';
 import { createRng } from '../src/engine/setup';
 import { applyAction } from '../src/engine/game';
-import { collectEdgeToken } from '../src/engine/seaTokens';
+import { collectEdgeToken, placeHeldHarborAt } from '../src/engine/seaTokens';
 import { calcVP, calcPublicVP } from '../src/engine/scoring';
 import { canBuildSettlement } from '../src/engine/actions';
 import { isLandVertex } from '../src/engine/board';
@@ -61,9 +61,15 @@ describe('S5 忘れられた部族: 海辺トークン', () => {
         && vx.adjacentTileIds.some(t => held.tiles[t]?.number != null)   // 数字ヘックス隣接(numberHexOnly)
         && vx.harborType == null;
     })!;
+    // [D8] 港同士は1辺以上空ける。機構を決定的に検証するため、v とその隣接頂点の港を外して
+    // 配置可能な状況を作る（盤の港密度に依存させない）。
+    const clearedVerts = { ...held.vertices };
+    for (const av of [v, ...held.vertices[v]!.adjacentVertexIds]) {
+      if (clearedVerts[av]) clearedVerts[av] = { ...clearedVerts[av]!, harborType: null };
+    }
     const eid = held.vertices[v]!.adjacentEdgeIds[0]!;
     const s2: GameState = {
-      ...held,
+      ...held, vertices: clearedVerts,
       phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null, currentPlayerIndex: 0, diceRolledThisTurn: true,
       edges: { ...held.edges, [eid]: { ...held.edges[eid]!, road: { playerId: 'player1' } } },
       players: { ...held.players, player1: { ...held.players.player1!, hand: { wood: 1, brick: 1, wool: 1, grain: 1, ore: 0 } } },
@@ -71,6 +77,29 @@ describe('S5 忘れられた部族: 海辺トークン', () => {
     const built = applyAction(s2, { type: 'BUILD_SETTLEMENT', vertexId: v });
     expect(built.vertices[v]!.harborType).toBe('generic');     // 港が設置された
     expect(built.heldHarbors?.player1 ?? 0).toBe(0);           // 保留が消費された
+  });
+
+  it('[D8] 港トークンは既存港に隣接する頂点には設置できない（港同士1辺以上空ける）', () => {
+    const s0 = tribe();
+    const v = Object.keys(s0.vertices).find(vid => {
+      const vx = s0.vertices[vid]!;
+      return isLandVertex(vx, s0.tiles)
+        && vx.adjacentTileIds.some(t => s0.tiles[t]?.type === 'sea')
+        && vx.adjacentVertexIds.length > 0;
+    })!;
+    const av = s0.vertices[v]!.adjacentVertexIds[0]!;
+    const s: GameState = {
+      ...s0,
+      heldHarbors: { player1: 1 },
+      vertices: {
+        ...s0.vertices,
+        [v]: { ...s0.vertices[v]!, building: { type: 'settlement', playerId: 'player1' }, harborType: null },
+        [av]: { ...s0.vertices[av]!, harborType: 'wood' }, // 隣接頂点に既存港
+      },
+    };
+    const r = placeHeldHarborAt(s, 'player1', v);
+    expect(r.vertices[v]!.harborType).toBeNull(); // 隣接港があるので設置不可
+    expect(r.heldHarbors!.player1).toBe(1);       // 保留のまま
   });
 
   it('numberHexOnly: 数字ヘックスに隣接しない陸頂点には開拓地を置けない（あれば）', () => {

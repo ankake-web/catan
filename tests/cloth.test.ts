@@ -6,7 +6,7 @@ import { applyAction } from '../src/engine/game';
 import { chooseAction } from '../src/engine/ai';
 import { connectVillagesAround, produceCloth, checkClothEnd, clothVp } from '../src/engine/cloth';
 import { calcVP } from '../src/engine/scoring';
-import { canBuildSettlement } from '../src/engine/actions';
+import { canBuildSettlement, isVillageLockedShip, isShipMovable } from '../src/engine/actions';
 import { isLandVertex } from '../src/engine/board';
 import type { GameState } from '../src/types';
 
@@ -92,6 +92,24 @@ describe('S6 カタンの織物', () => {
     expect(next.edges[e]!.ship?.playerId).toBe('player1');
     expect(next.cloth?.player1).toBe(1);
     expect(next.villages![villageId]).toBe(4);
+  });
+
+  it('[D7] 村につないだ航路は closed（移動できない）', () => {
+    const g = cloth();
+    const villageId = Object.keys(g.villages!)[0]!;
+    const e = g.tileToEdges[villageId]![0]!;
+    const v = g.edges[e]!.vertexIds[0];
+    const s: GameState = {
+      ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null, currentPlayerIndex: 0, diceRolledThisTurn: true,
+      vertices: { ...g.vertices, [v]: { ...g.vertices[v]!, building: { type: 'settlement', playerId: 'player1' } } },
+      players: { ...g.players, player1: { ...g.players.player1!, hand: { wood: 1, brick: 0, wool: 1, grain: 0, ore: 0 } } },
+    };
+    const next = applyAction(s, { type: 'BUILD_SHIP', edgeId: e });
+    expect(next.cloth?.player1).toBe(1); // 村に接続成立
+    expect(isVillageLockedShip(next, 'player1', e)).toBe(true);
+    // このターン建設という理由を外しても、村ロックで移動不可のまま。
+    const later: GameState = { ...next, shipsBuiltThisTurn: [], shipMovedThisTurn: false };
+    expect(isShipMovable(later, 'player1', e)).toBe(false);
   });
 });
 
