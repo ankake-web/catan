@@ -59,9 +59,14 @@ export interface Scenario {
   build(geo: BoardGeometry, rng: () => number): ScenarioBoard;
   /** 勝利に必要な勝利点。未指定は基本の VP_TABLE.target(10)。航海者は新島活用を促すため高め。 */
   readonly victoryTarget?: number;
+  /** おすすめプレイヤー数の表示用ラベル（例 '3〜4人'）。未指定はUI既定 '3〜4人'（公式カタンの推奨）。 */
+  readonly recommendedPlayers?: string;
   /** シナリオ固有ルールのトグル（公式準拠リビルド計画 §1）。未指定は基本/航海者共通の既定。 */
   readonly rules?: ScenarioRules;
 }
+
+/** おすすめプレイヤー数の既定表示（公式カタン/航海者は3〜4人推奨）。 */
+export const DEFAULT_RECOMMENDED_PLAYERS = '3〜4人';
 
 // ---- 基本カタン（既定）。挙動は従来どおり createRandomBoard に委譲。 ----
 const classic: Scenario = {
@@ -662,11 +667,16 @@ export interface ScenarioInfo {
   description: string;
   category: 'basic' | 'seafarers' | 'cities_knights';
   victoryTarget: number;
+  recommendedPlayers: string;
 }
-/** UI/設定で使うシナリオ一覧（id, 表示名, 説明, カテゴリ, 勝利点）。 */
+/** UI/設定で使うシナリオ一覧（id, 表示名, 説明, カテゴリ, 勝利点, おすすめ人数）。 */
 export function listScenarios(): ReadonlyArray<ScenarioInfo> {
   return (Object.keys(SCENARIOS) as ScenarioId[]).map(id => {
     const s = SCENARIOS[id];
-    return { id, name: s.name, description: s.description, category: s.category, victoryTarget: s.victoryTarget ?? 10 };
+    return {
+      id, name: s.name, description: s.description, category: s.category,
+      victoryTarget: s.victoryTarget ?? 10,
+      recommendedPlayers: s.recommendedPlayers ?? DEFAULT_RECOMMENDED_PLAYERS,
+    };
   });
 }

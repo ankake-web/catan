@@ -5,7 +5,7 @@
 // 各シナリオを「ミニ盤面プレビュー＋名前＋勝利点」のカードで見せるピッカー。
 // 盤面の形（島の数・海・金）が一目で分かる。listScenarios() 由来なので追加シナリオは自動で並ぶ。
 
-import { listScenarios, getScenario, type ScenarioId } from '../engine/scenarios';
+import { listScenarios, getScenario, DEFAULT_RECOMMENDED_PLAYERS, type ScenarioId } from '../engine/scenarios';
 import { buildBoardGeometry, axialToPixel } from '../engine/board';
 import { createRng } from '../engine/setup';
 
@@ -114,7 +114,8 @@ export function buildScenarioSelect(opts: ScenarioSelectOptions): HTMLElement {
       card.type = 'button';
       card.className = 'scenario-card' + (s.id === opts.current ? ' selected' : '');
       card.title = s.description;
-      card.setAttribute('aria-label', `${s.name}（${s.victoryTarget}点）`);
+      const players = s.recommendedPlayers ?? DEFAULT_RECOMMENDED_PLAYERS;
+      card.setAttribute('aria-label', `${s.name}（${s.victoryTarget}点・おすすめ${players}）`);
       card.appendChild(renderScenarioPreview(s.id));
 
       const main = document.createElement('div');
@@ -122,10 +123,16 @@ export function buildScenarioSelect(opts: ScenarioSelectOptions): HTMLElement {
       const nm = document.createElement('div');
       nm.className = 'scenario-card-name';
       nm.textContent = s.name.replace('航海者：', '');
+      const meta = document.createElement('div');
+      meta.className = 'scenario-card-meta';
       const vp = document.createElement('div');
       vp.className = 'scenario-card-vp';
       vp.textContent = `🏆 ${s.victoryTarget}点`;
-      main.append(nm, vp);
+      const pl = document.createElement('div');
+      pl.className = 'scenario-card-players';
+      pl.textContent = `👥 ${players}`;
+      meta.append(vp, pl);
+      main.append(nm, meta);
       card.appendChild(main);
 
       if (opts.disabled) card.disabled = true;

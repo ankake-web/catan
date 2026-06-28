@@ -1875,7 +1875,9 @@ html.reduce-motion .lan-spinner { animation-duration: 2.4s; }
   font-size: 0.85rem; font-weight: 700; line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.scenario-card-vp { font-size: 0.72rem; color: #ffcf4d; margin-top: 2px; }
+.scenario-card-vp { font-size: 0.72rem; color: #ffcf4d; }
+.scenario-card-meta { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 2px; }
+.scenario-card-players { font-size: 0.72rem; color: #9fd6ff; }
 .scenario-pdesc {
   font-size: 0.8rem; line-height: 1.45; color: rgba(255,255,255,0.78);
   background: rgba(255,255,255,0.05); border-radius: 7px; padding: 7px 9px; margin-top: 1px;
