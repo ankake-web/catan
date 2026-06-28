@@ -306,6 +306,19 @@ export function victoryTarget(state: GameState): number {
  * 満たしていれば winner と phase を更新した GameState を返す。
  */
 export function checkVictory(state: GameState, playerId: PlayerId): GameState {
+  // 航海者 S8「カタンの七不思議」: 不思議完成（Lv4）or 10VP以上かつ単独で最高レベル。
+  if (state.wonderLevel !== undefined) {
+    const myLevel = state.wonderLevel[playerId] ?? 0;
+    if (myLevel >= 4) return { ...state, winner: playerId, phase: 'GAME_OVER' };
+    if (calcVP(state, playerId) >= victoryTarget(state)) {
+      const maxOther = state.playerOrder
+        .filter(p => p !== playerId)
+        .reduce((m, p) => Math.max(m, state.wonderLevel![p] ?? 0), 0);
+      if (myLevel > maxOther) return { ...state, winner: playerId, phase: 'GAME_OVER' };
+    }
+    return state;
+  }
+
   const vp = calcVP(state, playerId);
   if (vp < victoryTarget(state)) return state;
 

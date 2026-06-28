@@ -292,6 +292,8 @@ export interface ScenarioRules {
   numberHexOnly?: boolean;
   /** 小島（本島以外）に開拓地を建てられないか（既定false）。S6 カタンの織物=true。 */
   noIslandSettlement?: boolean;
+  /** 七不思議モードを有効化するか（既定false）。S8 カタンの七不思議=true。 */
+  wonders?: boolean;
 }
 
 // 航海者 S5「忘れられた部族」: 海の辺に事前配置されるトークンの種別。
@@ -406,6 +408,10 @@ export interface GameState {
   villageConn?: Record<string, string[]>;
   // S6: 各プレイヤーの織物トークン数（2枚で1VP・公開情報）。
   cloth?: Record<string, number>;
+  // 航海者 S8「カタンの七不思議」: 各不思議のクレーム者（不思議ID→PlayerId・1人1つ早い者勝ち）。
+  wonderOwner?: Record<string, PlayerId>;
+  // S8: 各プレイヤーの不思議建設レベル（0..4・レベル4で完成）。存在＝七不思議シナリオ。
+  wonderLevel?: Record<string, number>;
   // 航海者拡張: 各プレイヤーが初期配置した島の代表ID一覧（=自分のホーム島群）。
   // setupAnywhere のシナリオで「未探検島＝自分のホーム以外」をプレイヤー別に判定するために使う。
   // 初期配置中に BUILD_SETTLEMENT が記録する。基本/S1系では全員が本島のみ。
@@ -501,6 +507,7 @@ export type Action =
   | { type: 'CHOOSE_GOLD';         playerId: PlayerId; resources: Partial<ResourceHand> }
   | { type: 'BUILD_SETTLEMENT';    vertexId: VertexId }
   | { type: 'BUILD_CITY';          vertexId: VertexId }
+  | { type: 'BUILD_WONDER';        wonderId: string } // 航海者 S8: 不思議のレベルを1段建設（必要ならクレーム）
   | { type: 'BUY_DEV_CARD' }
   | { type: 'PLAY_KNIGHT' }
   | { type: 'PLAY_ROAD_BUILDING' }

@@ -31,6 +31,7 @@ import { edgeTileIds } from './board';
 import { revealFogAround } from './explore';
 import { collectEdgeToken, placeHeldHarborAt } from './seaTokens';
 import { connectVillagesAround, produceCloth, checkClothEnd } from './cloth';
+import { canBuildWonder, buildWonder } from './wonders';
 
 // ============================================================
 // 内部ユーティリティ
@@ -549,6 +550,19 @@ export function applyAction(
       if (!canBuildCity(state, pid, vertexId)) throw new Error('BUILD_CITY: invalid');
 
       let next = buildCity(state, pid, vertexId);
+      next = checkVictory(next, pid);
+      return next;
+    }
+
+    // ----------------------------------------------------------
+    // BUILD_WONDER（航海者 S8 七不思議）。不思議のレベルを1段建設（必要ならクレーム）。
+    // ----------------------------------------------------------
+    case 'BUILD_WONDER': {
+      if (state.phase !== 'MAIN' || state.turnPhase !== 'TRADE_BUILD')
+        throw new Error('BUILD_WONDER: must be in MAIN TRADE_BUILD phase');
+      const { wonderId } = action;
+      if (!canBuildWonder(state, pid, wonderId)) throw new Error('BUILD_WONDER: invalid');
+      let next = buildWonder(state, pid, wonderId);
       next = checkVictory(next, pid);
       return next;
     }

@@ -22,6 +22,7 @@ export type ScenarioId =
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
   | 'seafarers_forgottentribe' // 公式S5 忘れられた部族
   | 'seafarers_cloth'          // 公式S6 カタンの織物
+  | 'seafarers_wonders'        // 公式S8 カタンの七不思議
   | 'seafarers_newworld'       // 公式 New World（自由構築）
   | 'seafarers_archipelago'    // 非公式
   | 'seafarers_goldenisles'    // 非公式
@@ -539,6 +540,39 @@ const seafarersCloth: Scenario = {
   victoryTarget: 14,
   rules: { useLongestRoute: false, noIslandSettlement: true, newIslandBonusVp: 0 },
 };
+
+// ---- 公式S8「カタンの七不思議」: 本島(資源豊富・特に鉄/麦)＋小島2つ。要件を満たして不思議を
+//   クレームし4レベル建設→完成で勝利。または10点以上かつ単独最高レベル。小島初入植+1点。 ----
+const WONDERS_LAND: LandMap = {
+  // 本島（12・全5資源／鉄・麦多めで不思議建設向き）
+  '-3,0':  { type: 'mountain', number: 8 },
+  '-3,1':  { type: 'field',    number: 5 },
+  '-3,2':  { type: 'pasture',  number: 10 },
+  '-2,-1': { type: 'mountain', number: 9 },
+  '-2,0':  { type: 'field',    number: 4 },
+  '-2,1':  { type: 'forest',   number: 11 },
+  '-2,2':  { type: 'hill',     number: 3 },
+  '-1,-2': { type: 'field',    number: 6 },
+  '-1,-1': { type: 'desert',   number: null, robber: true },
+  '-1,0':  { type: 'mountain', number: 2 },
+  '-1,1':  { type: 'field',    number: 9 },
+  '-1,2':  { type: 'pasture',  number: 10 },
+  // 小島A（右上）・小島B（右下）。初入植で+1点。
+  '1,-1':  { type: 'forest',   number: 8 },
+  '1,0':   { type: 'pasture',  number: 4 },
+  '3,-1':  { type: 'hill',     number: 5 },
+  '3,0':   { type: 'field',    number: 9 },
+};
+const seafarersWonders: Scenario = {
+  id: 'seafarers_wonders',
+  name: '航海者：カタンの七不思議',
+  description: '要件を満たして不思議をクレームし、4レベル建設して完成を競う（完成 or 10点＋最高レベル）。',
+  category: 'seafarers',
+  coords: SEAFARERS_COORDS,
+  build: buildFromLandMap(WONDERS_LAND),
+  victoryTarget: 10,
+  rules: { wonders: true, newIslandBonusVp: 1 },
+};
 const seafarersGoldenIsles: Scenario = {
   id: 'seafarers_goldenisles',
   name: '航海者：黄金諸島（非公式）',
@@ -588,6 +622,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   seafarers_throughdesert: seafarersThroughDesert,
   seafarers_forgottentribe: seafarersForgottenTribe,
   seafarers_cloth: seafarersCloth,
+  seafarers_wonders: seafarersWonders,
   seafarers_newworld: seafarersNewWorld,
   // 非公式オリジナルマップ
   seafarers_archipelago: seafarersArchipelago,

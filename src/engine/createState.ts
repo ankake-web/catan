@@ -115,6 +115,7 @@ export function createInitialGameState(
     ...(scenario.rules?.noIslandSettlement != null ? { noIslandSettlement: scenario.rules.noIslandSettlement } : {}),
     ...(edgeTokens != null ? { edgeTokens } : {}),
     ...(villages != null ? { villages, villageConn: {}, cloth: {} } : {}),
+    ...(scenario.rules?.wonders ? { wonderOwner: {}, wonderLevel: {} } : {}),
     ...(ck ? { expansion: 'cities_knights' as const, commodityBank: { ...COMMODITY_BANK_INITIAL }, barbarianPosition: 0, barbarianAttacks: 0, metropolis: {}, progressDecks: buildProgressDecks(rng), knightMovedThisTurn: false, knightChasedThisTurn: false } : {}),
     islandBonus: {},
     pendingTrade: null,
