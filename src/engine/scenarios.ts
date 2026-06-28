@@ -10,7 +10,7 @@
 //
 // 注意: 純粋関数（DOM非依存）。createInitialGameState から使う。
 
-import type { AxialCoord, Tile, TileId, TileType, Harbor, HarborType } from '../types';
+import type { AxialCoord, Tile, TileId, TileType, Harbor, HarborType, ScenarioRules } from '../types';
 import { getAllTileCoords, getHexRegion, tileId, parseTileId, edgeTileIds, type BoardGeometry } from './board';
 import { createRandomBoard } from './setup';
 
@@ -44,6 +44,8 @@ export interface Scenario {
   build(geo: BoardGeometry, rng: () => number): ScenarioBoard;
   /** 勝利に必要な勝利点。未指定は基本の VP_TABLE.target(10)。航海者は新島活用を促すため高め。 */
   readonly victoryTarget?: number;
+  /** シナリオ固有ルールのトグル（公式準拠リビルド計画 §1）。未指定は基本/航海者共通の既定。 */
+  readonly rules?: ScenarioRules;
 }
 
 // ---- 基本カタン（既定）。挙動は従来どおり createRandomBoard に委譲。 ----
@@ -85,7 +87,7 @@ const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; r
   '2,-1':  { type: 'mountain', number: 3 },
   '2,0':   { type: 'field',    number: 11 },
   '3,-2':  { type: 'pasture',  number: 6 },
-  '3,-1':  { type: 'hill',     number: 4 },
+  '3,-1':  { type: 'gold',     number: 4 },  // 金2枚目（公式S1は金タイル2枚）。新島の奥。
 };
 
 // 海岸線（陸1・海1 に面する辺）に港を決定論的に配置する。
@@ -140,14 +142,18 @@ function buildFromLandMap(landMap: LandMap): (geo: BoardGeometry, rng: () => num
   };
 }
 
+// 公式シナリオ1「新たな海岸を目指して」(Heading for New Shores)。本島＋新島群、
+// 新島への初入植ごとに各自+2VP、14点で勝利（公式ルールブック第6版）。
+// ※盤面は本島＋新島のデジタル簡略版（ピクセル単位の公式配置は地図画像があれば後で合わせ込み）。
 const seafarersNewShores: Scenario = {
   id: 'seafarers_newshores',
-  name: '航海者：新たな海岸を求めて',
-  description: '本島から海峡を渡り、対岸の新島へ入植。最初の入植で+2点（13点で勝利）。',
+  name: '航海者：新たな海岸を目指して',
+  description: '本島から海を渡り、対岸の新島へ入植。新しい島への初入植ごとに+2点（14点で勝利）。',
   category: 'seafarers',
   coords: SEAFARERS_COORDS,
   build: buildFromLandMap(NEW_SHORES_LAND),
-  victoryTarget: 13,
+  victoryTarget: 14,
+  rules: { newIslandBonusVp: 2 },
 };
 
 // ---- 航海者「群島」（2つ目の盤面） ----
@@ -181,10 +187,13 @@ const ARCHIPELAGO_LAND: LandMap = {
   '2,1':   { type: 'pasture',  number: 11 },
 };
 
+// ⚠ 非公式オリジナルマップ（群島/黄金諸島/連なる島々/大連邦/金の島）。
+// 公式8シナリオには存在しないが、航海者エンジン（船/島ボーナス/金/海賊/最長交易路）で
+// 完全にプレイ可能。公式シナリオが揃うまでの追加マップとして残置し、表示名に「(非公式)」を付す。
 const seafarersArchipelago: Scenario = {
   id: 'seafarers_archipelago',
-  name: '航海者：群島',
-  description: '海で隔てた3つの島。本島＋新島2つを巡る、島ボーナスと金の争奪戦（13点）。',
+  name: '航海者：群島（非公式）',
+  description: '【非公式】海で隔てた3つの島。本島＋新島2つを巡る、島ボーナスと金の争奪戦（13点）。',
   category: 'seafarers',
   coords: SEAFARERS_COORDS,
   build: buildFromLandMap(ARCHIPELAGO_LAND),
@@ -270,10 +279,11 @@ const GREATER_CATAN_LAND: LandMap = {
   '2,-2': { type: 'hill',     number: 12 },
 };
 
+// 非公式（公式S4「砂漠を越えて」とは別物の「遠い金の島」版。誤認を避け名前を変更）。
 const seafarersThroughDesert: Scenario = {
   id: 'seafarers_throughdesert',
-  name: '航海者：砂漠を越えて',
-  description: '広い大洋の先に遠い「金の島」。長い航路を繋いで渡れた者が勝つ（13点）。',
+  name: '航海者：金の島（非公式）',
+  description: '【非公式】広い大洋の先に遠い「金の島」。長い航路を繋いで渡れた者が勝つ（13点）。',
   category: 'seafarers',
   coords: SEAFARERS_COORDS,
   build: buildFromLandMap(THROUGH_DESERT_LAND),
@@ -281,8 +291,8 @@ const seafarersThroughDesert: Scenario = {
 };
 const seafarersGoldenIsles: Scenario = {
   id: 'seafarers_goldenisles',
-  name: '航海者：黄金諸島',
-  description: '金タイルが3つ。好きな資源を産む金を巡るゴールドラッシュ（13点）。',
+  name: '航海者：黄金諸島（非公式）',
+  description: '【非公式】金タイルが3つ。好きな資源を産む金を巡るゴールドラッシュ（13点）。',
   category: 'seafarers',
   coords: SEAFARERS_COORDS,
   build: buildFromLandMap(GOLDEN_ISLES_LAND),
@@ -290,8 +300,8 @@ const seafarersGoldenIsles: Scenario = {
 };
 const seafarersChainIsles: Scenario = {
   id: 'seafarers_chainisles',
-  name: '航海者：連なる島々',
-  description: '小さな島が点在。島ボーナスを稼ぐアイランドホッピング（13点）。',
+  name: '航海者：連なる島々（非公式）',
+  description: '【非公式】小さな島が点在。島ボーナスを稼ぐアイランドホッピング（13点）。',
   category: 'seafarers',
   coords: SEAFARERS_COORDS,
   build: buildFromLandMap(CHAIN_ISLES_LAND),
@@ -299,8 +309,8 @@ const seafarersChainIsles: Scenario = {
 };
 const seafarersGreaterCatan: Scenario = {
   id: 'seafarers_greatercatan',
-  name: '航海者：大連邦',
-  description: '海を少なくした大きな一枚大陸。船は控えめの拡大版（12点）。',
+  name: '航海者：大連邦（非公式）',
+  description: '【非公式】海を少なくした大きな一枚大陸。船は控えめの拡大版（12点）。',
   category: 'seafarers',
   coords: SEAFARERS_COORDS,
   build: buildFromLandMap(GREATER_CATAN_LAND),

@@ -105,6 +105,11 @@ export function createInitialGameState(
     longestRoadHolder: null,
     largestArmyHolder: null,
     ...(scenario.victoryTarget != null ? { victoryTarget: scenario.victoryTarget } : {}),
+    // 航海者: シナリオ固有ルールを配線（未指定フィールドは GameState 既定にフォールバック）。
+    ...(scenario.rules?.newIslandBonusVp != null ? { newIslandBonusVp: scenario.rules.newIslandBonusVp } : {}),
+    ...(scenario.rules?.startingSettlements != null ? { startingSettlements: scenario.rules.startingSettlements } : {}),
+    ...(scenario.rules?.useLongestRoute != null ? { useLongestRoute: scenario.rules.useLongestRoute } : {}),
+    ...(scenario.rules?.useRobber != null ? { useRobber: scenario.rules.useRobber } : {}),
     ...(ck ? { expansion: 'cities_knights' as const, commodityBank: { ...COMMODITY_BANK_INITIAL }, barbarianPosition: 0, barbarianAttacks: 0, metropolis: {}, progressDecks: buildProgressDecks(rng), knightMovedThisTurn: false, knightChasedThisTurn: false } : {}),
     islandBonus: {},
     pendingTrade: null,

@@ -46,15 +46,20 @@ describe('scenarios: classic は従来どおり（非破壊）', () => {
   });
 });
 
-describe('scenarios: 航海者「新たな海岸を求めて」', () => {
+describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
 
-  it('大きめ footprint（29ヘックス）で陸21・海8・砂漠1・金1', () => {
+  it('大きめ footprint（29ヘックス）で陸21・海8・砂漠1・金2（公式S1は金タイル2枚）', () => {
     expect(Object.keys(s.tiles)).toHaveLength(29);
     expect(count(s.tiles, 'sea')).toBe(8);
-    expect(count(s.tiles, 'gold')).toBe(1);
+    expect(count(s.tiles, 'gold')).toBe(2);
     expect(count(s.tiles, 'desert')).toBe(1);
     expect(29 - 8).toBe(21); // 海以外＝陸21（金タイルも陸に含む）
+  });
+
+  it('公式S1: 勝利点は14・新島初入植ボーナスは+2', () => {
+    expect(s.victoryTarget).toBe(14);
+    expect(s.newIslandBonusVp ?? 2).toBe(2);
   });
 
   it('本島12＋新島9 の二島に分かれる', () => {
