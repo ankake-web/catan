@@ -43,8 +43,8 @@ describe('islands: 連結成分（航海者「新たな海岸を求めて」）'
     expect(reps.has(NEW_REP)).toBe(true);
     const homeCount = Object.values(repOf).filter(r => r === HOME_REP).length;
     const newCount = Object.values(repOf).filter(r => r === NEW_REP).length;
-    expect(homeCount).toBe(12); // 砂漠含む本島12タイル
-    expect(newCount).toBe(9);   // 新島9タイル
+    expect(homeCount).toBe(15); // 砂漠含む本島15タイル（公式S1級・37ヘックス）
+    expect(newCount).toBe(7);   // 新島7タイル
   });
 
   it('海タイルは島に含まれない', () => {
