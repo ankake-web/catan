@@ -106,12 +106,13 @@ export function isUnclaimedNewIslandVertex(state: GameState, vertexId: VertexId)
 }
 
 /**
- * MAIN フェーズで開拓地を建てた“直後の state”を受け取り、その頂点が
- * 「その島で最初の建物」（=新しい島への最初の入植）なら島代表IDを返す。
- * 対象外（海タイルの無い基本ゲーム / 既に他の建物がある島 / 陸に面さない）の場合は null。
+ * MAIN フェーズで開拓地を建てた頂点が「本島でない島」に属するなら、その島の代表IDを返す。
+ * 対象外（海タイルの無い基本ゲーム / 本島 / 陸に面さない頂点）の場合は null。
  *
- * 判定は「島内の建物がちょうど1個（＝今置いた開拓地のみ）」で行う。建物は撤去されないため、
- * これは島ごとに一度だけ true になり、初入植者を一意に特定できる。
+ * 公式ルール（仕様メモ §2 シナリオ1）: 各プレイヤーが自分の初入植ごとに +2VP を得る
+ * （他人が先に建てていても獲得可）。よって「島で最初の1人だけ」ではなく、
+ * 「自分がその島へ初めて建てたか」は呼び出し側が islandBonus[rep] で重複排除する。
+ * この関数は島の同定（本島以外の陸島か）だけを行い、付与可否は判定しない。
  */
 export function newIslandBonusRep(state: GameState, builtVertexId: VertexId): string | null {
   // 基本ゲーム（海タイル無し）は新島ボーナス対象外。
@@ -121,17 +122,8 @@ export function newIslandBonusRep(state: GameState, builtVertexId: VertexId): st
   if (!builtV) return null;
 
   const repOf = computeIslandReps(state.tiles);
+  const home = homeIslandRep(repOf);
   const rep = vertexRep(builtV, repOf);
-  if (!rep) return null;
-
-  // この島の建物数を数える（2個以上見つかった時点で「最初ではない」と確定）。
-  let count = 0;
-  for (const v of Object.values(state.vertices)) {
-    if (!v.building) continue;
-    if (vertexRep(v, repOf) === rep) {
-      count++;
-      if (count > 1) return null;
-    }
-  }
-  return count === 1 ? rep : null;
+  if (!rep || rep === home) return null; // 純海上 or 本島は対象外
+  return rep;
 }

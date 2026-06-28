@@ -412,6 +412,11 @@ export function applyAction(
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
 
+      // 街道建設カード使用中: 船も道と同じく無料配置の1本として残数をデクリメント（船2/道1+船1）。
+      if (next.roadBuildingRoadsRemaining > 0) {
+        next = { ...next, roadBuildingRoadsRemaining: next.roadBuildingRoadsRemaining - 1 };
+      }
+
       // セットアップでは2個目のコマ（道 or 船）として進行。anchor 解除。
       if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
         next = advanceSetup({ ...next, setupRoadAnchor: null });
@@ -474,8 +479,12 @@ export function applyAction(
       // checkVictory より前に付与し、島ボーナスで 10VP に到達したら勝てるようにする。
       if (state.phase === 'MAIN') {
         const rep = newIslandBonusRep(next, vertexId);
-        if (rep && !(next.islandBonus ?? {})[rep]) {
-          next = { ...next, islandBonus: { ...(next.islandBonus ?? {}), [rep]: pid } };
+        if (rep) {
+          const owners = (next.islandBonus ?? {})[rep] ?? [];
+          // 公式: 各プレイヤーが「自分の初入植」で +2VP（他人が先でも可）。同一プレイヤーの重複のみ排除。
+          if (!owners.includes(pid)) {
+            next = { ...next, islandBonus: { ...(next.islandBonus ?? {}), [rep]: [...owners, pid] } };
+          }
         }
       }
 

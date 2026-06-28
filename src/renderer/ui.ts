@@ -773,7 +773,7 @@ function calcVPBreakdown(state: GameState, pid: PlayerId): VPBreakdown {
     lr: player?.hasLongestRoad ?? false,
     la: player?.hasLargestArmy ?? false,
     vpCards: player?.devCards.filter(c => c.type === 'victory_point').length ?? 0,
-    islandBonus: Object.values(state.islandBonus ?? {}).filter(o => o === pid).length,
+    islandBonus: Object.values(state.islandBonus ?? {}).flat().filter(o => o === pid).length,
   };
 }
 

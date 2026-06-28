@@ -50,9 +50,10 @@ function buildingVp(b: { type: 'settlement' | 'city'; metropolis?: boolean }): n
 
 /** 航海者: このプレイヤーが獲得した新島入植ボーナスの合計VP（公開情報）。基本ゲームは常に0。 */
 function islandBonusVP(state: GameState, playerId: PlayerId): number {
+  const per = state.newIslandBonusVp ?? VP_TABLE.island;
   let n = 0;
-  for (const owner of Object.values(state.islandBonus ?? {})) {
-    if (owner === playerId) n += VP_TABLE.island;
+  for (const owners of Object.values(state.islandBonus ?? {})) {
+    if (owners.includes(playerId)) n += per;
   }
   return n;
 }
@@ -173,6 +174,19 @@ export function calcLongestRoad(state: GameState, playerId: PlayerId): number {
  *   D) maxLen < LONGEST_ROAD_MIN → 場外（null）。
  */
 export function updateLongestRoad(state: GameState): GameState {
+  // 航海者: 最長交易路タイルを使わないシナリオ（S6 織物 / S7 海賊の島々）では誰も保持しない。
+  // 長さ自体は表示用に保持しつつ、ボーナス保持者は常に null・全員 hasLongestRoad=false。
+  if (state.useLongestRoute === false) {
+    let ns = state;
+    for (const pid of state.playerOrder) {
+      ns = {
+        ...ns,
+        players: { ...ns.players, [pid]: { ...ns.players[pid]!, longestRoadLength: calcLongestRoad(state, pid as PlayerId), hasLongestRoad: false } },
+      };
+    }
+    return { ...ns, longestRoadHolder: null };
+  }
+
   // 全プレイヤーの実際の最長道路長を計算
   const lengths: Record<string, number> = {};
   let newState = state;

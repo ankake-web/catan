@@ -268,6 +268,21 @@ export interface PendingTrade {
   selectedResponderId: PlayerId | null;
 }
 
+// ---- シナリオ固有ルール（航海者・公式準拠リビルド計画 §1） ----
+// 各シナリオが既定値（基本/航海者共通）から差し替えたいルールを宣言する。
+// createInitialGameState がこれを GameState の対応フィールドへ配線する。
+// 後続フェーズで onExplore/seaEdgeTokens/clothTrade/pirateFleet/wonders を追加予定。
+export interface ScenarioRules {
+  /** 初期配置の開拓地数。既定2。S6 カタンの織物=3。 */
+  startingSettlements?: number;
+  /** 最長交易路タイルを使うか。既定true。S6 織物 / S7 海賊の島々=false。 */
+  useLongestRoute?: boolean;
+  /** 7・盗賊・海賊を使うか。既定true。S7 海賊の島々=false。 */
+  useRobber?: boolean;
+  /** 新しい島への初入植ボーナスVP。既定2。S8 七不思議 / New World=1。0で無効。 */
+  newIslandBonusVp?: number;
+}
+
 // ---- GameState ----
 
 export interface GameState {
@@ -349,9 +364,18 @@ export interface GameState {
   // 勝利に必要な勝利点。シナリオ別（基本=10／航海者の大きい盤=13）。未設定は VP_TABLE.target。
   victoryTarget?: number;
 
-  // 航海者拡張: 「新しい島への最初の入植」ボーナス。島の代表タイルID → 最初に入植したプレイヤー。
-  // 各エントリ +2VP（calcVP で加算）。基本ゲームでは常に空（海タイルが無く発生しない）。
-  islandBonus?: Record<string, PlayerId>;
+  // 航海者拡張: 「新しい島への最初の入植」ボーナス。島の代表タイルID → その島で自分の初入植
+  // ボーナスを獲得済みのプレイヤー一覧。各プレイヤーが「自分が初めてその島へ建てた」とき +newIslandBonusVp
+  // を得る（公式: 他人が先に建てていても各自獲得可。よって1島に複数人が載りうる）。
+  // 基本ゲームでは常に空（海タイルが無く発生しない）。
+  islandBonus?: Record<string, PlayerId[]>;
+  // 航海者拡張: 新島初入植ボーナスのVP値（既定2。七不思議/New World は1）。未設定は VP_TABLE.island。
+  newIslandBonusVp?: number;
+  // 航海者拡張: シナリオ固有ルールのトグル（既定値は基本/航海者共通）。createInitialGameState が
+  // ScenarioRules から配線する。未設定はそれぞれ 2 / true / true の既定で扱う。
+  startingSettlements?: number;   // 初期配置の開拓地数（既定2。S6 織物=3）
+  useLongestRoute?: boolean;      // 最長交易路タイルを使うか（既定true。S6/S7=false）
+  useRobber?: boolean;            // 7/盗賊・海賊を使うか（既定true。S7=false）
 
   // 航海者拡張: 金タイル産出で「任意資源を選ぶ権利」の残数。PlayerId → 選ぶ枚数。
   // turnPhase==='GOLD' の間だけ非空。各プレイヤーが CHOOSE_GOLD で解決し、全員空になると

@@ -632,6 +632,12 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
         opts.validEdgeIds = new Set(
           Object.keys(state.edges).filter(eid => canBuildRoad(state, pid, eid)),
         );
+        // 航海者: 街道建設カード使用中は船も無料配置できる（道2/船2/道1+船1）→ 海上候補も光らせる。
+        if (state.roadBuildingRoadsRemaining > 0) {
+          opts.validShipEdgeIds = new Set(
+            Object.keys(state.edges).filter(eid => canBuildShip(state, pid, eid)),
+          );
+        }
       } else if (mode === 'ship') {
         opts.validShipEdgeIds = new Set(
           Object.keys(state.edges).filter(eid => canBuildShip(state, pid, eid)),

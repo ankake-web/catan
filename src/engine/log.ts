@@ -195,13 +195,17 @@ export function buildActionLog(
   if (prev.largestArmyHolder !== next.largestArmyHolder && next.largestArmyHolder) {
     push(next.largestArmyHolder, 'BONUS_CHANGE', `⚔ ${nm(next.largestArmyHolder)} が最大騎士力を獲得`);
   }
-  // 航海者: 新しい島への最初の入植（公開情報・+2VP）
+  // 航海者: 新しい島への最初の入植（公開情報・+VP）。各プレイヤーが自分の初入植で獲得（島ごと）。
   {
+    const per = next.newIslandBonusVp ?? 2;
     const prevBonus = prev.islandBonus ?? {};
     const nextBonus = next.islandBonus ?? {};
-    for (const [rep, owner] of Object.entries(nextBonus)) {
-      if (!prevBonus[rep]) {
-        push(owner, 'BONUS_CHANGE', `🚢 ${nm(owner)} が新しい島に入植（+2勝利点）`);
+    for (const [rep, owners] of Object.entries(nextBonus)) {
+      const before = new Set(prevBonus[rep] ?? []);
+      for (const owner of owners) {
+        if (!before.has(owner)) {
+          push(owner, 'BONUS_CHANGE', `🚢 ${nm(owner)} が新しい島に入植（+${per}勝利点）`);
+        }
       }
     }
   }

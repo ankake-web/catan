@@ -48,7 +48,7 @@ export function buildPlayerRecap(state: GameState, pid: PlayerId): PlayerRecap {
   for (const e of Object.values(state.edges)) {
     if (e.road?.playerId === pid) roads++;
   }
-  const islandBonus = Object.values(state.islandBonus ?? {}).filter(owner => owner === pid).length;
+  const islandBonus = Object.values(state.islandBonus ?? {}).flat().filter(owner => owner === pid).length;
   const p = state.players[pid];
   const stats: RecapStats = {
     settlements,
