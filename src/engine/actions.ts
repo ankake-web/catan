@@ -274,6 +274,8 @@ export function canBuildSettlement(
   if (state.numberHexOnly && !vertex.adjacentTileIds.some(t => state.tiles[t]?.number != null)) return false;
   // S6「カタンの織物」: 小島（本島以外）には開拓地を建てられない（村は航路で接続する）。
   if (state.noIslandSettlement && !isHomeIslandVertex(state, vertexId)) return false;
+  // S7「海賊の島々」: 海賊要塞の頂点には（奪取前は）開拓地を建てられない（攻撃で奪取する）。
+  if (state.fortresses && Object.values(state.fortresses).some(f => !f.captured && f.vertexId === vertexId)) return false;
 
   if (!isDistanceRuleOk(vertex, state.vertices)) return false;
 

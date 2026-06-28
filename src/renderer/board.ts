@@ -805,6 +805,35 @@ export function renderBoard(
   // --- 頂点（建物。最前面） ---
   content.appendChild(renderVertices(state, ox, oy, opts));
 
+  // --- 航海者 S7「海賊の島々」: 海賊要塞（🏰＋ラホ数）と海賊艦隊（🏴‍☠️）のマーカー（最前面） ---
+  if (state.fortresses || state.pirateFleet) {
+    const ov = svgEl('g');
+    ov.setAttribute('class', 'pirate-islands-overlay');
+    for (const f of Object.values(state.fortresses ?? {})) {
+      if (f.captured) continue;
+      const v = state.vertices[f.vertexId];
+      if (!v) continue;
+      const t = svgEl('text');
+      t.classList.add('fortress-mark');
+      setAttrs(t, { x: v.pixel.x + ox, y: v.pixel.y + oy, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': String(size * 0.34) });
+      t.textContent = `🏰${f.raho}`;
+      ov.appendChild(t);
+    }
+    const fleet = state.pirateFleet;
+    if (fleet && fleet.path.length > 0) {
+      const tile = state.tiles[fleet.path[fleet.pos % fleet.path.length]!];
+      if (tile) {
+        const p = axialToPixel(tile.coord, size);
+        const t = svgEl('text');
+        t.classList.add('fleet-mark');
+        setAttrs(t, { x: p.x + ox, y: p.y + oy, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': String(size * 0.5) });
+        t.textContent = '🏴‍☠️';
+        ov.appendChild(t);
+      }
+    }
+    content.appendChild(ov);
+  }
+
   viewport.appendChild(content);
   svgEl_.appendChild(viewport);
 }

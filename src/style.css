@@ -369,6 +369,9 @@ html.reduce-motion .hex-tile.producing { animation: none; filter: brightness(1.5
   fill: #5a3d00; font-weight: bold; pointer-events: none;
   paint-order: stroke; stroke: rgba(255,245,200,0.95); stroke-width: 2.4px; stroke-linejoin: round;
 }
+/* S7「海賊の島々」: 海賊要塞（🏰＋ラホ数）と海賊艦隊（🏴‍☠️）のマーカー。 */
+.fortress-mark { font-weight: bold; pointer-events: none; paint-order: stroke; stroke: rgba(255,255,255,0.9); stroke-width: 2px; }
+.fleet-mark { pointer-events: none; }
 /* S6「カタンの織物」: 村タイルのラベル。 */
 .village-tag {
   fill: #4a2d6a; font-weight: bold; pointer-events: none;

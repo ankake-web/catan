@@ -32,6 +32,7 @@ import { revealFogAround } from './explore';
 import { collectEdgeToken, placeHeldHarborAt } from './seaTokens';
 import { connectVillagesAround, produceCloth, checkClothEnd } from './cloth';
 import { canBuildWonder, buildWonder } from './wonders';
+import { canAttackFortress, attackFortress, moveFleet } from './pirateIslands';
 
 // ============================================================
 // 内部ユーティリティ
@@ -164,6 +165,9 @@ export function applyAction(
         // 蛮族撃退の守護者VPで勝利点目標に到達した場合は、その手番でそのまま勝利確定させる。
         return checkVictory(ckPostEventTransition(next, total), pid);
       }
+
+      // S7 海賊の島々: ダイス後・資源収集前に海賊艦隊が「小さい目」の数だけ前進し、隣接建物から略奪。
+      if (state.pirateFleet) next = moveFleet(next, Math.min(d1, d2), rng);
 
       if (total === 7) {
         const needsDiscard = state.playerOrder.some(p => {
@@ -563,6 +567,18 @@ export function applyAction(
       const { wonderId } = action;
       if (!canBuildWonder(state, pid, wonderId)) throw new Error('BUILD_WONDER: invalid');
       let next = buildWonder(state, pid, wonderId);
+      next = checkVictory(next, pid);
+      return next;
+    }
+
+    // ----------------------------------------------------------
+    // ATTACK_FORTRESS（航海者 S7 海賊の島々）。隣接する自分の要塞をラホ1つ分攻撃。
+    // ----------------------------------------------------------
+    case 'ATTACK_FORTRESS': {
+      if (state.phase !== 'MAIN' || state.turnPhase !== 'TRADE_BUILD')
+        throw new Error('ATTACK_FORTRESS: must be in MAIN TRADE_BUILD phase');
+      if (!canAttackFortress(state, pid)) throw new Error('ATTACK_FORTRESS: invalid');
+      let next = attackFortress(state, pid);
       next = checkVictory(next, pid);
       return next;
     }

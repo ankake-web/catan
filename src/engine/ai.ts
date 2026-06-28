@@ -13,6 +13,7 @@ import {
 import { isSeaEdge, isLandVertex, isDistanceRuleOk } from './board';
 import { isUnclaimedNewIslandVertex } from './islands';
 import { bestWonderAction } from './wonders';
+import { canAttackFortress, bestFortressShip } from './pirateIslands';
 import { canBankTrade, getEffectiveTradeRate } from './trade';
 import { calcVP, victoryTarget, calcLongestRoad } from './scoring';
 import { applyAction } from './game';
@@ -812,6 +813,13 @@ function chooseTradeBuildAction(state: GameState, pid: PlayerId, skipPlayerTrade
   if (state.wonderLevel !== undefined && difficulty !== 'weak') {
     const w = bestWonderAction(state, pid);
     if (w) return w;
+  }
+
+  // 航海者 S7 海賊の島々: 自色の要塞攻略を優先（隣接で攻撃→未到達なら船を延ばす）。奪取後は通常建設で10点へ。
+  if (state.fortresses !== undefined && difficulty !== 'weak') {
+    if (canAttackFortress(state, pid)) return { type: 'ATTACK_FORTRESS' };
+    const ship = bestFortressShip(state, pid);
+    if (ship) return { type: 'BUILD_SHIP', edgeId: ship };
   }
 
   if (difficulty === 'weak') return chooseTradeBuildWeak(state, pid, rng);

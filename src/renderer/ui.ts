@@ -7,6 +7,8 @@ import { RESOURCE_TYPES, BUILD_COSTS, CK_COSTS, VP_TABLE } from '../constants';
 import { calcVP, calcPublicVP, victoryTarget } from '../engine/scoring';
 import { LONGEST_ROAD_MIN, LARGEST_ARMY_MIN } from '../constants';
 import { hasEnoughResources, playerHasMovableShip } from '../engine/actions';
+import { canAttackFortress } from '../engine/pirateIslands';
+import { bestWonderAction } from '../engine/wonders';
 import { canBankTrade, getEffectiveTradeRate, isCommodity } from '../engine/trade';
 import { findPendingDiscarder, discardCount, robbableCardCount } from '../engine/robber';
 import {
@@ -1915,6 +1917,20 @@ function buildActionButtons(
   }
   div.appendChild(modeImgBtn(houseImg(ckey), [costLabel('開拓地', resCostParts(BUILD_COSTS.settlement))], 'settlement', canSettl, buildMode, setBuildMode));
   div.appendChild(modeImgBtn(cityImg(ckey), [costLabel('都市', resCostParts(BUILD_COSTS.city))], 'city', canCity, buildMode, setBuildMode));
+  // 航海者 S7 海賊の島々: 隣接する自分の要塞を攻撃（ラホを1つ除去・3で奪取）。
+  if (state.fortresses && canAttackFortress(state, pid)) {
+    const raho = state.fortresses[pid]?.raho ?? 0;
+    div.appendChild(makeBtn(`🏰 要塞を攻撃（ラホ${raho}）`, 'btn-primary', false, () => dispatch({ type: 'ATTACK_FORTRESS' })));
+  }
+  // 航海者 S8 七不思議: 不思議を建設（要件を満たせばクレーム→レベルアップ）。
+  if (state.wonderLevel !== undefined) {
+    const wa = bestWonderAction(state, pid);
+    if (wa && wa.type === 'BUILD_WONDER') {
+      const lvl = state.wonderLevel[pid] ?? 0;
+      const wid = wa.wonderId;
+      div.appendChild(makeBtn(`🏛 不思議を建設（Lv${lvl}→${lvl + 1}）`, 'btn-primary', false, () => dispatch({ type: 'BUILD_WONDER', wonderId: wid })));
+    }
+  }
   // 発展カードは騎士と商人では使わない（進歩カードに置換）。基本/航海者のみ表示。
   if (!isCk(state)) {
     div.appendChild(makeImgBtn(glyph('ic-cards'), [costLabel('発展カード', resCostParts(BUILD_COSTS.dev_card))], canDev ? 'btn-build' : 'btn-disabled', !canDev,

@@ -22,6 +22,7 @@ export type ScenarioId =
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
   | 'seafarers_forgottentribe' // 公式S5 忘れられた部族
   | 'seafarers_cloth'          // 公式S6 カタンの織物
+  | 'seafarers_pirateislands'  // 公式S7 海賊の島々
   | 'seafarers_wonders'        // 公式S8 カタンの七不思議
   | 'seafarers_newworld'       // 公式 New World（自由構築）
   | 'seafarers_archipelago'    // 非公式
@@ -37,6 +38,10 @@ export interface ScenarioBoard {
   edgeTokens?: Record<string, EdgeTokenKind>;
   /** S6 カタンの織物: 村タイル（タイルID→初期織物供給5）。 */
   villages?: Record<string, number>;
+  /** S7 海賊の島々: 要塞の頂点ID（要塞島ごとに1つ・プレイヤーへ手番順で割当）。 */
+  fortressVertices?: string[];
+  /** S7 海賊の島々: 海賊艦隊の固定経路（タイルID列）。 */
+  fleetPath?: string[];
 }
 
 export interface Scenario {
@@ -573,6 +578,51 @@ const seafarersWonders: Scenario = {
   victoryTarget: 10,
   rules: { wonders: true, newIslandBonusVp: 1 },
 };
+
+// ---- 公式S7「海賊の島々」: 本島(資源豊富)＋各自の海賊要塞(小島)。本島から船で要塞へ航路を延ばし
+//   3回攻撃して奪取（=自分の開拓地に）。海賊艦隊が中央の海を巡回し隣接建物から略奪。
+//   勝利: 自分の要塞を制圧 かつ 10点以上。 ----
+// ※デジタル版簡略: 公式の軍船による艦隊戦は省略（艦隊は確定的な脅威）。盗賊/最長交易路は通常通り使用。
+const PIRATE_HOME: LandMap = {
+  '-3,0':  { type: 'mountain', number: 8 },
+  '-3,1':  { type: 'field',    number: 5 },
+  '-3,2':  { type: 'pasture',  number: 10 },
+  '-2,-1': { type: 'mountain', number: 9 },
+  '-2,0':  { type: 'field',    number: 4 },
+  '-2,1':  { type: 'forest',   number: 11 },
+  '-2,2':  { type: 'hill',     number: 3 },
+  '-1,-2': { type: 'field',    number: 6 },
+  '-1,-1': { type: 'desert',   number: null, robber: true },
+  '-1,0':  { type: 'mountain', number: 2 },
+  '-1,1':  { type: 'field',    number: 9 },
+  '-1,2':  { type: 'pasture',  number: 10 },
+};
+// 要塞タイル（1タイルの小島・互いに海で隔離）。番号は奪取後の産出用。
+const PIRATE_FORTRESS_TILES: Record<string, number> = { '1,-2': 4, '1,2': 5, '3,-2': 9, '3,0': 10 };
+const PIRATE_FLEET_PATH: string[] = ['0,-2', '0,-1', '0,0', '0,1', '0,2']; // 中央の海を縦に巡回
+function buildPirateIslands(homeMap: LandMap, fortressTiles: Record<string, number>, fleetPath: string[]): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  const fullLand: LandMap = { ...homeMap };
+  for (const [tid, num] of Object.entries(fortressTiles)) fullLand[tid] = { type: 'pasture', number: num };
+  const base = buildFromLandMap(fullLand);
+  return (geo, rng) => {
+    const board = base(geo, rng);
+    // 各要塞タイルの代表頂点（攻略対象）。タイルの最初の頂点を採用。
+    const fortressVertices = Object.keys(fortressTiles)
+      .map(tid => (geo.tileToVertices[tid] ?? [])[0])
+      .filter((v): v is string => !!v);
+    return { ...board, fortressVertices, fleetPath };
+  };
+}
+const seafarersPirateIslands: Scenario = {
+  id: 'seafarers_pirateislands',
+  name: '航海者：海賊の島々',
+  description: '本島から船で自色の海賊要塞へ。3回攻撃して奪取し、10点以上で勝利。海賊艦隊が略奪する。',
+  category: 'seafarers',
+  coords: SEAFARERS_COORDS,
+  build: buildPirateIslands(PIRATE_HOME, PIRATE_FORTRESS_TILES, PIRATE_FLEET_PATH),
+  victoryTarget: 10,
+  rules: { pirateIslands: true, newIslandBonusVp: 0 },
+};
 const seafarersGoldenIsles: Scenario = {
   id: 'seafarers_goldenisles',
   name: '航海者：黄金諸島（非公式）',
@@ -622,6 +672,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   seafarers_throughdesert: seafarersThroughDesert,
   seafarers_forgottentribe: seafarersForgottenTribe,
   seafarers_cloth: seafarersCloth,
+  seafarers_pirateislands: seafarersPirateIslands,
   seafarers_wonders: seafarersWonders,
   seafarers_newworld: seafarersNewWorld,
   // 非公式オリジナルマップ

@@ -45,7 +45,7 @@ export function createInitialGameState(
   // シナリオ駆動の盤面生成。既定 'classic' は従来と同一（非破壊）。
   const scenario = getScenario(scenarioId);
   const geo = buildBoardGeometry(scenario.coords());
-  const { tiles, harbors, edgeTokens, villages } = scenario.build(geo, rng);
+  const { tiles, harbors, edgeTokens, villages, fortressVertices, fleetPath } = scenario.build(geo, rng);
 
   const ck = scenario.expansion === 'cities_knights';
   const players: GameState['players'] = {};
@@ -78,6 +78,14 @@ export function createInitialGameState(
   }
 
   const playerOrder = resolvePlayerOrder(allIds, orderMode, orderSpec, rng);
+
+  // S7 海賊の島々: 要塞を手番順でプレイヤーへ割り当てる（各自が自色の要塞を攻略）。
+  const fortresses: GameState['fortresses'] | undefined = fortressVertices
+    ? Object.fromEntries(
+        playerOrder.slice(0, fortressVertices.length)
+          .map((pid, i) => [pid, { vertexId: fortressVertices[i]!, raho: 3, captured: false }]),
+      )
+    : undefined;
 
   return {
     tiles,
@@ -116,6 +124,7 @@ export function createInitialGameState(
     ...(edgeTokens != null ? { edgeTokens } : {}),
     ...(villages != null ? { villages, villageConn: {}, cloth: {} } : {}),
     ...(scenario.rules?.wonders ? { wonderOwner: {}, wonderLevel: {} } : {}),
+    ...(fortresses ? { fortresses, pirateFleet: { path: fleetPath ?? [], pos: 0 } } : {}),
     ...(ck ? { expansion: 'cities_knights' as const, commodityBank: { ...COMMODITY_BANK_INITIAL }, barbarianPosition: 0, barbarianAttacks: 0, metropolis: {}, progressDecks: buildProgressDecks(rng), knightMovedThisTurn: false, knightChasedThisTurn: false } : {}),
     islandBonus: {},
     pendingTrade: null,

@@ -306,6 +306,14 @@ export function victoryTarget(state: GameState): number {
  * 満たしていれば winner と phase を更新した GameState を返す。
  */
 export function checkVictory(state: GameState, playerId: PlayerId): GameState {
+  // 航海者 S7「海賊の島々」: 自分の要塞を制圧 かつ victoryTarget(=10)以上で勝利。
+  if (state.fortresses !== undefined) {
+    const f = state.fortresses[playerId];
+    if (f?.captured && calcVP(state, playerId) >= victoryTarget(state)) {
+      return { ...state, winner: playerId, phase: 'GAME_OVER' };
+    }
+    return state;
+  }
   // 航海者 S8「カタンの七不思議」: 不思議完成（Lv4）or 10VP以上かつ単独で最高レベル。
   if (state.wonderLevel !== undefined) {
     const myLevel = state.wonderLevel[playerId] ?? 0;

@@ -294,6 +294,8 @@ export interface ScenarioRules {
   noIslandSettlement?: boolean;
   /** 七不思議モードを有効化するか（既定false）。S8 カタンの七不思議=true。 */
   wonders?: boolean;
+  /** 海賊の島々モードを有効化するか（既定false）。S7=true（各自の要塞を攻略）。 */
+  pirateIslands?: boolean;
 }
 
 // 航海者 S5「忘れられた部族」: 海の辺に事前配置されるトークンの種別。
@@ -412,6 +414,10 @@ export interface GameState {
   wonderOwner?: Record<string, PlayerId>;
   // S8: 各プレイヤーの不思議建設レベル（0..4・レベル4で完成）。存在＝七不思議シナリオ。
   wonderLevel?: Record<string, number>;
+  // 航海者 S7「海賊の島々」: 各プレイヤーの要塞（攻略対象の頂点＋ラホHP＋奪取済みフラグ）。存在＝S7。
+  fortresses?: Record<string, { vertexId: string; raho: number; captured: boolean }>;
+  // S7: 海賊艦隊。固定経路 path（タイルID列）上を pos の位置で巡回し、ダイス後に小さい目の数だけ前進。
+  pirateFleet?: { path: string[]; pos: number };
   // 航海者拡張: 各プレイヤーが初期配置した島の代表ID一覧（=自分のホーム島群）。
   // setupAnywhere のシナリオで「未探検島＝自分のホーム以外」をプレイヤー別に判定するために使う。
   // 初期配置中に BUILD_SETTLEMENT が記録する。基本/S1系では全員が本島のみ。
@@ -508,6 +514,7 @@ export type Action =
   | { type: 'BUILD_SETTLEMENT';    vertexId: VertexId }
   | { type: 'BUILD_CITY';          vertexId: VertexId }
   | { type: 'BUILD_WONDER';        wonderId: string } // 航海者 S8: 不思議のレベルを1段建設（必要ならクレーム）
+  | { type: 'ATTACK_FORTRESS' }                       // 航海者 S7: 隣接する自分の要塞をラホ1つ分攻撃
   | { type: 'BUY_DEV_CARD' }
   | { type: 'PLAY_KNIGHT' }
   | { type: 'PLAY_ROAD_BUILDING' }
