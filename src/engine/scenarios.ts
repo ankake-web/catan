@@ -96,7 +96,7 @@ const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; r
   '-3,2':  { type: 'pasture',  number: 10 },
   '-3,3':  { type: 'hill',     number: 4 },
   '-2,-1': { type: 'mountain', number: 9 },
-  '-2,0':  { type: 'field',    number: 6 },
+  '-2,0':  { type: 'field',    number: 4 },  // 赤数字6/8の隣接回避（-3,0=8と隣接のため非赤4に）
   '-2,1':  { type: 'forest',   number: 11 },
   '-2,2':  { type: 'pasture',  number: 3 },
   '-2,3':  { type: 'hill',     number: 6 },
@@ -218,7 +218,7 @@ const ARCHIPELAGO_LAND: LandMap = {
   '-3,1':  { type: 'forest',   number: 5 },
   '-3,2':  { type: 'field',    number: 11 },
   '-2,-1': { type: 'mountain', number: 6 },
-  '-2,0':  { type: 'hill',     number: 8 },
+  '-2,0':  { type: 'hill',     number: 9 },  // 赤6/8隣接回避（-2,-1=6と隣接のため非赤9に）
   '-2,1':  { type: 'forest',   number: 4 },
   '-2,2':  { type: 'pasture',  number: 3 },
   '-1,-2': { type: 'field',    number: 10 },
@@ -226,9 +226,9 @@ const ARCHIPELAGO_LAND: LandMap = {
   '-1,0':  { type: 'mountain', number: 5 },
   '-1,1':  { type: 'hill',     number: 9 },
   '-1,2':  { type: 'forest',   number: 11 },
-  // 新島A（右上 6）。玄関口(1,-1)に金タイル。
+  // 新島A（右上 6）。玄関口(1,-1)に金タイル（金に赤数字は置かない）。
   '1,-2':  { type: 'field',    number: 4 },
-  '1,-1':  { type: 'gold',     number: 8 },  // 金（任意資源）
+  '1,-1':  { type: 'gold',     number: 5 },  // 金（任意資源・非赤。2,-1=6隣接の赤回避も兼ねる）
   '2,-2':  { type: 'forest',   number: 10 },
   '2,-1':  { type: 'mountain', number: 6 },
   '3,-2':  { type: 'pasture',  number: 3 },
@@ -282,7 +282,7 @@ const BIG_MAIN_ISLAND: LandMap = {
   '-3,2':  { type: 'pasture',  number: 10 },
   '-3,3':  { type: 'hill',     number: 4 },
   '-2,-1': { type: 'mountain', number: 9 },
-  '-2,0':  { type: 'field',    number: 6 },
+  '-2,0':  { type: 'field',    number: 4 },  // 赤数字6/8の隣接回避（-3,0=8と隣接のため非赤4に）
   '-2,1':  { type: 'forest',   number: 11 },
   '-2,2':  { type: 'pasture',  number: 3 },
   '-2,3':  { type: 'hill',     number: 6 },
@@ -332,9 +332,9 @@ const GOLDEN_ISLES_LAND: LandMap = {
 // ---- 連なる島々：小さな島が点在（島ボーナスを稼ぐアイランドホッピング）。 ----
 const CHAIN_ISLES_LAND: LandMap = {
   ...MAIN_ISLAND,
-  // 島1（上）
+  // 島1（上）。金に赤数字は置かない・6/8隣接回避。
   '1,-2': { type: 'field',    number: 6 },
-  '1,-1': { type: 'gold',     number: 8 },
+  '1,-1': { type: 'gold',     number: 5 },
   // 島2（中）
   '2,0':  { type: 'forest',   number: 5 },
   '3,0':  { type: 'pasture',  number: 9 },
@@ -350,7 +350,7 @@ const GREATER_CATAN_LAND: LandMap = {
   '0,-2': { type: 'forest',   number: 3 },
   '0,-1': { type: 'field',    number: 11 },
   '0,0':  { type: 'pasture',  number: 6 },
-  '0,1':  { type: 'hill',     number: 8 },
+  '0,1':  { type: 'hill',     number: 9 },   // 赤6/8隣接回避（0,0=6と隣接のため非赤9に）
   '1,-2': { type: 'mountain', number: 4 },
   '1,-1': { type: 'gold',     number: 10 },
   '1,0':  { type: 'forest',   number: 9 },
@@ -493,7 +493,7 @@ const FOUR_ISLANDS_LAND: LandMap = {
   '2,-1': { type: 'forest',   number: 4 },
   '3,-2': { type: 'field',    number: 10 },
   '3,-1': { type: 'pasture',  number: 8 },
-  '3,0':  { type: 'hill',     number: 6 },
+  '3,0':  { type: 'hill',     number: 4 },   // 赤数字6/8の隣接回避（3,-1=8と隣接のため非赤4に）
   // 島D（南）
   '0,1':  { type: 'forest',   number: 9 },
   '0,2':  { type: 'field',    number: 5 },
@@ -553,7 +553,7 @@ const WONDERS_LAND: LandMap = {
   '-3,2':  { type: 'pasture',  number: 10 },
   '-3,3':  { type: 'mountain', number: 4 },
   '-2,-1': { type: 'mountain', number: 9 },
-  '-2,0':  { type: 'field',    number: 6 },
+  '-2,0':  { type: 'field',    number: 4 },  // 赤数字6/8の隣接回避（-3,0=8と隣接のため非赤4に）
   '-2,1':  { type: 'forest',   number: 11 },
   '-2,2':  { type: 'hill',     number: 3 },
   '-2,3':  { type: 'field',    number: 6 },
