@@ -49,12 +49,12 @@ describe('scenarios: classic は従来どおり（非破壊）', () => {
 describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
 
-  it('大きめ footprint（29ヘックス）で陸21・海8・砂漠1・金2（公式S1は金タイル2枚）', () => {
-    expect(Object.keys(s.tiles)).toHaveLength(29);
-    expect(count(s.tiles, 'sea')).toBe(8);
+  it('公式S1級 footprint（37ヘックス）で陸22・海15・砂漠1・金2（公式S1は金タイル2枚）', () => {
+    expect(Object.keys(s.tiles)).toHaveLength(37);
+    expect(count(s.tiles, 'sea')).toBe(15);
     expect(count(s.tiles, 'gold')).toBe(2);
     expect(count(s.tiles, 'desert')).toBe(1);
-    expect(29 - 8).toBe(21); // 海以外＝陸21（金タイルも陸に含む）
+    expect(37 - 15).toBe(22); // 海以外＝陸22（金タイルも陸に含む）
   });
 
   it('公式S1: 勝利点は14・新島初入植ボーナスは+2', () => {
@@ -62,18 +62,17 @@ describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', (
     expect(s.newIslandBonusVp ?? 2).toBe(2);
   });
 
-  it('本島12＋新島9 の二島に分かれる', () => {
+  it('本島15＋新島7 の二島に分かれる', () => {
     const repOf = computeIslandReps(s.tiles);
     const sizes = [...new Set(Object.values(repOf))]
       .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
-    expect(sizes).toEqual([12, 9]);
+    expect(sizes).toEqual([15, 7]);
   });
 
   it('海峡(q=0列)が全て海で左右の陸塊を分離（船が必要）', () => {
-    for (const r of [-2, -1, 0, 1, 2]) expect(s.tiles[`0,${r}`]?.type).toBe('sea');
-    // 左(q=-3..-1)と右(q=1..3)に陸がある
+    for (const r of [-3, -2, -1, 0, 1, 2, 3]) expect(s.tiles[`0,${r}`]?.type).toBe('sea');
     expect(s.tiles['-1,-1']?.type).toBe('desert'); // 本島の砂漠
-    expect(s.tiles['1,-1']?.type).toBe('gold');    // 新島の玄関口＝金
+    expect(s.tiles['1,-1']?.type).toBe('gold');    // 新島の金
   });
 
   it('海タイルは数字なし・盗賊なし。陸タイルは砂漠以外に数字あり', () => {
@@ -153,11 +152,11 @@ describe('scenarios: 航海者「砂漠を越えて」(公式S4)', () => {
     expect(count(s.tiles, 'gold')).toBe(2);
     expect(count(s.tiles, 'desert')).toBe(2);
   });
-  it('本島(最大12)と新天地が海で分かれる2島', () => {
+  it('本島(最大15)と新天地が海で分かれる2島', () => {
     const repOf = computeIslandReps(s.tiles);
     const sizes = [...new Set(Object.values(repOf))]
       .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
-    expect(sizes).toEqual([12, 6]);
+    expect(sizes).toEqual([15, 7]);
   });
 });
 
@@ -212,10 +211,10 @@ describe('scenarios: 航海者「新世界」(New World)', () => {
     expect(s.newIslandBonusVp).toBe(1);
     expect(s.setupAnywhere).toBe(true);
   });
-  it('3島に分かれ、本島が一意に最大', () => {
+  it('3島に分かれ、本島が一意に最大（公式級37ヘックス）', () => {
     const repOf = computeIslandReps(s.tiles);
     const sizes = [...new Set(Object.values(repOf))]
       .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
-    expect(sizes).toEqual([8, 6, 3]);
+    expect(sizes).toEqual([15, 3, 3]);
   });
 });

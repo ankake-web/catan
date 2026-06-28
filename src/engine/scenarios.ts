@@ -73,38 +73,42 @@ const classic: Scenario = {
   build: (geo, rng) => createRandomBoard(geo, rng),
 };
 
-// 航海者マップは大きめの footprint（半径3＝29ヘックス）を使う。盤面は自動縮小して収まる。
+// 航海者マップの footprint。盤面は自動縮小して収まる。
+//   SEAFARERS_COORDS=29（小盤）/ BIG_COORDS=37（公式35級）/ HUGE_COORDS=51（公式49級）。
+// 公式コンポ数に近づけるため、各シナリオは規模に応じて footprint を選ぶ。
 const SEAFARERS_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 2, 3);
-// S2「4つの島」用のやや大きい footprint（37ヘックス）。4島を海で分離して配置できる広さ。
-const FOUR_ISLANDS_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 3, 3);
+const BIG_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 3, 3);   // 37ヘックス
+const HUGE_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(4, 3, 4);  // 51ヘックス
+const FOUR_ISLANDS_COORDS = BIG_COORDS; // S2 は 37ヘックス（4島）
 
-// ---- 航海者「新たな海岸を求めて」 ----
-// 本島(左 q=-3..-1 = 12タイル)＋海峡(q=0列)＋新しい島(右 q=1..3 = 9タイル)。
-//   左右の陸は海峡で隔てられ、新島へは船で渡る。新島の玄関口(1,-1)に金タイル。陸21タイル。
+// ---- 航海者「新たな海岸を目指して」（公式S1・37ヘックス級） ----
+// 本島(左 q=-3..-1 = 15タイル・全5資源＋砂漠)＋海峡(q=0列＝海)＋新しい島(右 7タイル・金2)。
+//   公式コンポ目安(35)に寄せた拡張版。本島が一意最大・新島へは船で渡り初入植+2点。
 const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; robber?: boolean }> = {
-  // 本島（左 12）
+  // 本島（左 15・全5資源＋砂漠=盗賊初期）
   '-3,0':  { type: 'forest',   number: 8 },
   '-3,1':  { type: 'field',    number: 5 },
   '-3,2':  { type: 'pasture',  number: 10 },
-  '-2,-1': { type: 'hill',     number: 9 },
-  '-2,0':  { type: 'mountain', number: 4 },
+  '-3,3':  { type: 'hill',     number: 4 },
+  '-2,-1': { type: 'mountain', number: 9 },
+  '-2,0':  { type: 'field',    number: 6 },
   '-2,1':  { type: 'forest',   number: 11 },
-  '-2,2':  { type: 'field',    number: 3 },
-  '-1,-2': { type: 'pasture',  number: 6 },
-  '-1,-1': { type: 'desert',   number: null, robber: true }, // 砂漠（盗賊初期位置）
-  '-1,0':  { type: 'hill',     number: 2 },
-  '-1,1':  { type: 'mountain', number: 9 },
+  '-2,2':  { type: 'pasture',  number: 3 },
+  '-2,3':  { type: 'hill',     number: 6 },
+  '-1,-2': { type: 'field',    number: 4 },
+  '-1,-1': { type: 'desert',   number: null, robber: true },
+  '-1,0':  { type: 'mountain', number: 2 },
+  '-1,1':  { type: 'pasture',  number: 9 },
   '-1,2':  { type: 'forest',   number: 10 },
-  // 新しい島（右 9）。玄関口(1,-1)に金タイル。残り(0列・1,2・2,1・3,0)は海。
+  '-1,3':  { type: 'mountain', number: 5 },
+  // 新しい島（右 7・連続・金2）。残りの q>=1 と q=0 列は海。
   '1,-2':  { type: 'field',    number: 4 },
-  '1,-1':  { type: 'gold',     number: 8 },  // 金（任意資源）。新島の玄関口。
-  '1,0':   { type: 'pasture',  number: 10 },
-  '1,1':   { type: 'hill',     number: 5 },
+  '1,-1':  { type: 'gold',     number: 5 },  // 金（任意資源）
+  '1,0':   { type: 'pasture',  number: 11 },
   '2,-2':  { type: 'forest',   number: 9 },
-  '2,-1':  { type: 'mountain', number: 3 },
-  '2,0':   { type: 'field',    number: 11 },
-  '3,-2':  { type: 'pasture',  number: 6 },
-  '3,-1':  { type: 'gold',     number: 4 },  // 金2枚目（公式S1は金タイル2枚）。新島の奥。
+  '2,-1':  { type: 'hill',     number: 3 },
+  '3,-2':  { type: 'gold',     number: 4 },  // 金2枚目
+  '3,-1':  { type: 'mountain', number: 6 },
 };
 
 // 海岸線（陸1・海1 に面する辺）に港を決定論的に配置する。
@@ -189,7 +193,7 @@ const seafarersNewShores: Scenario = {
   name: '航海者：新たな海岸を目指して',
   description: '本島から海を渡り、対岸の新島へ入植。新しい島への初入植ごとに+2点（14点で勝利）。',
   category: 'seafarers',
-  coords: SEAFARERS_COORDS,
+  coords: BIG_COORDS,
   build: buildFromLandMap(NEW_SHORES_LAND),
   victoryTarget: 14,
   rules: { newIslandBonusVp: 2 },
@@ -261,17 +265,39 @@ const MAIN_ISLAND: LandMap = {
   '-1,2':  { type: 'field',    number: 5 },
 };
 
+// 公式級(37ヘックス)の共通本島＝BIG_COORDS の q<=-1 領域15タイル（全5資源＋砂漠=盗賊初期）。
+// q=0列は海、q>=1 が新天地（各シナリオが島/霧/トークン/村/要塞を配置）。本島が常に一意最大。
+const BIG_MAIN_ISLAND: LandMap = {
+  '-3,0':  { type: 'forest',   number: 8 },
+  '-3,1':  { type: 'field',    number: 5 },
+  '-3,2':  { type: 'pasture',  number: 10 },
+  '-3,3':  { type: 'hill',     number: 4 },
+  '-2,-1': { type: 'mountain', number: 9 },
+  '-2,0':  { type: 'field',    number: 6 },
+  '-2,1':  { type: 'forest',   number: 11 },
+  '-2,2':  { type: 'pasture',  number: 3 },
+  '-2,3':  { type: 'hill',     number: 6 },
+  '-1,-2': { type: 'field',    number: 4 },
+  '-1,-1': { type: 'desert',   number: null, robber: true },
+  '-1,0':  { type: 'mountain', number: 2 },
+  '-1,1':  { type: 'pasture',  number: 9 },
+  '-1,2':  { type: 'forest',   number: 10 },
+  '-1,3':  { type: 'mountain', number: 5 },
+};
+
 // ---- 公式S4「砂漠を越えて」：本島(左12)から広い大洋を渡った先に、砂漠を含む新天地（右奥 q=2,3）。
 //   長い航路で渡り、新天地への初入植ごとに各自+2VP。金タイル2枚。14点。
 //   ※公式の「砂漠帯で陸を分断」は、デジタル版では大洋＋砂漠を含む別島として表現（地図画像があれば作り込む）。
 const THROUGH_DESERT_LAND: LandMap = {
-  ...MAIN_ISLAND,                            // 本島12（全5資源＋砂漠 -1,-1=盗賊初期）
-  '2,-2': { type: 'forest',   number: 5 },
-  '3,-2': { type: 'gold',     number: 4 },   // 金1（赤数字を避ける）
-  '2,-1': { type: 'field',    number: 3 },
-  '3,-1': { type: 'pasture',  number: 10 },
-  '3,0':  { type: 'gold',     number: 11 },  // 金2
-  '2,1':  { type: 'desert',   number: null }, // 砂漠（盗賊なし・テーマ）。新天地6タイル。
+  ...BIG_MAIN_ISLAND,                         // 本島15（全5資源＋砂漠 -1,-1=盗賊初期）
+  // 海を渡った新天地（右 7・連続）。砂漠を含み、金2。初入植+2点。
+  '1,-2': { type: 'field',    number: 4 },
+  '1,-1': { type: 'gold',     number: 5 },    // 金1
+  '1,0':  { type: 'pasture',  number: 11 },
+  '2,-2': { type: 'desert',   number: null }, // 砂漠（テーマ・盗賊なし）
+  '2,-1': { type: 'forest',   number: 9 },
+  '3,-2': { type: 'gold',     number: 4 },    // 金2
+  '3,-1': { type: 'hill',     number: 3 },
 };
 
 // ---- 黄金諸島：右に2つの新島、合計3つの金タイル。ゴールドラッシュ。 ----
@@ -324,26 +350,15 @@ const GREATER_CATAN_LAND: LandMap = {
 // ---- 公式 New World（自由構築）: 本島＋複数の小島。どの島にも初期配置でき(setupAnywhere)、
 //   自分が初期配置した島以外への初入植ごとに各自+1VP。12点。 ----
 const NEW_WORLD_LAND: LandMap = {
-  // 本島（左 8・全5資源＋砂漠）
-  '-3,0':  { type: 'forest',   number: 8 },
-  '-3,1':  { type: 'field',    number: 5 },
-  '-2,-1': { type: 'hill',     number: 9 },
-  '-2,0':  { type: 'mountain', number: 4 },
-  '-2,1':  { type: 'pasture',  number: 11 },
-  '-1,-1': { type: 'desert',   number: null, robber: true },
-  '-1,0':  { type: 'forest',   number: 6 },
-  '-1,1':  { type: 'hill',     number: 3 },
-  // 新島A（右上 6・金1）
+  ...BIG_MAIN_ISLAND,                          // 本島15（出発島の1つ・全5資源＋砂漠）
+  // 新島A（右上 3・金1）。どの島にも初期配置でき、出発島以外への初入植で+1点。
   '1,-2':  { type: 'field',    number: 4 },
   '1,-1':  { type: 'gold',     number: 5 },
-  '2,-2':  { type: 'forest',   number: 10 },
-  '2,-1':  { type: 'pasture',  number: 9 },
-  '3,-2':  { type: 'mountain', number: 8 },
-  '3,-1':  { type: 'hill',     number: 6 },
-  // 新島B（右下 3）
-  '1,1':   { type: 'field',    number: 3 },
-  '1,2':   { type: 'pasture',  number: 11 },
-  '2,1':   { type: 'forest',   number: 4 },
+  '1,0':   { type: 'pasture',  number: 11 },
+  // 新島B（右下 3・金1）
+  '3,-2':  { type: 'forest',   number: 9 },
+  '3,-1':  { type: 'gold',     number: 4 },
+  '3,0':   { type: 'hill',     number: 3 },
 };
 
 const seafarersThroughDesert: Scenario = {
@@ -351,7 +366,7 @@ const seafarersThroughDesert: Scenario = {
   name: '航海者：砂漠を越えて',
   description: '本島から広い大洋を渡り、砂漠を含む新天地へ。新天地への初入植ごとに+2点（14点で勝利）。',
   category: 'seafarers',
-  coords: SEAFARERS_COORDS,
+  coords: BIG_COORDS,
   build: buildFromLandMap(THROUGH_DESERT_LAND),
   victoryTarget: 14,
   rules: { newIslandBonusVp: 2 },
@@ -361,7 +376,7 @@ const seafarersNewWorld: Scenario = {
   name: '航海者：新世界（New World）',
   description: 'どの島にも入植でき、自分の出発島以外への初入植ごとに+1点。海を制す自由構築（12点）。',
   category: 'seafarers',
-  coords: SEAFARERS_COORDS,
+  coords: BIG_COORDS,
   build: buildFromLandMap(NEW_WORLD_LAND),
   victoryTarget: 12,
   rules: { newIslandBonusVp: 1, setupAnywhere: true },
@@ -369,33 +384,22 @@ const seafarersNewWorld: Scenario = {
 
 // ---- 公式S3「霧の島」: 本島(左12)の周りに霧の海域。船/道/開拓地で進むと霧が晴れ、
 //   陸なら数字＋資源1枚が出現（探索の報酬）。12点。 ----
-const FOG_MAIN: LandMap = {
-  '-3,0':  { type: 'forest',   number: 8 },
-  '-3,1':  { type: 'field',    number: 5 },
-  '-3,2':  { type: 'pasture',  number: 10 },
-  '-2,-1': { type: 'hill',     number: 9 },
-  '-2,0':  { type: 'mountain', number: 4 },
-  '-2,1':  { type: 'forest',   number: 11 },
-  '-2,2':  { type: 'field',    number: 3 },
-  '-1,-2': { type: 'pasture',  number: 6 },
-  '-1,-1': { type: 'desert',   number: null, robber: true },
-  '-1,0':  { type: 'hill',     number: 2 },
-  '-1,1':  { type: 'mountain', number: 9 },
-  '-1,2':  { type: 'forest',   number: 10 },
-};
-// 霧（右側 q=1..3）。表向きは海、探索で公開＝陸7/海5。
+// 霧（右側 q>=1 の全15セル）。表向きは海、探索で公開＝陸9/海6。
 const FOG_HIDDEN: FogMap = {
-  '1,-2': { type: 'sea',     number: null },
-  '1,-1': { type: 'forest',  number: 5 },
-  '1,0':  { type: 'field',   number: 4 },
-  '1,1':  { type: 'pasture', number: 9 },
-  '1,2':  { type: 'sea',     number: null },
-  '2,-2': { type: 'hill',    number: 3 },
-  '2,-1': { type: 'sea',     number: null },
-  '2,0':  { type: 'mountain',number: 6 },
-  '2,1':  { type: 'field',   number: 5 },
-  '3,-2': { type: 'sea',     number: null },
-  '3,-1': { type: 'forest',  number: 10 },
+  '1,-3': { type: 'sea',     number: null },
+  '1,-2': { type: 'forest',  number: 5 },
+  '1,-1': { type: 'field',   number: 4 },
+  '1,0':  { type: 'pasture', number: 9 },
+  '1,1':  { type: 'sea',     number: null },
+  '1,2':  { type: 'hill',    number: 3 },
+  '2,-3': { type: 'sea',     number: null },
+  '2,-2': { type: 'mountain',number: 6 },
+  '2,-1': { type: 'field',   number: 5 },
+  '2,0':  { type: 'sea',     number: null },
+  '2,1':  { type: 'forest',  number: 8 },
+  '3,-3': { type: 'sea',     number: null },
+  '3,-2': { type: 'pasture', number: 4 },
+  '3,-1': { type: 'hill',    number: 9 },
   '3,0':  { type: 'sea',     number: null },
 };
 const seafarersFogIslands: Scenario = {
@@ -403,30 +407,14 @@ const seafarersFogIslands: Scenario = {
   name: '航海者：霧の島',
   description: '霧に包まれた海域。船・道・開拓地で進むたびに霧が晴れ、島や資源が現れる（12点）。',
   category: 'seafarers',
-  coords: SEAFARERS_COORDS,
-  build: buildFromLandFogMap(FOG_MAIN, FOG_HIDDEN),
+  coords: BIG_COORDS,
+  build: buildFromLandFogMap(BIG_MAIN_ISLAND, FOG_HIDDEN),
   victoryTarget: 12,
   rules: { newIslandBonusVp: 0 }, // 探索の報酬は資源（島ボーナスVPは無し）
 };
 
-// ---- 公式S5「忘れられた部族」: 本島(左14・全数字)＋右の海域に VP/開発カード/港 トークン。
+// ---- 公式S5「忘れられた部族」: 本島(左15・全数字)＋右の海域に VP/開発カード/港 トークン。
 //   船で到達して獲得。開拓地・盗賊は数字ヘックスのみ。13点。 ----
-const FORGOTTEN_TRIBE_LAND: LandMap = {
-  '-3,0':  { type: 'forest',   number: 8 },
-  '-3,1':  { type: 'field',    number: 5 },
-  '-3,2':  { type: 'pasture',  number: 10 },
-  '-2,-1': { type: 'hill',     number: 9 },
-  '-2,0':  { type: 'mountain', number: 4 },
-  '-2,1':  { type: 'forest',   number: 11 },
-  '-2,2':  { type: 'field',    number: 3 },
-  '-1,-2': { type: 'pasture',  number: 6 },
-  '-1,-1': { type: 'desert',   number: null, robber: true },
-  '-1,0':  { type: 'hill',     number: 2 },
-  '-1,1':  { type: 'mountain', number: 9 },
-  '-1,2':  { type: 'forest',   number: 10 },
-  '0,-1':  { type: 'field',    number: 4 },
-  '0,0':   { type: 'pasture',  number: 5 },
-};
 // 右の海域（q>=1）の開放海辺へトークンを散らす（決定論・等間隔サンプリング）。
 function buildForgottenTribe(landMap: LandMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
   const base = buildFromLandMap(landMap);
@@ -455,8 +443,8 @@ const seafarersForgottenTribe: Scenario = {
   name: '航海者：忘れられた部族',
   description: '海に眠るVP・開発カード・港のトークンを船で回収。開拓地は数字ヘックスのみ（13点）。',
   category: 'seafarers',
-  coords: SEAFARERS_COORDS,
-  build: buildForgottenTribe(FORGOTTEN_TRIBE_LAND),
+  coords: BIG_COORDS,
+  build: buildForgottenTribe(BIG_MAIN_ISLAND),
   victoryTarget: 13,
   rules: { numberHexOnly: true, newIslandBonusVp: 0 },
 };
@@ -500,24 +488,10 @@ const seafarersFourIslands: Scenario = {
   rules: { newIslandBonusVp: 2, setupAnywhere: true },
 };
 
-// ---- 公式S6「カタンの織物」: 本島(左12)＋小島の「村」5つ。自分の建物から航路（船）を村へ
+// ---- 公式S6「カタンの織物」: 本島(左15)＋小島の「村」5つ。自分の建物から航路（船）を村へ
 //   つなぐと織物トークン（接続で1枚＋村の数字が出るたび接続者へ1枚、各村5枚）。織物2枚=1VP。
 //   小島には開拓地建設不可・最長交易路タイル不使用。14点、または5村供給切れで最多VP。 ----
 // ※デジタル版簡略: 初期配置は標準の2軒（公式の3軒は未対応）。村は1タイルの小島として配置。
-const CLOTH_MAIN: LandMap = {
-  '-3,0':  { type: 'forest',   number: 8 },
-  '-3,1':  { type: 'field',    number: 5 },
-  '-3,2':  { type: 'pasture',  number: 10 },
-  '-2,-1': { type: 'hill',     number: 9 },
-  '-2,0':  { type: 'mountain', number: 4 },
-  '-2,1':  { type: 'forest',   number: 11 },
-  '-2,2':  { type: 'field',    number: 3 },
-  '-1,-2': { type: 'pasture',  number: 6 },
-  '-1,-1': { type: 'desert',   number: null, robber: true },
-  '-1,0':  { type: 'hill',     number: 2 },
-  '-1,1':  { type: 'mountain', number: 9 },
-  '-1,2':  { type: 'forest',   number: 10 },
-};
 // 村（1タイルの小島・互いに海で隔離）。各村に数字ディスク（生産で織物を産む）。
 const CLOTH_VILLAGE_NUMBERS: Record<string, number> = {
   '1,-2': 4, '1,0': 5, '1,2': 6, '3,-2': 9, '3,0': 10,
@@ -540,8 +514,8 @@ const seafarersCloth: Scenario = {
   name: '航海者：カタンの織物',
   description: '小島の村へ航路をつなぎ織物を集める（2枚で1点）。小島は入植不可・最長交易路なし（14点）。',
   category: 'seafarers',
-  coords: SEAFARERS_COORDS,
-  build: buildClothScenario(CLOTH_MAIN, CLOTH_VILLAGE_NUMBERS),
+  coords: BIG_COORDS,
+  build: buildClothScenario(BIG_MAIN_ISLAND, CLOTH_VILLAGE_NUMBERS),
   victoryTarget: 14,
   rules: { useLongestRoute: false, noIslandSettlement: true, newIslandBonusVp: 0 },
 };
@@ -549,31 +523,34 @@ const seafarersCloth: Scenario = {
 // ---- 公式S8「カタンの七不思議」: 本島(資源豊富・特に鉄/麦)＋小島2つ。要件を満たして不思議を
 //   クレームし4レベル建設→完成で勝利。または10点以上かつ単独最高レベル。小島初入植+1点。 ----
 const WONDERS_LAND: LandMap = {
-  // 本島（12・全5資源／鉄・麦多めで不思議建設向き）
+  // 本島（15・全5資源／鉄・麦多めで不思議建設向き）
   '-3,0':  { type: 'mountain', number: 8 },
   '-3,1':  { type: 'field',    number: 5 },
   '-3,2':  { type: 'pasture',  number: 10 },
+  '-3,3':  { type: 'mountain', number: 4 },
   '-2,-1': { type: 'mountain', number: 9 },
-  '-2,0':  { type: 'field',    number: 4 },
+  '-2,0':  { type: 'field',    number: 6 },
   '-2,1':  { type: 'forest',   number: 11 },
   '-2,2':  { type: 'hill',     number: 3 },
-  '-1,-2': { type: 'field',    number: 6 },
+  '-2,3':  { type: 'field',    number: 6 },
+  '-1,-2': { type: 'field',    number: 4 },
   '-1,-1': { type: 'desert',   number: null, robber: true },
   '-1,0':  { type: 'mountain', number: 2 },
-  '-1,1':  { type: 'field',    number: 9 },
-  '-1,2':  { type: 'pasture',  number: 10 },
-  // 小島A（右上）・小島B（右下）。初入植で+1点。
-  '1,-1':  { type: 'forest',   number: 8 },
-  '1,0':   { type: 'pasture',  number: 4 },
-  '3,-1':  { type: 'hill',     number: 5 },
-  '3,0':   { type: 'field',    number: 9 },
+  '-1,1':  { type: 'pasture',  number: 9 },
+  '-1,2':  { type: 'forest',   number: 10 },
+  '-1,3':  { type: 'field',    number: 5 },
+  // 小島A（右上 2）・小島B（右下 2）。初入植で+1点。鉄/麦を補強。
+  '1,-1':  { type: 'field',    number: 4 },
+  '1,0':   { type: 'mountain', number: 5 },
+  '3,-1':  { type: 'field',    number: 9 },
+  '3,0':   { type: 'mountain', number: 6 },
 };
 const seafarersWonders: Scenario = {
   id: 'seafarers_wonders',
   name: '航海者：カタンの七不思議',
   description: '要件を満たして不思議をクレームし、4レベル建設して完成を競う（完成 or 10点＋最高レベル）。',
   category: 'seafarers',
-  coords: SEAFARERS_COORDS,
+  coords: BIG_COORDS,
   build: buildFromLandMap(WONDERS_LAND),
   victoryTarget: 10,
   rules: { wonders: true, newIslandBonusVp: 1 },
@@ -583,20 +560,6 @@ const seafarersWonders: Scenario = {
 //   3回攻撃して奪取（=自分の開拓地に）。海賊艦隊が中央の海を巡回し隣接建物から略奪。
 //   勝利: 自分の要塞を制圧 かつ 10点以上。 ----
 // ※デジタル版簡略: 公式の軍船による艦隊戦は省略（艦隊は確定的な脅威）。盗賊/最長交易路は通常通り使用。
-const PIRATE_HOME: LandMap = {
-  '-3,0':  { type: 'mountain', number: 8 },
-  '-3,1':  { type: 'field',    number: 5 },
-  '-3,2':  { type: 'pasture',  number: 10 },
-  '-2,-1': { type: 'mountain', number: 9 },
-  '-2,0':  { type: 'field',    number: 4 },
-  '-2,1':  { type: 'forest',   number: 11 },
-  '-2,2':  { type: 'hill',     number: 3 },
-  '-1,-2': { type: 'field',    number: 6 },
-  '-1,-1': { type: 'desert',   number: null, robber: true },
-  '-1,0':  { type: 'mountain', number: 2 },
-  '-1,1':  { type: 'field',    number: 9 },
-  '-1,2':  { type: 'pasture',  number: 10 },
-};
 // 要塞タイル（1タイルの小島・互いに海で隔離）。番号は奪取後の産出用。
 const PIRATE_FORTRESS_TILES: Record<string, number> = { '1,-2': 4, '1,2': 5, '3,-2': 9, '3,0': 10 };
 const PIRATE_FLEET_PATH: string[] = ['0,-2', '0,-1', '0,0', '0,1', '0,2']; // 中央の海を縦に巡回
@@ -618,8 +581,8 @@ const seafarersPirateIslands: Scenario = {
   name: '航海者：海賊の島々',
   description: '本島から船で自色の海賊要塞へ。3回攻撃して奪取し、10点以上で勝利。海賊艦隊が略奪する。',
   category: 'seafarers',
-  coords: SEAFARERS_COORDS,
-  build: buildPirateIslands(PIRATE_HOME, PIRATE_FORTRESS_TILES, PIRATE_FLEET_PATH),
+  coords: BIG_COORDS,
+  build: buildPirateIslands(BIG_MAIN_ISLAND, PIRATE_FORTRESS_TILES, PIRATE_FLEET_PATH),
   victoryTarget: 10,
   rules: { pirateIslands: true, newIslandBonusVp: 0 },
 };
