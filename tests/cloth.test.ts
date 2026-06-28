@@ -3,6 +3,7 @@ import { createInitialGameState } from '../src/engine/createState';
 import type { PlayerSpec } from '../src/engine/createState';
 import { createRng } from '../src/engine/setup';
 import { applyAction } from '../src/engine/game';
+import { chooseAction } from '../src/engine/ai';
 import { connectVillagesAround, produceCloth, checkClothEnd, clothVp } from '../src/engine/cloth';
 import { calcVP } from '../src/engine/scoring';
 import { canBuildSettlement } from '../src/engine/actions';
@@ -91,5 +92,58 @@ describe('S6 カタンの織物', () => {
     expect(next.edges[e]!.ship?.playerId).toBe('player1');
     expect(next.cloth?.player1).toBe(1);
     expect(next.villages![villageId]).toBe(4);
+  });
+});
+
+describe('S6 カタンの織物: 初期配置3軒（[D3]）', () => {
+  const SPECS3: PlayerSpec[] = [
+    { id: 'player1', name: 'A', color: 'red',    type: 'ai', aiDifficulty: 'normal' },
+    { id: 'player2', name: 'B', color: 'blue',   type: 'ai', aiDifficulty: 'normal' },
+    { id: 'player3', name: 'C', color: 'purple', type: 'ai', aiDifficulty: 'normal' },
+  ];
+  const totalHand = (p: { hand: Record<string, number> }) => Object.values(p.hand).reduce((a, b) => a + b, 0);
+  const countBuildings = (s: GameState, pid: string) =>
+    Object.values(s.vertices).filter(v => v.building?.playerId === pid).length;
+
+  it('startingSettlements が 3 に設定されている', () => {
+    expect(cloth().startingSettlements).toBe(3);
+  });
+
+  it('AI で初期配置を完走すると各プレイヤーが3軒・資源は3軒目でのみ付与', () => {
+    const rng = createRng(7);
+    let s = createInitialGameState(SPECS3, 'fixed', ['player1', 'player2', 'player3'], rng, 'seafarers_cloth');
+    let guard = 0;
+    while (s.phase !== 'MAIN' && guard++ < 3000) {
+      const pid = s.playerOrder[s.currentPlayerIndex]!;
+      const handBefore = totalHand(s.players[pid]!);
+      const buildingsBefore = countBuildings(s, pid);
+      const a = chooseAction(s, pid, { rng });
+      if (!a) break;
+      s = applyAction(s, a, rng);
+      if (a.type === 'BUILD_SETTLEMENT' && buildingsBefore + 1 < 3) {
+        // 1軒目・2軒目では資源を得ない（公式: 最初の2軒は資源なし）
+        expect(totalHand(s.players[pid]!)).toBe(handBefore);
+      }
+    }
+    expect(s.phase).toBe('MAIN');
+    for (const pid of s.playerOrder) expect(countBuildings(s, pid)).toBe(3);
+    // 3軒目の隣接タイルから資源が配られている（盤は数字付きの本島なので全体で>0）
+    const handsTotal = s.playerOrder.reduce((acc, pid) => acc + totalHand(s.players[pid]!), 0);
+    expect(handsTotal).toBeGreaterThan(0);
+  });
+
+  it('標準の2軒シナリオ（新たな海岸）は従来どおり各2軒で完走する（非回帰）', () => {
+    const rng = createRng(7);
+    let s = createInitialGameState(SPECS3, 'fixed', ['player1', 'player2', 'player3'], rng, 'seafarers_newshores');
+    expect(s.startingSettlements ?? 2).toBe(2);
+    let guard = 0;
+    while (s.phase !== 'MAIN' && guard++ < 3000) {
+      const pid = s.playerOrder[s.currentPlayerIndex]!;
+      const a = chooseAction(s, pid, { rng });
+      if (!a) break;
+      s = applyAction(s, a, rng);
+    }
+    expect(s.phase).toBe('MAIN');
+    for (const pid of s.playerOrder) expect(countBuildings(s, pid)).toBe(2);
   });
 });

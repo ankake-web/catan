@@ -491,7 +491,7 @@ const seafarersFourIslands: Scenario = {
 // ---- 公式S6「カタンの織物」: 本島(左15)＋小島の「村」5つ。自分の建物から航路（船）を村へ
 //   つなぐと織物トークン（接続で1枚＋村の数字が出るたび接続者へ1枚、各村5枚）。織物2枚=1VP。
 //   小島には開拓地建設不可・最長交易路タイル不使用。14点、または5村供給切れで最多VP。 ----
-// ※デジタル版簡略: 初期配置は標準の2軒（公式の3軒は未対応）。村は1タイルの小島として配置。
+// 初期配置は公式どおり開拓地3軒（最初の2軒は資源なし・3軒目で資源取得）。村は1タイルの小島として配置。
 // 村（1タイルの小島・互いに海で隔離）。各村に数字ディスク（生産で織物を産む）。
 const CLOTH_VILLAGE_NUMBERS: Record<string, number> = {
   '1,-2': 4, '1,0': 5, '1,2': 6, '3,-2': 9, '3,0': 10,
@@ -517,7 +517,7 @@ const seafarersCloth: Scenario = {
   coords: BIG_COORDS,
   build: buildClothScenario(BIG_MAIN_ISLAND, CLOTH_VILLAGE_NUMBERS),
   victoryTarget: 14,
-  rules: { useLongestRoute: false, noIslandSettlement: true, newIslandBonusVp: 0 },
+  rules: { useLongestRoute: false, noIslandSettlement: true, newIslandBonusVp: 0, startingSettlements: 3 },
 };
 
 // ---- 公式S8「カタンの七不思議」: 本島(資源豊富・特に鉄/麦)＋小島2つ。要件を満たして不思議を

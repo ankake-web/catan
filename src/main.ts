@@ -2317,11 +2317,17 @@ function triggerResourceAnimation(
   // 盗み取り(MOVE_ROBBER)は飛ばさない（奪った資源の種類を秘匿するため）。
   if (action?.type === 'MOVE_ROBBER') return;
 
-  // 初期配置2軒目の初期資源は公開情報から導出する（LANでも相手分のアニメを出すため）。
+  // 初期配置の「最後の軒」で配る初期資源を公開情報から導出する（LANでも相手分のアニメを出すため）。
+  // 標準/航海者は2軒目、S6 織物は3軒目。それ以前の軒は資源なしなので飛ばさない。
   if (action?.type === 'BUILD_SETTLEMENT'
-      && oldState.phase === 'SETUP_BACKWARD'
+      && (oldState.phase === 'SETUP_FORWARD' || oldState.phase === 'SETUP_BACKWARD')
       && oldState.setupSubPhase === 'PLACE_SETTLEMENT') {
-    animateSetupGain(oldState, action.vertexId);
+    const setupTarget = oldState.startingSettlements ?? 2;
+    const spid = oldState.playerOrder[oldState.currentPlayerIndex];
+    const placedBefore = spid
+      ? Object.values(oldState.vertices).filter(v => v.building?.playerId === spid).length
+      : 0;
+    if (placedBefore + 1 >= setupTarget) animateSetupGain(oldState, action.vertexId);
     return;
   }
 

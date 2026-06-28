@@ -486,13 +486,17 @@ export function applyAction(
       // S5 忘れられた部族: 港トークンを保留していれば、この沿岸開拓地に設置（無ければ no-op）。
       next = placeHeldHarborAt(next, pid, vertexId);
 
-      // SETUP 後半: 2個目の配置。
-      const isSecondPlacement = state.phase === 'SETUP_BACKWARD' && state.setupSubPhase === 'PLACE_SETTLEMENT';
-      if (isSecondPlacement && isCk(state)) {
+      // SETUP の「最後の開拓地」で初期資源を配る。標準/航海者は2軒目、S6 織物は3軒目。
+      // 公式: 最後の1軒の隣接タイルから資源を取得（それ以前の軒は資源なし）。
+      // 配置数は全建物で数える（CK は2軒目を都市へ昇格させるため）。
+      const setupTarget = state.startingSettlements ?? 2;
+      const placedNow = Object.values(next.vertices).filter(v => v.building?.playerId === pid).length;
+      const isLastSetupPlacement = _isSetupS && placedNow >= setupTarget;
+      if (isLastSetupPlacement && isCk(state)) {
         // 騎士と商人: 2個目は「都市」。開拓地→都市へ昇格し、都市の初期産出(資源+商品)を配る。
         next = ckSetupSecondCity(next, pid, vertexId);
-      } else if (isSecondPlacement) {
-        // 基本/航海者: 2個目開拓地の隣接タイルから初期資源を配布（setupGainFor に一本化）。
+      } else if (isLastSetupPlacement) {
+        // 基本/航海者: 最後の開拓地の隣接タイルから初期資源を配布（setupGainFor に一本化）。
         for (const resource of setupGainFor(next, vertexId, next.bank)) {
           next = {
             ...next,
@@ -1009,44 +1013,40 @@ export function applyAction(
 function advanceSetup(state: GameState): GameState {
   const total = state.playerOrder.length;
   const idx = state.currentPlayerIndex;
+  // 初期配置の開拓地数（既定2。S6 織物=3）。スネークドラフトを target ラウンド繰り返す。
+  const target = state.startingSettlements ?? 2;
+  // いま手番を終えたプレイヤーがこのセットアップで置いた建物数（= そのプレイヤーのラウンド番号）。
+  // CK は2軒目を都市へ昇格させるため settlement 限定ではなく全建物で数える。
+  const pidJust = state.playerOrder[idx]!;
+  const placed = Object.values(state.vertices).filter(v => v.building?.playerId === pidJust).length;
+
+  const toMain: GameState = {
+    ...state,
+    phase: 'MAIN',
+    turnPhase: 'PRE_ROLL',
+    currentPlayerIndex: 0,
+    setupSubPhase: null,
+    diceRolledThisTurn: false,
+    devCardPlayedThisTurn: false,
+  };
 
   if (state.phase === 'SETUP_FORWARD') {
     if (idx < total - 1) {
-      // 次のプレイヤーへ
-      return {
-        ...state,
-        currentPlayerIndex: idx + 1,
-        setupSubPhase: 'PLACE_SETTLEMENT',
-      };
-    } else {
-      // 後半開始: 最後のプレイヤーが前半を終えたらそのまま後半へ（同プレイヤーが続ける）
-      return {
-        ...state,
-        phase: 'SETUP_BACKWARD',
-        setupSubPhase: 'PLACE_SETTLEMENT',
-      };
+      // 同一ラウンド内: 次のプレイヤーへ
+      return { ...state, currentPlayerIndex: idx + 1, setupSubPhase: 'PLACE_SETTLEMENT' };
     }
+    // 順方向ラウンドの最後のプレイヤー。目標数に達していたら終了、未達なら逆方向へ折り返す（同プレイヤー続行）。
+    if (placed >= target) return toMain;
+    return { ...state, phase: 'SETUP_BACKWARD', setupSubPhase: 'PLACE_SETTLEMENT' };
   }
 
   if (state.phase === 'SETUP_BACKWARD') {
     if (idx > 0) {
-      return {
-        ...state,
-        currentPlayerIndex: idx - 1,
-        setupSubPhase: 'PLACE_SETTLEMENT',
-      };
-    } else {
-      // 全員配置完了 → MAIN フェーズへ
-      return {
-        ...state,
-        phase: 'MAIN',
-        turnPhase: 'PRE_ROLL',
-        currentPlayerIndex: 0,
-        setupSubPhase: null,
-        diceRolledThisTurn: false,
-        devCardPlayedThisTurn: false,
-      };
+      return { ...state, currentPlayerIndex: idx - 1, setupSubPhase: 'PLACE_SETTLEMENT' };
     }
+    // 逆方向ラウンドの先頭プレイヤー。目標数に達したら MAIN、未達なら3軒目以降の順方向ラウンドへ（同プレイヤー続行）。
+    if (placed >= target) return toMain;
+    return { ...state, phase: 'SETUP_FORWARD', setupSubPhase: 'PLACE_SETTLEMENT' };
   }
 
   return state;
