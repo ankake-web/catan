@@ -369,6 +369,13 @@ html.reduce-motion .hex-tile.producing { animation: none; filter: brightness(1.5
   fill: #5a3d00; font-weight: bold; pointer-events: none;
   paint-order: stroke; stroke: rgba(255,245,200,0.95); stroke-width: 2.4px; stroke-linejoin: round;
 }
+/* S3「霧の島」: 未探検（霧）ヘックス。海より明るい霧色で覆い「?」を表示する。 */
+.hex-tile.fog-tile { fill: #8fa6ad; stroke: #c8dde3; stroke-width: 1.5; opacity: 0.92; }
+.fog-mark {
+  fill: #2b4750; font-weight: bold; pointer-events: none; opacity: 0.8;
+  paint-order: stroke; stroke: rgba(255,255,255,0.85); stroke-width: 2px; stroke-linejoin: round;
+  text-anchor: middle; dominant-baseline: central;
+}
 
 /* ---- 数字トークン ---- */
 .token-circle {

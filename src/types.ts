@@ -32,6 +32,10 @@ export interface Tile {
   type: TileType;
   number: number | null; // 砂漠は null
   hasRobber: boolean;
+  // 航海者 S3「霧の島」: 未探検(霧)ヘックス。霧の間は type='sea' として扱われ（配置/産出/島判定で海）、
+  // 船/道/開拓地を隣接マスに置いて探索すると公開され、本来の type/number が確定する。
+  // 公開された地形が陸なら、探索したプレイヤーが資源1枚を即獲得。
+  fog?: { type: TileType; number: number | null };
 }
 
 // ---- 頂点（Vertex） ----

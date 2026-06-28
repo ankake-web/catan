@@ -27,6 +27,8 @@ import {
 import { executeBankTrade, canBankTrade, offerTrade, respondTrade, confirmTrade, cancelTrade } from './trade';
 import { updateLongestRoad, updateLargestArmy, checkVictory, calcVP, victoryTarget } from './scoring';
 import { newIslandBonusRep, islandRepOf } from './islands';
+import { edgeTileIds } from './board';
+import { revealFogAround } from './explore';
 
 // ============================================================
 // 内部ユーティリティ
@@ -380,6 +382,8 @@ export function applyAction(
       if (!canBuildRoad(state, pid, edgeId)) throw new Error('BUILD_ROAD: invalid');
 
       let next = buildRoad(state, pid, edgeId);
+      // S3 霧の島: 道の隣接ヘックスを探索公開（霧の無い盤では no-op）。
+      next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
 
@@ -409,6 +413,8 @@ export function applyAction(
       let next = buildShip(state, pid, edgeId);
       // 建てたばかりの船は同じターンに移動できない（航海者の標準ルール）。建設した辺を記録。
       next = { ...next, shipsBuiltThisTurn: [...(next.shipsBuiltThisTurn ?? []), edgeId] };
+      // S3 霧の島: 船の隣接ヘックスを探索公開（霧→陸なら資源1枚）。霧の無い盤では no-op。
+      next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
 
@@ -435,6 +441,8 @@ export function applyAction(
       if (!canMoveShip(state, pid, fromEdgeId, toEdgeId)) throw new Error('MOVE_SHIP: invalid');
 
       let next = moveShip(state, pid, fromEdgeId, toEdgeId);
+      // S3 霧の島: 移動先の隣接ヘックスを探索公開（霧の無い盤では no-op）。
+      next = revealFogAround(next, edgeTileIds(next.edges[toEdgeId]!, next.vertices), pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
       return next;
@@ -451,6 +459,8 @@ export function applyAction(
       if (!canBuildSettlement(state, pid, vertexId)) throw new Error('BUILD_SETTLEMENT: invalid');
 
       let next = buildSettlement(state, pid, vertexId);
+      // S3 霧の島: 開拓地の隣接ヘックスを探索公開（霧の無い盤では no-op）。
+      next = revealFogAround(next, next.vertices[vertexId]!.adjacentTileIds, pid);
 
       // SETUP 後半: 2個目の配置。
       const isSecondPlacement = state.phase === 'SETUP_BACKWARD' && state.setupSubPhase === 'PLACE_SETTLEMENT';

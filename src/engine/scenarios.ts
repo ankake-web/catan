@@ -17,6 +17,7 @@ import { createRandomBoard } from './setup';
 export type ScenarioId =
   | 'classic'
   | 'seafarers_newshores'      // 公式S1 新たな海岸を目指して
+  | 'seafarers_fogislands'     // 公式S3 霧の島
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
   | 'seafarers_newworld'       // 公式 New World（自由構築）
   | 'seafarers_archipelago'    // 非公式
@@ -138,6 +139,28 @@ function buildFromLandMap(landMap: LandMap): (geo: BoardGeometry, rng: () => num
       tiles[id] = land
         ? { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber }
         : { id, coord, type: 'sea', number: null, hasRobber: false }; // 表に無い＝海
+    }
+    return { tiles, harbors: coastalHarbors(geo, tiles) };
+  };
+}
+
+// 霧(fog)ヘックス定義: 表向きは海として扱い、探索で公開すると本来の地形/数字になる（S3 霧の島）。
+type FogMap = Record<string, { type: TileType; number: number | null }>;
+// landMap（確定の陸/海）＋ fogMap（霧）から盤を作る。霧は type='sea'＋tile.fog に本来値を隠す。
+function buildFromLandFogMap(landMap: LandMap, fogMap: FogMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  return (geo) => {
+    const tiles: Record<TileId, Tile> = {};
+    for (const id of Object.keys(geo.tileToVertices)) {
+      const coord = parseTileId(id);
+      const land = landMap[id];
+      const fog = fogMap[id];
+      if (land) {
+        tiles[id] = { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber };
+      } else if (fog) {
+        tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false, fog: { type: fog.type, number: fog.number } };
+      } else {
+        tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false };
+      }
     }
     return { tiles, harbors: coastalHarbors(geo, tiles) };
   };
@@ -328,6 +351,48 @@ const seafarersNewWorld: Scenario = {
   victoryTarget: 12,
   rules: { newIslandBonusVp: 1, setupAnywhere: true },
 };
+
+// ---- 公式S3「霧の島」: 本島(左12)の周りに霧の海域。船/道/開拓地で進むと霧が晴れ、
+//   陸なら数字＋資源1枚が出現（探索の報酬）。12点。 ----
+const FOG_MAIN: LandMap = {
+  '-3,0':  { type: 'forest',   number: 8 },
+  '-3,1':  { type: 'field',    number: 5 },
+  '-3,2':  { type: 'pasture',  number: 10 },
+  '-2,-1': { type: 'hill',     number: 9 },
+  '-2,0':  { type: 'mountain', number: 4 },
+  '-2,1':  { type: 'forest',   number: 11 },
+  '-2,2':  { type: 'field',    number: 3 },
+  '-1,-2': { type: 'pasture',  number: 6 },
+  '-1,-1': { type: 'desert',   number: null, robber: true },
+  '-1,0':  { type: 'hill',     number: 2 },
+  '-1,1':  { type: 'mountain', number: 9 },
+  '-1,2':  { type: 'forest',   number: 10 },
+};
+// 霧（右側 q=1..3）。表向きは海、探索で公開＝陸7/海5。
+const FOG_HIDDEN: FogMap = {
+  '1,-2': { type: 'sea',     number: null },
+  '1,-1': { type: 'forest',  number: 5 },
+  '1,0':  { type: 'field',   number: 4 },
+  '1,1':  { type: 'pasture', number: 9 },
+  '1,2':  { type: 'sea',     number: null },
+  '2,-2': { type: 'hill',    number: 3 },
+  '2,-1': { type: 'sea',     number: null },
+  '2,0':  { type: 'mountain',number: 6 },
+  '2,1':  { type: 'field',   number: 5 },
+  '3,-2': { type: 'sea',     number: null },
+  '3,-1': { type: 'forest',  number: 10 },
+  '3,0':  { type: 'sea',     number: null },
+};
+const seafarersFogIslands: Scenario = {
+  id: 'seafarers_fogislands',
+  name: '航海者：霧の島',
+  description: '霧に包まれた海域。船・道・開拓地で進むたびに霧が晴れ、島や資源が現れる（12点）。',
+  category: 'seafarers',
+  coords: SEAFARERS_COORDS,
+  build: buildFromLandFogMap(FOG_MAIN, FOG_HIDDEN),
+  victoryTarget: 12,
+  rules: { newIslandBonusVp: 0 }, // 探索の報酬は資源（島ボーナスVPは無し）
+};
 const seafarersGoldenIsles: Scenario = {
   id: 'seafarers_goldenisles',
   name: '航海者：黄金諸島（非公式）',
@@ -372,6 +437,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
   // 公式航海者シナリオ
   seafarers_newshores: seafarersNewShores,
+  seafarers_fogislands: seafarersFogIslands,
   seafarers_throughdesert: seafarersThroughDesert,
   seafarers_newworld: seafarersNewWorld,
   // 非公式オリジナルマップ

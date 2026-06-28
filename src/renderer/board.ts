@@ -202,6 +202,16 @@ function renderTile(
   else if (isValidRobber) poly.classList.add('valid-robber');
   g.appendChild(poly);
 
+  // S3「霧の島」: 未探検（霧）ヘックスは霧で覆い「?」を表示（type は海だが視覚的に区別）。
+  if (tile.fog) {
+    poly.classList.add('fog-tile');
+    const q = svgEl('text');
+    q.classList.add('fog-mark');
+    setAttrs(q, { x: cx, y: cy, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': String(size * 0.7) });
+    q.textContent = '?';
+    g.appendChild(q);
+  }
+
   // 金タイル: 麦(field)と色が紛らわしいので、光沢ゴールド＋発光（CSS）に加えて
   // 下部に「任意資源」ラベルで明示する。絵文字マーカーは環境差で崩れるため使わない。
   if (tile.type === 'gold') {
