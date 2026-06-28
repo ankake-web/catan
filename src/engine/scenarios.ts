@@ -375,6 +375,58 @@ const NEW_WORLD_LAND: LandMap = {
   '3,0':   { type: 'hill',     number: 3 },
 };
 
+// 公式New Worldの趣旨「制約付きランダム生成」: 島の位置（陸座標21）は固定したまま、毎ゲーム
+// タイル種別と数字を rng でシャッフルする。制約=(a)赤数字6/8を辺で隣接させない (b)金タイルに赤数字を置かない。
+const NEW_WORLD_COORDS = Object.keys(NEW_WORLD_LAND); // 21陸セル（本島15＋小島3＋小島3）
+const NEW_WORLD_TYPES: TileType[] = [
+  ...Array<TileType>(4).fill('forest'), ...Array<TileType>(4).fill('field'),
+  ...Array<TileType>(4).fill('pasture'), ...Array<TileType>(3).fill('hill'),
+  ...Array<TileType>(3).fill('mountain'), 'desert', 'gold', 'gold',
+]; // 計21（NEW_WORLD_LAND と同じ構成）
+const NEW_WORLD_NUMBERS = [2, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12]; // 20=非砂漠タイル数
+const NW_NB: ReadonlyArray<readonly [number, number]> = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+const isRedNum = (n: number | null | undefined): boolean => n === 6 || n === 8;
+function shuffleWithRng<T>(arr: readonly T[], rng: () => number): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a;
+}
+function generateNewWorldLand(rng: () => number): LandMap {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const types = shuffleWithRng(NEW_WORLD_TYPES, rng);
+    const tType: Record<string, TileType> = {};
+    NEW_WORLD_COORDS.forEach((c, i) => { tType[c] = types[i]!; });
+    const numbered = NEW_WORLD_COORDS.filter(c => tType[c] !== 'desert');
+    const nums = shuffleWithRng(NEW_WORLD_NUMBERS, rng);
+    const tNum: Record<string, number> = {};
+    numbered.forEach((c, i) => { tNum[c] = nums[i]!; });
+    // (b) 金に赤数字を置かない
+    if (numbered.some(c => tType[c] === 'gold' && isRedNum(tNum[c]))) continue;
+    // (a) 赤数字(6/8)が辺で隣接しない
+    let ok = true;
+    for (const c of NEW_WORLD_COORDS) {
+      if (!isRedNum(tNum[c])) continue;
+      const [q, r] = c.split(',').map(Number) as [number, number];
+      for (const [dq, dr] of NW_NB) {
+        if (isRedNum(tNum[`${q + dq},${r + dr}`])) { ok = false; break; }
+      }
+      if (!ok) break;
+    }
+    if (!ok) continue;
+    const map: LandMap = {};
+    for (const c of NEW_WORLD_COORDS) {
+      map[c] = tType[c] === 'desert'
+        ? { type: 'desert', number: null, robber: true }
+        : { type: tType[c]!, number: tNum[c]! };
+    }
+    return map;
+  }
+  return NEW_WORLD_LAND; // フォールバック（固定マップ・制約充足済み）
+}
+
 const seafarersThroughDesert: Scenario = {
   id: 'seafarers_throughdesert',
   name: '航海者：砂漠を越えて',
@@ -388,10 +440,11 @@ const seafarersThroughDesert: Scenario = {
 const seafarersNewWorld: Scenario = {
   id: 'seafarers_newworld',
   name: '航海者：新世界（New World）',
-  description: 'どの島にも入植でき、自分の出発島以外への初入植ごとに+1点。海を制す自由構築（12点）。',
+  description: 'どの島にも入植でき、自分の出発島以外への初入植ごとに+1点。毎回ランダムな自由構築（12点）。',
   category: 'seafarers',
   coords: BIG_COORDS,
-  build: buildFromLandMap(NEW_WORLD_LAND),
+  // 制約付きランダム生成（島座標は固定・種別/数字を毎回ランダム）。公式New Worldの「自由構築」を再現。
+  build: (geo, rng) => buildFromLandMap(generateNewWorldLand(rng))(geo, rng),
   victoryTarget: 12,
   rules: { newIslandBonusVp: 1, setupAnywhere: true },
 };

@@ -187,6 +187,29 @@ describe('scenarios: 航海者「砂漠を越えて」(公式S4)', () => {
   });
 });
 
+describe('scenarios: 航海者「新世界」(公式New World・制約付きランダム生成)', () => {
+  it('陸構成は固定(森4/畑4/牧草4/丘3/山3/砂漠1/金2)・島15/3/3・シードで盤が変わる', () => {
+    const a = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newworld');
+    const b = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(2), 'seafarers_newworld');
+    for (const s of [a, b]) {
+      expect(count(s.tiles, 'forest')).toBe(4);
+      expect(count(s.tiles, 'field')).toBe(4);
+      expect(count(s.tiles, 'pasture')).toBe(4);
+      expect(count(s.tiles, 'hill')).toBe(3);
+      expect(count(s.tiles, 'mountain')).toBe(3);
+      expect(count(s.tiles, 'desert')).toBe(1);
+      expect(count(s.tiles, 'gold')).toBe(2);
+      const repOf = computeIslandReps(s.tiles);
+      const sizes = [...new Set(Object.values(repOf))]
+        .map(r => Object.values(repOf).filter(x => x === r).length).sort((x, y) => y - x);
+      expect(sizes).toEqual([15, 3, 3]); // 島構造は固定（本島15＋小島3+3）
+    }
+    // 異なるシードでタイル配置が変わる（＝ランダム生成）。
+    const sig = (s: typeof a) => Object.entries(s.tiles).map(([id, t]) => `${id}:${t.type}:${t.number}`).join('|');
+    expect(sig(a)).not.toBe(sig(b));
+  });
+});
+
 describe('航海者: 海賊コマは開始時から海ヘクスに居る（盗賊＋海賊が1体ずつ）', () => {
   it('新たな海岸: 開始時に piratePosition が海ヘクス、盗賊は砂漠', () => {
     const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
