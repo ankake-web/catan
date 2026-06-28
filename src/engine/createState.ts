@@ -45,7 +45,7 @@ export function createInitialGameState(
   // シナリオ駆動の盤面生成。既定 'classic' は従来と同一（非破壊）。
   const scenario = getScenario(scenarioId);
   const geo = buildBoardGeometry(scenario.coords());
-  const { tiles, harbors, edgeTokens } = scenario.build(geo, rng);
+  const { tiles, harbors, edgeTokens, villages } = scenario.build(geo, rng);
 
   const ck = scenario.expansion === 'cities_knights';
   const players: GameState['players'] = {};
@@ -112,7 +112,9 @@ export function createInitialGameState(
     ...(scenario.rules?.useRobber != null ? { useRobber: scenario.rules.useRobber } : {}),
     ...(scenario.rules?.setupAnywhere != null ? { setupAnywhere: scenario.rules.setupAnywhere } : {}),
     ...(scenario.rules?.numberHexOnly != null ? { numberHexOnly: scenario.rules.numberHexOnly } : {}),
+    ...(scenario.rules?.noIslandSettlement != null ? { noIslandSettlement: scenario.rules.noIslandSettlement } : {}),
     ...(edgeTokens != null ? { edgeTokens } : {}),
+    ...(villages != null ? { villages, villageConn: {}, cloth: {} } : {}),
     ...(ck ? { expansion: 'cities_knights' as const, commodityBank: { ...COMMODITY_BANK_INITIAL }, barbarianPosition: 0, barbarianAttacks: 0, metropolis: {}, progressDecks: buildProgressDecks(rng), knightMovedThisTurn: false, knightChasedThisTurn: false } : {}),
     islandBonus: {},
     pendingTrade: null,

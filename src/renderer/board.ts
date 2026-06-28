@@ -43,6 +43,8 @@ export interface BoardRenderOptions {
   validTileIds?: Set<string>;
   // 航海者: 船の配置候補（海に面した辺）。
   validShipEdgeIds?: Set<string>;
+  // 航海者 S6 カタンの織物: 村タイルID（「村」マーカーを描く）。
+  villageTileIds?: Set<string>;
   // 仮置きプレビュー（確定待ち）のターゲット。ゴースト表示する。
   previewVertexId?: string;
   previewEdgeId?: string;
@@ -201,6 +203,15 @@ function renderTile(
   if (isChosen) poly.classList.add('tile-chosen');
   else if (isValidRobber) poly.classList.add('valid-robber');
   g.appendChild(poly);
+
+  // S6「カタンの織物」: 村タイルに「村」ラベルを表示（航路でつないで織物を得る対象）。
+  if (opts?.villageTileIds?.has(tile.id)) {
+    const tag = svgEl('text');
+    tag.classList.add('village-tag');
+    setAttrs(tag, { x: cx, y: cy + size * 0.58, 'text-anchor': 'middle', 'font-size': String(size * 0.26) });
+    tag.textContent = '村';
+    g.appendChild(tag);
+  }
 
   // S3「霧の島」: 未探検（霧）ヘックスは霧で覆い「?」を表示（type は海だが視覚的に区別）。
   if (tile.fog) {
@@ -768,9 +779,11 @@ export function renderBoard(
   // --- タイル（最下層） ---
   // 騎士と商人: 商人コマの位置・所有者色を opts に注入（renderTile で描画）。
   const merchant = state.merchant;
-  const tileOpts: BoardRenderOptions | undefined = merchant
-    ? { ...(opts ?? {}), merchantTileId: merchant.tileId, merchantColor: PLAYER_HEX_COLOR[merchant.playerId] ?? '#caa14a' }
-    : opts;
+  const tileOpts: BoardRenderOptions = {
+    ...(opts ?? {}),
+    ...(merchant ? { merchantTileId: merchant.tileId, merchantColor: PLAYER_HEX_COLOR[merchant.playerId] ?? '#caa14a' } : {}),
+    ...(state.villages ? { villageTileIds: new Set(Object.keys(state.villages)) } : {}),
+  };
   const tileGroup = svgEl('g');
   tileGroup.setAttribute('class', 'tiles');
   for (const tile of Object.values(state.tiles)) {

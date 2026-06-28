@@ -21,6 +21,7 @@ export type ScenarioId =
   | 'seafarers_fogislands'     // 公式S3 霧の島
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
   | 'seafarers_forgottentribe' // 公式S5 忘れられた部族
+  | 'seafarers_cloth'          // 公式S6 カタンの織物
   | 'seafarers_newworld'       // 公式 New World（自由構築）
   | 'seafarers_archipelago'    // 非公式
   | 'seafarers_goldenisles'    // 非公式
@@ -33,6 +34,8 @@ export interface ScenarioBoard {
   harbors: Harbor[];
   /** S5 忘れられた部族: 海の辺に事前配置するトークン（辺ID→種別）。 */
   edgeTokens?: Record<string, EdgeTokenKind>;
+  /** S6 カタンの織物: 村タイル（タイルID→初期織物供給5）。 */
+  villages?: Record<string, number>;
 }
 
 export interface Scenario {
@@ -490,6 +493,52 @@ const seafarersFourIslands: Scenario = {
   victoryTarget: 13,
   rules: { newIslandBonusVp: 2, setupAnywhere: true },
 };
+
+// ---- 公式S6「カタンの織物」: 本島(左12)＋小島の「村」5つ。自分の建物から航路（船）を村へ
+//   つなぐと織物トークン（接続で1枚＋村の数字が出るたび接続者へ1枚、各村5枚）。織物2枚=1VP。
+//   小島には開拓地建設不可・最長交易路タイル不使用。14点、または5村供給切れで最多VP。 ----
+// ※デジタル版簡略: 初期配置は標準の2軒（公式の3軒は未対応）。村は1タイルの小島として配置。
+const CLOTH_MAIN: LandMap = {
+  '-3,0':  { type: 'forest',   number: 8 },
+  '-3,1':  { type: 'field',    number: 5 },
+  '-3,2':  { type: 'pasture',  number: 10 },
+  '-2,-1': { type: 'hill',     number: 9 },
+  '-2,0':  { type: 'mountain', number: 4 },
+  '-2,1':  { type: 'forest',   number: 11 },
+  '-2,2':  { type: 'field',    number: 3 },
+  '-1,-2': { type: 'pasture',  number: 6 },
+  '-1,-1': { type: 'desert',   number: null, robber: true },
+  '-1,0':  { type: 'hill',     number: 2 },
+  '-1,1':  { type: 'mountain', number: 9 },
+  '-1,2':  { type: 'forest',   number: 10 },
+};
+// 村（1タイルの小島・互いに海で隔離）。各村に数字ディスク（生産で織物を産む）。
+const CLOTH_VILLAGE_NUMBERS: Record<string, number> = {
+  '1,-2': 4, '1,0': 5, '1,2': 6, '3,-2': 9, '3,0': 10,
+};
+function buildClothScenario(landMap: LandMap, villageNumbers: Record<string, number>): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  const fullLand: LandMap = { ...landMap };
+  for (const [tid, num] of Object.entries(villageNumbers)) {
+    fullLand[tid] = { type: 'pasture', number: num }; // 村タイル（隣接建物不可なので資源は産出しない）
+  }
+  const base = buildFromLandMap(fullLand);
+  return (geo, rng) => {
+    const board = base(geo, rng);
+    const villages: Record<string, number> = {};
+    for (const tid of Object.keys(villageNumbers)) villages[tid] = 5; // 各村の織物供給5
+    return { ...board, villages };
+  };
+}
+const seafarersCloth: Scenario = {
+  id: 'seafarers_cloth',
+  name: '航海者：カタンの織物',
+  description: '小島の村へ航路をつなぎ織物を集める（2枚で1点）。小島は入植不可・最長交易路なし（14点）。',
+  category: 'seafarers',
+  coords: SEAFARERS_COORDS,
+  build: buildClothScenario(CLOTH_MAIN, CLOTH_VILLAGE_NUMBERS),
+  victoryTarget: 14,
+  rules: { useLongestRoute: false, noIslandSettlement: true, newIslandBonusVp: 0 },
+};
 const seafarersGoldenIsles: Scenario = {
   id: 'seafarers_goldenisles',
   name: '航海者：黄金諸島（非公式）',
@@ -538,6 +587,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   seafarers_fogislands: seafarersFogIslands,
   seafarers_throughdesert: seafarersThroughDesert,
   seafarers_forgottentribe: seafarersForgottenTribe,
+  seafarers_cloth: seafarersCloth,
   seafarers_newworld: seafarersNewWorld,
   // 非公式オリジナルマップ
   seafarers_archipelago: seafarersArchipelago,

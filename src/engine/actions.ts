@@ -272,6 +272,8 @@ export function canBuildSettlement(
   if (!isLandVertex(vertex, state.tiles)) return false;
   // S5「忘れられた部族」: 数字ディスクのあるヘクスに隣接した頂点にしか開拓地を置けない。
   if (state.numberHexOnly && !vertex.adjacentTileIds.some(t => state.tiles[t]?.number != null)) return false;
+  // S6「カタンの織物」: 小島（本島以外）には開拓地を建てられない（村は航路で接続する）。
+  if (state.noIslandSettlement && !isHomeIslandVertex(state, vertexId)) return false;
 
   if (!isDistanceRuleOk(vertex, state.vertices)) return false;
 

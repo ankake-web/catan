@@ -30,6 +30,7 @@ import { newIslandBonusRep, islandRepOf } from './islands';
 import { edgeTileIds } from './board';
 import { revealFogAround } from './explore';
 import { collectEdgeToken, placeHeldHarborAt } from './seaTokens';
+import { connectVillagesAround, produceCloth, checkClothEnd } from './cloth';
 
 // ============================================================
 // 内部ユーティリティ
@@ -171,6 +172,8 @@ export function applyAction(
         next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : 'ROBBER' };
       } else {
         next = distributeResources({ ...next, turnPhase: 'TRADE_BUILD' }, total);
+        // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
+        next = produceCloth(next, total);
         // 航海者: 金タイル産出があれば、任意資源の選択待ち(GOLD)へ。無ければ通常どおり TRADE_BUILD。
         // 複数人が同時に owed になりうるため、選択枚数は「逐次的に減るバンク総在庫」で頭打ちにする。
         // 全体総和が在庫を超えないよう playerOrder 順に bankLeft から差し引くことで、どの順に
@@ -187,6 +190,7 @@ export function applyAction(
           : { ...next, turnPhase: 'TRADE_BUILD' };
       }
 
+      next = checkClothEnd(next); // S6: 織物生産後、5村供給切れなら終了（無い盤では no-op）
       return next;
     }
 
@@ -420,8 +424,11 @@ export function applyAction(
       next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
       // S5 忘れられた部族: この辺に海辺トークンがあれば獲得（VP/開発カード/港）。無い盤では no-op。
       next = collectEdgeToken(next, edgeId, pid);
+      // S6 カタンの織物: この辺が村に隣接していれば航路接続（接続成立で即織物1枚）。無い盤では no-op。
+      next = connectVillagesAround(next, edgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
+      next = checkClothEnd(next); // S6: 5村供給切れで終了（無い盤では no-op）
 
       // 街道建設カード使用中: 船も道と同じく無料配置の1本として残数をデクリメント（船2/道1+船1）。
       if (next.roadBuildingRoadsRemaining > 0) {
@@ -450,8 +457,11 @@ export function applyAction(
       next = revealFogAround(next, edgeTileIds(next.edges[toEdgeId]!, next.vertices), pid);
       // S5 忘れられた部族: 移動先の辺に海辺トークンがあれば獲得。無い盤では no-op。
       next = collectEdgeToken(next, toEdgeId, pid);
+      // S6 カタンの織物: 移動先が村に隣接していれば航路接続（無い盤では no-op）。
+      next = connectVillagesAround(next, toEdgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
+      next = checkClothEnd(next);
       return next;
     }
 

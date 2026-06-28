@@ -1,0 +1,95 @@
+import { describe, it, expect } from 'vitest';
+import { createInitialGameState } from '../src/engine/createState';
+import type { PlayerSpec } from '../src/engine/createState';
+import { createRng } from '../src/engine/setup';
+import { applyAction } from '../src/engine/game';
+import { connectVillagesAround, produceCloth, checkClothEnd, clothVp } from '../src/engine/cloth';
+import { calcVP } from '../src/engine/scoring';
+import { canBuildSettlement } from '../src/engine/actions';
+import { isLandVertex } from '../src/engine/board';
+import type { GameState } from '../src/types';
+
+const SPECS: PlayerSpec[] = [
+  { id: 'player1', name: 'A', color: 'red',  type: 'human' },
+  { id: 'player2', name: 'B', color: 'blue', type: 'ai', aiDifficulty: 'normal' },
+];
+const cloth = (): GameState =>
+  createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_cloth');
+
+describe('S6 カタンの織物', () => {
+  it('開始時に村が5つ・各供給5・最長交易路は無効', () => {
+    const s = cloth();
+    expect(Object.keys(s.villages ?? {})).toHaveLength(5);
+    for (const v of Object.values(s.villages ?? {})) expect(v).toBe(5);
+    expect(s.useLongestRoute).toBe(false);
+    expect(s.noIslandSettlement).toBe(true);
+  });
+
+  it('村への航路接続で織物を即1枚得る（供給が1減る）', () => {
+    const s = cloth();
+    const villageId = Object.keys(s.villages!)[0]!;
+    const e = s.tileToEdges[villageId]![0]!; // 村に面する辺
+    const next = connectVillagesAround(s, e, 'player1');
+    expect(next.villageConn![villageId]).toContain('player1');
+    expect(next.cloth!.player1).toBe(1);
+    expect(next.villages![villageId]).toBe(4);
+    // 同じ村への再接続では増えない
+    const again = connectVillagesAround(next, s.tileToEdges[villageId]![1]!, 'player1');
+    expect(again.cloth!.player1).toBe(1);
+  });
+
+  it('織物2枚で1VP（端数は0）', () => {
+    const s = cloth();
+    expect(clothVp({ ...s, cloth: { player1: 3 } }, 'player1')).toBe(1);
+    expect(clothVp({ ...s, cloth: { player1: 4 } }, 'player1')).toBe(2);
+    expect(calcVP({ ...s, cloth: { player1: 4 } }, 'player1')).toBe(2); // 建物0+織物2VP
+  });
+
+  it('村の数字が出ると接続済みプレイヤーへ織物1枚（供給の範囲で）', () => {
+    const s0 = cloth();
+    const villageId = Object.keys(s0.villages!)[0]!;
+    const num = s0.tiles[villageId]!.number!;
+    const s: GameState = { ...s0, villageConn: { [villageId]: ['player1', 'player2'] } };
+    const next = produceCloth(s, num);
+    expect(next.cloth!.player1).toBe(1);
+    expect(next.cloth!.player2).toBe(1);
+    expect(next.villages![villageId]).toBe(3); // 5 - 2
+    // 別の出目では何も起きない
+    const other = produceCloth(s, num === 12 ? 11 : num + 1);
+    expect(other).toBe(s);
+  });
+
+  it('小島（村）には開拓地を建てられない（noIslandSettlement）', () => {
+    const s = cloth();
+    const villageId = Object.keys(s.villages!)[0]!;
+    const v = (s.tileToVertices[villageId] ?? []).find(vid => isLandVertex(s.vertices[vid]!, s.tiles));
+    if (v) expect(canBuildSettlement(s, 'player1', v)).toBe(false);
+  });
+
+  it('5村が供給切れになると最多VPで終了（同点は織物多い方）', () => {
+    const s0 = cloth();
+    const depleted: Record<string, number> = {};
+    for (const id of Object.keys(s0.villages!)) depleted[id] = 0;
+    const s: GameState = { ...s0, villages: depleted, cloth: { player1: 1, player2: 5 } };
+    const end = checkClothEnd(s);
+    expect(end.phase).toBe('GAME_OVER');
+    // 建物が無い状態では VP は織物のみ → player2(5枚=2VP) が player1(1枚=0VP) に勝つ
+    expect(end.winner).toBe('player2');
+  });
+
+  it('BUILD_SHIP で村に隣接すると織物接続が成立する（エンドツーエンド）', () => {
+    const g = cloth();
+    const villageId = Object.keys(g.villages!)[0]!;
+    const e = g.tileToEdges[villageId]![0]!;
+    const v = g.edges[e]!.vertexIds[0];
+    const s: GameState = {
+      ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null, currentPlayerIndex: 0, diceRolledThisTurn: true,
+      vertices: { ...g.vertices, [v]: { ...g.vertices[v]!, building: { type: 'settlement', playerId: 'player1' } } },
+      players: { ...g.players, player1: { ...g.players.player1!, hand: { wood: 1, brick: 0, wool: 1, grain: 0, ore: 0 } } },
+    };
+    const next = applyAction(s, { type: 'BUILD_SHIP', edgeId: e });
+    expect(next.edges[e]!.ship?.playerId).toBe('player1');
+    expect(next.cloth?.player1).toBe(1);
+    expect(next.villages![villageId]).toBe(4);
+  });
+});

@@ -369,6 +369,11 @@ html.reduce-motion .hex-tile.producing { animation: none; filter: brightness(1.5
   fill: #5a3d00; font-weight: bold; pointer-events: none;
   paint-order: stroke; stroke: rgba(255,245,200,0.95); stroke-width: 2.4px; stroke-linejoin: round;
 }
+/* S6「カタンの織物」: 村タイルのラベル。 */
+.village-tag {
+  fill: #4a2d6a; font-weight: bold; pointer-events: none;
+  paint-order: stroke; stroke: rgba(255,245,255,0.95); stroke-width: 2.2px; stroke-linejoin: round;
+}
 /* S5「忘れられた部族」: 海辺トークン（V=VP / D=開発カード / H=港）。 */
 .edge-token { fill: #2d2740; stroke: #ffd34d; stroke-width: 2; }
 .edge-token-label {
