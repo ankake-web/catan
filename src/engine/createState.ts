@@ -110,6 +110,7 @@ export function createInitialGameState(
     ...(scenario.rules?.startingSettlements != null ? { startingSettlements: scenario.rules.startingSettlements } : {}),
     ...(scenario.rules?.useLongestRoute != null ? { useLongestRoute: scenario.rules.useLongestRoute } : {}),
     ...(scenario.rules?.useRobber != null ? { useRobber: scenario.rules.useRobber } : {}),
+    ...(scenario.rules?.setupAnywhere != null ? { setupAnywhere: scenario.rules.setupAnywhere } : {}),
     ...(ck ? { expansion: 'cities_knights' as const, commodityBank: { ...COMMODITY_BANK_INITIAL }, barbarianPosition: 0, barbarianAttacks: 0, metropolis: {}, progressDecks: buildProgressDecks(rng), knightMovedThisTurn: false, knightChasedThisTurn: false } : {}),
     islandBonus: {},
     pendingTrade: null,

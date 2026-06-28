@@ -121,6 +121,19 @@ describe('newIslandBonusRep: 新島への最初の入植判定', () => {
     expect(newIslandBonusRep(s, h2)).toBeNull();
   });
 
+  it('setupAnywhere: プレイヤー別ホーム島以外への初入植のみ対象（自分の出発島は対象外）', () => {
+    const base = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newworld');
+    const reps = [...new Set(Object.values(computeIslandReps(base.tiles)))];
+    expect(reps.length).toBeGreaterThanOrEqual(2);
+    const [repA, repB] = reps as string[];
+    const vA = vertexOnIsland(base, repA!);
+    const vB = vertexOnIsland(base, repB!);
+    // player1 のホーム島を repA とする（初期配置で記録される想定）。
+    const s: GameState = { ...base, playerHomeIslands: { player1: [repA!] } };
+    expect(newIslandBonusRep(s, vA!, 'player1')).toBeNull();   // 自分のホーム島は対象外
+    expect(newIslandBonusRep(s, vB!, 'player1')).toBe(repB);   // ホーム外への初入植は対象
+  });
+
   it('基本ゲームでは常に null（海タイルが無いため新島ボーナスは発生しない）', () => {
     const base = classic();
     const v = Object.keys(base.vertices)[0]!;

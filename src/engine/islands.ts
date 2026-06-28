@@ -78,11 +78,20 @@ export function isHomeIslandVertex(state: GameState, vertexId: VertexId): boolea
   if (!Object.values(state.tiles).some(t => t.type === 'sea')) return true; // 基本ゲームは無制限
   const v = state.vertices[vertexId];
   if (!v) return false;
+  // S2「4つの島」/ New World: 初期配置はどの陸島にも置ける（陸かどうかは canBuildSettlement が別途判定）。
+  if (state.setupAnywhere) return true;
   const repOf = computeIslandReps(state.tiles);
   const home = homeIslandRep(repOf);
   if (home == null) return true; // 陸が無い異常時は制限しない
   const rep = vertexRep(v, repOf);
   return rep === home; // 純海上頂点(null)は本島外
+}
+
+/** 頂点が属する島の代表ID（純海上頂点は null）。シナリオのホーム島記録に使う。 */
+export function islandRepOf(state: GameState, vertexId: VertexId): string | null {
+  const v = state.vertices[vertexId];
+  if (!v) return null;
+  return vertexRep(v, computeIslandReps(state.tiles));
 }
 
 /**
@@ -109,12 +118,16 @@ export function isUnclaimedNewIslandVertex(state: GameState, vertexId: VertexId)
  * MAIN フェーズで開拓地を建てた頂点が「本島でない島」に属するなら、その島の代表IDを返す。
  * 対象外（海タイルの無い基本ゲーム / 本島 / 陸に面さない頂点）の場合は null。
  *
- * 公式ルール（仕様メモ §2 シナリオ1）: 各プレイヤーが自分の初入植ごとに +2VP を得る
+ * 公式ルール（仕様メモ §2 シナリオ1）: 各プレイヤーが自分の初入植ごとに +VP を得る
  * （他人が先に建てていても獲得可）。よって「島で最初の1人だけ」ではなく、
  * 「自分がその島へ初めて建てたか」は呼び出し側が islandBonus[rep] で重複排除する。
- * この関数は島の同定（本島以外の陸島か）だけを行い、付与可否は判定しない。
+ *
+ * ホーム島の判定:
+ *  - playerId が渡され state.playerHomeIslands[playerId] があれば、その島群（=自分の初期配置島）以外を対象とする
+ *    （S2「4つの島」/ New World のプレイヤー別未探検）。
+ *  - 無ければ盤面共有の本島（=最大陸塊）以外を対象とする（S1系のフォールバック）。
  */
-export function newIslandBonusRep(state: GameState, builtVertexId: VertexId): string | null {
+export function newIslandBonusRep(state: GameState, builtVertexId: VertexId, playerId?: string): string | null {
   // 基本ゲーム（海タイル無し）は新島ボーナス対象外。
   if (!Object.values(state.tiles).some(t => t.type === 'sea')) return null;
 
@@ -122,8 +135,10 @@ export function newIslandBonusRep(state: GameState, builtVertexId: VertexId): st
   if (!builtV) return null;
 
   const repOf = computeIslandReps(state.tiles);
-  const home = homeIslandRep(repOf);
   const rep = vertexRep(builtV, repOf);
-  if (!rep || rep === home) return null; // 純海上 or 本島は対象外
-  return rep;
+  if (!rep) return null; // 純海上は対象外
+
+  const homeSet = playerId != null ? state.playerHomeIslands?.[playerId] : undefined;
+  if (homeSet) return homeSet.includes(rep) ? null : rep; // プレイヤー別ホーム
+  return rep === homeIslandRep(repOf) ? null : rep;        // 盤面共有の本島
 }

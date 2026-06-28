@@ -16,12 +16,13 @@ import { createRandomBoard } from './setup';
 
 export type ScenarioId =
   | 'classic'
-  | 'seafarers_newshores'
-  | 'seafarers_archipelago'
-  | 'seafarers_throughdesert'
-  | 'seafarers_goldenisles'
-  | 'seafarers_chainisles'
-  | 'seafarers_greatercatan'
+  | 'seafarers_newshores'      // 公式S1 新たな海岸を目指して
+  | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
+  | 'seafarers_newworld'       // 公式 New World（自由構築）
+  | 'seafarers_archipelago'    // 非公式
+  | 'seafarers_goldenisles'    // 非公式
+  | 'seafarers_chainisles'     // 非公式
+  | 'seafarers_greatercatan'   // 非公式
   | 'cities_knights';
 
 export interface ScenarioBoard {
@@ -222,15 +223,17 @@ const MAIN_ISLAND: LandMap = {
   '-1,2':  { type: 'field',    number: 5 },
 };
 
-// ---- 砂漠を越えて：広い大洋(q=0,1は海)の先に、遠い金の島（右奥 q=2,3）。長い航路が要る。 ----
+// ---- 公式S4「砂漠を越えて」：本島(左12)から広い大洋を渡った先に、砂漠を含む新天地（右奥 q=2,3）。
+//   長い航路で渡り、新天地への初入植ごとに各自+2VP。金タイル2枚。14点。
+//   ※公式の「砂漠帯で陸を分断」は、デジタル版では大洋＋砂漠を含む別島として表現（地図画像があれば作り込む）。
 const THROUGH_DESERT_LAND: LandMap = {
-  ...MAIN_ISLAND,
+  ...MAIN_ISLAND,                            // 本島12（全5資源＋砂漠 -1,-1=盗賊初期）
   '2,-2': { type: 'forest',   number: 5 },
-  '3,-2': { type: 'gold',     number: 8 },
-  '2,-1': { type: 'field',    number: 4 },
+  '3,-2': { type: 'gold',     number: 4 },   // 金1（赤数字を避ける）
+  '2,-1': { type: 'field',    number: 3 },
   '3,-1': { type: 'pasture',  number: 10 },
-  '3,0':  { type: 'gold',     number: 9 },
-  '2,1':  { type: 'hill',     number: 6 },
+  '3,0':  { type: 'gold',     number: 11 },  // 金2
+  '2,1':  { type: 'desert',   number: null }, // 砂漠（盗賊なし・テーマ）。新天地6タイル。
 };
 
 // ---- 黄金諸島：右に2つの新島、合計3つの金タイル。ゴールドラッシュ。 ----
@@ -280,14 +283,50 @@ const GREATER_CATAN_LAND: LandMap = {
 };
 
 // 非公式（公式S4「砂漠を越えて」とは別物の「遠い金の島」版。誤認を避け名前を変更）。
+// ---- 公式 New World（自由構築）: 本島＋複数の小島。どの島にも初期配置でき(setupAnywhere)、
+//   自分が初期配置した島以外への初入植ごとに各自+1VP。12点。 ----
+const NEW_WORLD_LAND: LandMap = {
+  // 本島（左 8・全5資源＋砂漠）
+  '-3,0':  { type: 'forest',   number: 8 },
+  '-3,1':  { type: 'field',    number: 5 },
+  '-2,-1': { type: 'hill',     number: 9 },
+  '-2,0':  { type: 'mountain', number: 4 },
+  '-2,1':  { type: 'pasture',  number: 11 },
+  '-1,-1': { type: 'desert',   number: null, robber: true },
+  '-1,0':  { type: 'forest',   number: 6 },
+  '-1,1':  { type: 'hill',     number: 3 },
+  // 新島A（右上 6・金1）
+  '1,-2':  { type: 'field',    number: 4 },
+  '1,-1':  { type: 'gold',     number: 5 },
+  '2,-2':  { type: 'forest',   number: 10 },
+  '2,-1':  { type: 'pasture',  number: 9 },
+  '3,-2':  { type: 'mountain', number: 8 },
+  '3,-1':  { type: 'hill',     number: 6 },
+  // 新島B（右下 3）
+  '1,1':   { type: 'field',    number: 3 },
+  '1,2':   { type: 'pasture',  number: 11 },
+  '2,1':   { type: 'forest',   number: 4 },
+};
+
 const seafarersThroughDesert: Scenario = {
   id: 'seafarers_throughdesert',
-  name: '航海者：金の島（非公式）',
-  description: '【非公式】広い大洋の先に遠い「金の島」。長い航路を繋いで渡れた者が勝つ（13点）。',
+  name: '航海者：砂漠を越えて',
+  description: '本島から広い大洋を渡り、砂漠を含む新天地へ。新天地への初入植ごとに+2点（14点で勝利）。',
   category: 'seafarers',
   coords: SEAFARERS_COORDS,
   build: buildFromLandMap(THROUGH_DESERT_LAND),
-  victoryTarget: 13,
+  victoryTarget: 14,
+  rules: { newIslandBonusVp: 2 },
+};
+const seafarersNewWorld: Scenario = {
+  id: 'seafarers_newworld',
+  name: '航海者：新世界（New World）',
+  description: 'どの島にも入植でき、自分の出発島以外への初入植ごとに+1点。海を制す自由構築（12点）。',
+  category: 'seafarers',
+  coords: SEAFARERS_COORDS,
+  build: buildFromLandMap(NEW_WORLD_LAND),
+  victoryTarget: 12,
+  rules: { newIslandBonusVp: 1, setupAnywhere: true },
 };
 const seafarersGoldenIsles: Scenario = {
   id: 'seafarers_goldenisles',
@@ -331,9 +370,12 @@ const citiesKnights: Scenario = {
 
 const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
+  // 公式航海者シナリオ
   seafarers_newshores: seafarersNewShores,
-  seafarers_archipelago: seafarersArchipelago,
   seafarers_throughdesert: seafarersThroughDesert,
+  seafarers_newworld: seafarersNewWorld,
+  // 非公式オリジナルマップ
+  seafarers_archipelago: seafarersArchipelago,
   seafarers_goldenisles: seafarersGoldenIsles,
   seafarers_chainisles: seafarersChainIsles,
   seafarers_greatercatan: seafarersGreaterCatan,

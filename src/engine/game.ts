@@ -26,7 +26,7 @@ import {
 } from './citiesKnights';
 import { executeBankTrade, canBankTrade, offerTrade, respondTrade, confirmTrade, cancelTrade } from './trade';
 import { updateLongestRoad, updateLargestArmy, checkVictory, calcVP, victoryTarget } from './scoring';
-import { newIslandBonusRep } from './islands';
+import { newIslandBonusRep, islandRepOf } from './islands';
 
 // ============================================================
 // 内部ユーティリティ
@@ -478,12 +478,21 @@ export function applyAction(
       // 海タイルの無い基本ゲームでは newIslandBonusRep が常に null を返し no-op。
       // checkVictory より前に付与し、島ボーナスで 10VP に到達したら勝てるようにする。
       if (state.phase === 'MAIN') {
-        const rep = newIslandBonusRep(next, vertexId);
+        const rep = newIslandBonusRep(next, vertexId, pid);
         if (rep) {
           const owners = (next.islandBonus ?? {})[rep] ?? [];
-          // 公式: 各プレイヤーが「自分の初入植」で +2VP（他人が先でも可）。同一プレイヤーの重複のみ排除。
+          // 公式: 各プレイヤーが「自分の初入植」で +VP（他人が先でも可）。同一プレイヤーの重複のみ排除。
           if (!owners.includes(pid)) {
             next = { ...next, islandBonus: { ...(next.islandBonus ?? {}), [rep]: [...owners, pid] } };
+          }
+        }
+      } else {
+        // 初期配置: 置いた島を「自分のホーム島」として記録（S2/New World のプレイヤー別未探検判定に使う）。
+        const homeRep = islandRepOf(next, vertexId);
+        if (homeRep) {
+          const cur = (next.playerHomeIslands ?? {})[pid] ?? [];
+          if (!cur.includes(homeRep)) {
+            next = { ...next, playerHomeIslands: { ...(next.playerHomeIslands ?? {}), [pid]: [...cur, homeRep] } };
           }
         }
       }

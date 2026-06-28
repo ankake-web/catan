@@ -281,6 +281,9 @@ export interface ScenarioRules {
   useRobber?: boolean;
   /** 新しい島への初入植ボーナスVP。既定2。S8 七不思議 / New World=1。0で無効。 */
   newIslandBonusVp?: number;
+  /** 初期配置をどの島にも置けるか（既定false=本島=最大陸塊のみ）。S2 4つの島 / New World=true。
+   *  trueのとき「自分が初期配置した島」が各プレイヤーのホーム島となり、それ以外への初入植で加点。 */
+  setupAnywhere?: boolean;
 }
 
 // ---- GameState ----
@@ -376,6 +379,11 @@ export interface GameState {
   startingSettlements?: number;   // 初期配置の開拓地数（既定2。S6 織物=3）
   useLongestRoute?: boolean;      // 最長交易路タイルを使うか（既定true。S6/S7=false）
   useRobber?: boolean;            // 7/盗賊・海賊を使うか（既定true。S7=false）
+  setupAnywhere?: boolean;        // 初期配置をどの島にも置けるか（既定false。S2/New World=true）
+  // 航海者拡張: 各プレイヤーが初期配置した島の代表ID一覧（=自分のホーム島群）。
+  // setupAnywhere のシナリオで「未探検島＝自分のホーム以外」をプレイヤー別に判定するために使う。
+  // 初期配置中に BUILD_SETTLEMENT が記録する。基本/S1系では全員が本島のみ。
+  playerHomeIslands?: Record<string, string[]>;
 
   // 航海者拡張: 金タイル産出で「任意資源を選ぶ権利」の残数。PlayerId → 選ぶ枚数。
   // turnPhase==='GOLD' の間だけ非空。各プレイヤーが CHOOSE_GOLD で解決し、全員空になると
