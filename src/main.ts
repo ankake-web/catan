@@ -31,6 +31,7 @@ import { renderBoard } from './renderer/board';
 import type { BoardRenderOptions, BoardViewport } from './renderer/board';
 import { installHexTooltip } from './renderer/hexTooltip';
 import { beginnerHint, recommendedSetupVertices } from './renderer/beginnerHints';
+import { openBeginnerHelp } from './renderer/beginnerHelp';
 import { renderUI, syncBoardDrawWidth, showAssetGallery } from './renderer/ui';
 import type { UIPhase } from './renderer/ui';
 import { attachBoardEvents, attachBoardGestures, resolvePlacePreviewAction, centeredZoom, ZOOM_LIMITS } from './renderer/events';
@@ -1347,6 +1348,15 @@ function updateGameNav(): void {
       if (window.confirm('ホームに戻りますか？現在のゲームは終了します。')) returnToHome();
     });
     dd.appendChild(homeBtn);
+  }
+
+  // 初心者モード: 「🔰 遊び方」ボタン（目的・手番の流れ・建設コストの早見表）。
+  if (beginnerMode && state.phase !== 'GAME_OVER') {
+    const helpBtn = document.createElement('button');
+    helpBtn.className = 'btn-nav beginner-help-nav-btn';
+    helpBtn.textContent = '🔰 遊び方';
+    helpBtn.addEventListener('click', () => openBeginnerHelp(state));
+    gameNav.appendChild(helpBtn);
   }
 
   const wrap = document.createElement('div');

@@ -118,6 +118,7 @@ export function beginnerHint(state: GameState, selfId: PlayerId | null | undefin
 
   if (state.turnPhase === 'TRADE_BUILD') {
     const hand = state.players[selfId]?.hand;
+    const total = hand ? Object.values(hand).reduce((a, b) => a + b, 0) : 0;
     const can: string[] = [];
     if (hand) {
       if (hasEnoughResources(hand, BUILD_COSTS.settlement)) can.push('開拓地(+1点)');
@@ -125,6 +126,11 @@ export function beginnerHint(state: GameState, selfId: PlayerId | null | undefin
       if (hasEnoughResources(hand, BUILD_COSTS.road)) can.push('道');
       if (sea && hasEnoughResources(hand, BUILD_COSTS.ship)) can.push('船');
       if (hasEnoughResources(hand, BUILD_COSTS.dev_card)) can.push('発展カード');
+    }
+    // 手札が8枚以上＝次に誰かが7を出すと半分捨て。使い切る/交易するよう先に促す。
+    if (total >= 8) {
+      const tail = can.length > 0 ? `今のうちに ${can.join('・')} を作るか交易を。` : '交易で資源を使うのがおすすめ。';
+      return { icon: '⚠', title: `手札が多い（${total}枚）`, body: `誰かが7を出すと半分（${Math.floor(total / 2)}枚）捨てます。${tail}` };
     }
     const body = can.length > 0
       ? `いま作れる：${can.join('・')}。資源が足りなければ交易（銀行は同じ資源4枚→1枚）。終わったら「手番終了」。`

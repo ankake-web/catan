@@ -3175,3 +3175,8 @@ html.reduce-motion .mini-panel.mine { animation: none; }
 /* 初心者モード: 初期配置のおすすめ地点の⭐（クリックは下の当たり判定に通す）。 */
 .vertex-recommend { pointer-events: none; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
 
+/* 初心者モード: 「🔰 遊び方」ヘルプ */
+.beginner-help-nav-btn { border-color: rgba(120, 200, 160, 0.55); color: #aef0c4; }
+.beginner-help-body .beginner-help-list { margin: 4px 0 10px; padding-left: 20px; }
+.beginner-help-body .beginner-help-list li { font-size: 0.86rem; line-height: 1.5; color: #ece4d4; margin: 2px 0; }
+

@@ -53,6 +53,14 @@ describe('beginnerHint（初心者の局面ガイド）', () => {
     expect(beginnerHint(poor, 'player1')!.body).toContain('足りません');
   });
 
+  it('TRADE_BUILD: 手札8枚以上なら7の捨て札を警告', () => {
+    const big = setHand(withState({ phase: 'MAIN', turnPhase: 'TRADE_BUILD' }), 'player1', { wood: 8, ore: 1 });
+    const h = beginnerHint(big, 'player1')!;
+    expect(h.title).toContain('手札が多い');
+    expect(h.body).toContain('7'); // 7で捨てる警告
+    expect(h.body).toContain('4枚'); // 9枚→半分=4
+  });
+
   it('DISCARD: 自分が捨てる番なら枚数を案内', () => {
     let s = withState({ phase: 'MAIN', turnPhase: 'DISCARD' });
     s = setHand(s, 'player1', { wood: 9 });
