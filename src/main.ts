@@ -1175,6 +1175,26 @@ function updateGameNav(): void {
   });
   dd.addEventListener('click', (e) => e.stopPropagation());
 
+  // 初心者モード（ゲーム中でも切替可。ヒント/おすすめ⭐/遊び方ボタンを即反映）。
+  {
+    const begRow = document.createElement('div');
+    begRow.className = 'game-menu-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'game-menu-label';
+    lbl.textContent = '🔰 初心者モード';
+    const sel = document.createElement('select');
+    sel.className = 'game-menu-select';
+    ([['on', 'ON'], ['off', 'OFF']] as [string, string][]).forEach(([v, t]) => {
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = t;
+      if ((beginnerMode ? 'on' : 'off') === v) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', () => { setBeginnerMode(sel.value === 'on'); redraw(); });
+    begRow.append(lbl, sel);
+    dd.appendChild(begRow);
+  }
+
   // CPU 速度（ゲーム中に変更可能。次のCPU行動から反映）
   if (lastConfig) {
     const speedRow = document.createElement('div');

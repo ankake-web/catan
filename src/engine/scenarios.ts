@@ -66,7 +66,9 @@ export interface Scenario {
 }
 
 /** おすすめプレイヤー数の既定表示（公式カタン/航海者は3〜4人推奨）。 */
-export const DEFAULT_RECOMMENDED_PLAYERS = '3〜4人';
+// 既定は「3人」。航海者の各盤は公式3人用コンポに合わせて作ってあるため。
+// 基本/都市と騎士（標準19タイル）と S7（要塞4）は個別に「4人」を指定する。
+export const DEFAULT_RECOMMENDED_PLAYERS = '3人';
 
 // ---- 基本カタン（既定）。挙動は従来どおり createRandomBoard に委譲。 ----
 const classic: Scenario = {
@@ -74,6 +76,7 @@ const classic: Scenario = {
   name: '基本',
   description: '標準の19タイル。海・船なしのオリジナルルール（10点で勝利）。',
   category: 'basic',
+  recommendedPlayers: '4人', // 標準19タイルはフル対戦の4人がおすすめ
   coords: () => getAllTileCoords(),
   build: (geo, rng) => createRandomBoard(geo, rng),
 };
@@ -667,7 +670,7 @@ const seafarersPirateIslands: Scenario = {
   coords: BIG_COORDS,
   build: buildPirateIslands(BIG_MAIN_ISLAND, PIRATE_FORTRESS_TILES, PIRATE_FLEET_PATH),
   victoryTarget: 10,
-  recommendedPlayers: '3〜4人', // 要塞4＝最大4人。3人時は手番順で3要塞を割当（余りは小島）
+  recommendedPlayers: '4人', // 要塞4＝4人で全員が要塞を攻略（3人時は3要塞割当・余りは小島）
   rules: { pirateIslands: true, newIslandBonusVp: 0, useRobber: false, useLongestRoute: false, useLargestArmy: false },
 };
 const seafarersGoldenIsles: Scenario = {
@@ -704,6 +707,7 @@ const citiesKnights: Scenario = {
   name: '都市と騎士',
   description: '商品・都市改善・騎士・蛮族の襲来。最も奥深い拡張ルール（13点）。',
   category: 'cities_knights',
+  recommendedPlayers: '4人', // 標準19タイルはフル対戦の4人がおすすめ
   coords: () => getAllTileCoords(),
   build: (geo, rng) => createRandomBoard(geo, rng),
   victoryTarget: 13,
