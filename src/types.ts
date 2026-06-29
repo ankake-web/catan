@@ -302,9 +302,10 @@ export interface ScenarioRules {
   pirateIslands?: boolean;
 }
 
-// 航海者 S5「忘れられた部族」: 海の辺に事前配置されるトークンの種別。
-//   vp=VPトークン(+1点) / dev=開発カード(今ターン購入扱い) / harbor=港(沿岸の自分の建物隣に設置)。
-export type EdgeTokenKind = 'vp' | 'dev' | 'harbor';
+// 航海者 S5「忘れられた部族」/「宝島」: 海の辺に事前配置されるトークンの種別。
+//   vp=VPトークン(+1点) / dev=開発カード(今ターン購入扱い) / harbor=港(沿岸の自分の建物隣に設置)
+//   treasure=財宝（宝島・船で到達すると資源2枚 or 開発カード1枚を獲得）。
+export type EdgeTokenKind = 'vp' | 'dev' | 'harbor' | 'treasure';
 
 // ---- GameState ----
 

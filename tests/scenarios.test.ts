@@ -49,19 +49,19 @@ describe('scenarios: classic は従来どおり（非破壊）', () => {
 describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
 
-  it('公式S1の陸構成（丘4/森3/牧草5/畑4/山4/金2/砂漠0＝陸22）に一致・数字22', () => {
-    expect(Object.keys(s.tiles)).toHaveLength(37);
-    expect(count(s.tiles, 'sea')).toBe(15);
+  it('公式アプリ4人盤(51ヘックス)の陸構成（丘4/森4/牧草5/畑4/山4/金2/砂漠0＝陸23）に一致・数字23', () => {
+    expect(Object.keys(s.tiles)).toHaveLength(51);
+    expect(count(s.tiles, 'sea')).toBe(28);
     expect(count(s.tiles, 'gold')).toBe(2);
     expect(count(s.tiles, 'desert')).toBe(0);   // 公式S1は砂漠なし
     expect(count(s.tiles, 'hill')).toBe(4);
-    expect(count(s.tiles, 'forest')).toBe(3);
+    expect(count(s.tiles, 'forest')).toBe(4);
     expect(count(s.tiles, 'pasture')).toBe(5);
     expect(count(s.tiles, 'field')).toBe(4);
     expect(count(s.tiles, 'mountain')).toBe(4);
-    // 陸22（金2含む）・数字トークン22（砂漠が無く全陸に数字）
-    expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(22);
-    expect(Object.values(s.tiles).filter(t => t.number != null)).toHaveLength(22);
+    // 陸23（金2含む）・数字トークン23（砂漠が無く全陸に数字）
+    expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(23);
+    expect(Object.values(s.tiles).filter(t => t.number != null)).toHaveLength(23);
   });
 
   it('公式S1: 勝利点は14・新島初入植ボーナスは+2', () => {
@@ -69,17 +69,23 @@ describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', (
     expect(s.newIslandBonusVp ?? 2).toBe(2);
   });
 
-  it('本島15＋新島7 の二島に分かれる', () => {
+  it('中央本島15＋四方の小島4つ(各2)に分かれる（公式アプリ4人盤のトポロジ）', () => {
     const repOf = computeIslandReps(s.tiles);
     const sizes = [...new Set(Object.values(repOf))]
       .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
-    expect(sizes).toEqual([15, 7]);
+    expect(sizes).toEqual([15, 2, 2, 2, 2]);
   });
 
-  it('海峡(q=0列)が全て海で左右の陸塊を分離（船が必要）', () => {
-    for (const r of [-3, -2, -1, 0, 1, 2, 3]) expect(s.tiles[`0,${r}`]?.type).toBe('sea');
-    expect(s.tiles['-1,-1']?.type).toBe('pasture'); // 公式S1は砂漠なし＝盗賊初期は牧草に置く
-    expect(s.tiles['1,-1']?.type).toBe('gold');    // 新島の金
+  it('金は離れ小島（本島以外の小島）にのみ出る（本島には置かない＝毎ゲームランダム配置）', () => {
+    const repOf = computeIslandReps(s.tiles);
+    // 最大連結成分＝本島
+    const sizeOf: Record<string, number> = {};
+    for (const r of Object.values(repOf)) sizeOf[r] = (sizeOf[r] ?? 0) + 1;
+    const mainRep = Object.entries(sizeOf).sort((a, b) => b[1] - a[1])[0]![0];
+    const gold = Object.values(s.tiles).filter(t => t.type === 'gold');
+    expect(gold).toHaveLength(2);
+    // 金タイルはどれも本島(最大成分)に属さない＝離れ小島の上
+    expect(gold.every(t => repOf[t.id] !== mainRep)).toBe(true);
   });
 
   it('海タイルは数字なし・盗賊なし。陸タイルは砂漠以外に数字あり', () => {
@@ -93,16 +99,54 @@ describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', (
     }
   });
 
-  it('盗賊は本島(-1,-1)から開始（公式S1は砂漠なしのため牧草上に置く）', () => {
+  it('盗賊は本島(最大の島)の資源タイルから開始（公式S1は砂漠なし）', () => {
     const robber = Object.values(s.tiles).find(t => t.hasRobber)!;
-    expect(robber.id).toBe('-1,-1');
-    expect(robber.type).toBe('pasture');
+    expect(robber.type).not.toBe('sea');
+    expect(robber.type).not.toBe('desert');         // 公式S1は砂漠なし
+    // 盗賊は最大連結成分（本島）の上に置かれる（小島ではない）。
+    const repOf = computeIslandReps(s.tiles);
+    const sizeOf: Record<string, number> = {};
+    for (const r of Object.values(repOf)) sizeOf[r] = (sizeOf[r] ?? 0) + 1;
+    const mainRep = Object.entries(sizeOf).sort((a, b) => b[1] - a[1])[0]![0];
+    expect(repOf[robber.id]).toBe(mainRep);
   });
 
   it('盤面が viewBox に収まるよう、基本盤より頂点/辺が多い（大きい盤）', () => {
     expect(Object.keys(s.vertices).length).toBeGreaterThan(54);
     expect(Object.keys(s.edges).length).toBeGreaterThan(72);
   });
+});
+
+describe('scenarios: 航海者「干ばつ」(公式アプリ・本島は砂漠の痩せ地)', () => {
+  // 中身ランダムだが「砂漠は本島・金は離れ小島」「構成枚数」「島構造」は不変。複数シードで検証。
+  for (const seed of [1, 2, 7]) {
+    it(`seed${seed}: 51ヘックス・陸23(砂漠3/金2)・本島15＋小島4・砂漠は本島・金は離れ小島・14点`, () => {
+      const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(seed), 'seafarers_drought');
+      expect(Object.keys(s.tiles)).toHaveLength(51);
+      expect(count(s.tiles, 'sea')).toBe(28);
+      expect(count(s.tiles, 'desert')).toBe(3);
+      expect(count(s.tiles, 'gold')).toBe(2);
+      expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(23);
+      expect(s.victoryTarget).toBe(14);
+      expect(s.newIslandBonusVp).toBe(2);
+      // 島構造: 中央本島15＋四方の小島4つ(各2)
+      const repOf = computeIslandReps(s.tiles);
+      const sizeOf: Record<string, number> = {};
+      for (const r of Object.values(repOf)) sizeOf[r] = (sizeOf[r] ?? 0) + 1;
+      const sizes = Object.values(sizeOf).sort((a, b) => b - a);
+      expect(sizes).toEqual([15, 2, 2, 2, 2]);
+      const mainRep = Object.entries(sizeOf).sort((a, b) => b[1] - a[1])[0]![0];
+      // 砂漠はすべて本島(最大成分)に、金はすべて離れ小島に。
+      for (const t of Object.values(s.tiles)) {
+        if (t.type === 'desert') expect(repOf[t.id]).toBe(mainRep);
+        if (t.type === 'gold') expect(repOf[t.id]).not.toBe(mainRep);
+      }
+      // 盗賊は砂漠（=本島）の上。
+      const robber = Object.values(s.tiles).find(t => t.hasRobber)!;
+      expect(robber.type).toBe('desert');
+      expect(repOf[robber.id]).toBe(mainRep);
+    });
+  }
 });
 
 describe('scenarios: 航海者「群島」', () => {
@@ -160,8 +204,10 @@ describe('scenarios: 航海者「群島」', () => {
     expect(s.tiles['1,0']?.type).toBe('sea');
     expect(s.tiles['2,0']?.type).toBe('sea');
     expect(s.tiles['3,0']?.type).toBe('sea');
-    // 金は新島Aの玄関口(1,-1)
-    expect(s.tiles['1,-1']?.type).toBe('gold');
+    // 金は離れ小島（右 q>=1）にのみ出る（本島には置かない＝毎ゲームランダム配置）。
+    const gold = Object.values(s.tiles).filter(t => t.type === 'gold');
+    expect(gold).toHaveLength(1);
+    expect(gold.every(t => t.coord.q >= 1)).toBe(true);
   });
 });
 

@@ -17,8 +17,10 @@ import { createRandomBoard } from './setup';
 export type ScenarioId =
   | 'classic'
   | 'seafarers_newshores'      // 公式S1 新たな海岸を目指して
+  | 'seafarers_drought'        // 公式アプリ「干ばつ」（本島は砂漠の痩せ地・小島が豊か）
   | 'seafarers_fourislands'    // 公式S2 4つの島
   | 'seafarers_fogislands'     // 公式S3 霧の島
+  | 'seafarers_treasure'       // 公式アプリ「宝島」（霧＋海辺の財宝トークン）
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
   | 'seafarers_forgottentribe' // 公式S5 忘れられた部族
   | 'seafarers_cloth'          // 公式S6 カタンの織物
@@ -89,51 +91,55 @@ const BIG_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 3, 3);
 const HUGE_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(4, 3, 4);  // 51ヘックス
 const FOUR_ISLANDS_COORDS = BIG_COORDS; // S2 は 37ヘックス（4島）
 
-// ---- 航海者「新たな海岸を目指して」（公式S1・37ヘックス級） ----
-// 本島(左 q=-3..-1 = 15タイル・全5資源＋砂漠)＋海峡(q=0列＝海)＋新しい島(右 7タイル・金2)。
-//   公式コンポ目安(35)に寄せた拡張版。本島が一意最大・新島へは船で渡り初入植+2点。
+// ---- 航海者「新たな海岸を目指して」（公式S1・51ヘックス＝公式アプリ4人盤に準拠） ----
+// 公式アプリ(photo/IMG_6399)の「中央に本島＋四方に離れた小島」を51マス盤で再現。
+//   中央本島15＋四隅の小島4つ(各2タイル)。金は小島にランダム配置（randomizeLandMap が
+//   最大連結成分=本島以外＝離れ小島へ金を置く）。中身（資源/数字/港/金位置）は毎ゲームランダム。
+//   下記は構成（枚数）の“正”＝森4/畑4/牧草5/丘4/山4/金2＝陸23・砂漠なし。
 const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; robber?: boolean }> = {
-  // 本島（左 15・全5資源＋砂漠=盗賊初期）
-  '-3,0':  { type: 'forest',   number: 8 },
-  '-3,1':  { type: 'field',    number: 5 },
-  '-3,2':  { type: 'pasture',  number: 10 },
-  '-3,3':  { type: 'hill',     number: 4 },
-  '-2,-1': { type: 'mountain', number: 9 },
-  '-2,0':  { type: 'field',    number: 4 },  // 赤数字6/8の隣接回避（-3,0=8と隣接のため非赤4に）
-  '-2,1':  { type: 'forest',   number: 11 },
-  '-2,2':  { type: 'pasture',  number: 3 },
-  '-2,3':  { type: 'hill',     number: 6 },
-  '-1,-2': { type: 'field',    number: 4 },
-  // 公式S1は砂漠なし。盗賊初期はこの牧草(数字3・非赤)に置く＝盤上のヘックス数を公式(牧草5/砂漠0)に一致。
-  '-1,-1': { type: 'pasture',  number: 3, robber: true },
-  '-1,0':  { type: 'mountain', number: 2 },
-  '-1,1':  { type: 'pasture',  number: 9 },
-  '-1,2':  { type: 'forest',   number: 10 },
-  '-1,3':  { type: 'mountain', number: 5 },
-  // 新しい島（右 7・連続・金2）。残りの q>=1 と q=0 列は海。
-  '1,-2':  { type: 'field',    number: 4 },
-  '1,-1':  { type: 'gold',     number: 5 },  // 金（任意資源）
-  '1,0':   { type: 'pasture',  number: 11 },
-  '2,-2':  { type: 'hill',     number: 9 },  // 公式の丘4/森3に合わせ森→丘
-  '2,-1':  { type: 'hill',     number: 3 },
-  '3,-2':  { type: 'gold',     number: 4 },  // 金2枚目
-  '3,-1':  { type: 'mountain', number: 6 },
+  // 中央本島（15・全5資源・砂漠なし＝盗賊は本島の非赤タイルへ）
+  '-2,0':  { type: 'forest',   number: 8 },
+  '-2,1':  { type: 'field',    number: 5 },
+  '-1,-1': { type: 'pasture',  number: 10 },
+  '-1,0':  { type: 'hill',     number: 4 },
+  '-1,1':  { type: 'mountain', number: 9 },
+  '-1,2':  { type: 'field',    number: 6 },
+  '0,-1':  { type: 'pasture',  number: 3 },
+  '0,0':   { type: 'forest',   number: 11 },
+  '0,1':   { type: 'hill',     number: 4 },
+  '1,-2':  { type: 'field',    number: 8 },
+  '1,-1':  { type: 'pasture',  number: 5 },
+  '1,0':   { type: 'forest',   number: 9 },
+  '1,1':   { type: 'mountain', number: 2 },
+  '2,-1':  { type: 'pasture',  number: 10 },
+  '2,0':   { type: 'hill',     number: 3 },
+  // 離れ小島（四隅・各2タイル）。金2はここにランダム配置される。
+  '-4,0':  { type: 'gold',     number: 5 },   // 北西
+  '-4,1':  { type: 'mountain', number: 6 },
+  '-4,3':  { type: 'field',    number: 11 },  // 南西
+  '-3,3':  { type: 'forest',   number: 4 },
+  '3,-3':  { type: 'hill',     number: 12 },  // 北東
+  '4,-3':  { type: 'pasture',  number: 9 },
+  '4,-1':  { type: 'mountain', number: 10 },  // 南東
+  '4,0':   { type: 'gold',     number: 4 },
 };
 
-// 海岸線（陸1・海1 に面する辺）に港を決定論的に配置する。
-// 各辺の2頂点は陸の沿岸頂点なので、そこに港を持たせる。港が密集しないよう
-// 使用頂点とその隣接頂点を避けながら最大 max 個まで、種別をプールから順に割り当てる。
-// プールは公式航海者の港構成（2:1×各資源5＋3:1×複数）に寄せる。5種の専門港(2:1)を先頭に
-// 配置し、海岸線が短い盤でも全資源の2:1港が出るようにする（旧実装は max=4 で羊毛/麦/鉱の
-// 2:1港が生成されない不具合があった。docs/AUDIT_SEAFARERS.md [D1]）。
-const HARBOR_POOL: HarborType[] = ['wood', 'brick', 'wool', 'grain', 'ore', 'generic', 'generic', 'generic'];
-function coastalHarbors(geo: BoardGeometry, tiles: Record<TileId, Tile>, max = 7): Harbor[] {
-  const coastEdges = Object.values(geo.edges)
-    .filter(e => {
+// 海岸線（陸1・海1 に面する辺）に港を毎ゲームランダム配置する。
+// 公式アプリ同様、港の「位置」も「種別」も起動ごとにランダム。ただし密集を防ぐため
+// 使用頂点とその隣接頂点を避ける（[D8] 港同士1辺以上空ける）。種別は5資源の2:1港(シャッフル)を
+// 先頭に積むので、placed が5以上なら必ず全資源の専門港が出る（docs/AUDIT_SEAFARERS.md [D1]）。
+// 残りは3:1(generic)。海岸線の辺順自体もシャッフルして位置をランダム化する。
+const HARBOR_SPECIALTY: HarborType[] = ['wood', 'brick', 'wool', 'grain', 'ore'];
+function randomHarbors(geo: BoardGeometry, tiles: Record<TileId, Tile>, rng: () => number, max = 8): Harbor[] {
+  const coastEdges = shuffleWithRng(
+    Object.values(geo.edges).filter(e => {
       const tids = edgeTileIds(e, geo.vertices);
       return tids.length === 2 && tids.filter(t => tiles[t]?.type === 'sea').length === 1; // 陸1・海1＝海岸線
-    })
-    .sort((a, b) => (a.id < b.id ? -1 : 1)); // 決定論的順序
+    }),
+    rng,
+  );
+  // 種別プール: 5資源の2:1港(シャッフル)→全資源の専門港が必ず出る。残りは3:1(generic)。
+  const pool: HarborType[] = [...shuffleWithRng(HARBOR_SPECIALTY, rng), 'generic', 'generic', 'generic', 'generic'];
 
   const harbors: Harbor[] = [];
   const used = new Set<string>();
@@ -146,7 +152,7 @@ function coastalHarbors(geo: BoardGeometry, tiles: Record<TileId, Tile>, max = 7
     // 使用済み頂点・その隣接頂点に被るなら避ける（港の密集を防ぐ）。
     if (used.has(va) || used.has(vb)) continue;
     if (vA.adjacentVertexIds.some(v => used.has(v)) || vB.adjacentVertexIds.some(v => used.has(v))) continue;
-    const type = HARBOR_POOL[harbors.length % HARBOR_POOL.length]!;
+    const type = pool[harbors.length] ?? 'generic';
     vA.harborType = type;
     vB.harborType = type;
     harbors.push({ id: `harbor_${harbors.length}`, type, vertexIds: [va, vb] });
@@ -156,44 +162,54 @@ function coastalHarbors(geo: BoardGeometry, tiles: Record<TileId, Tile>, max = 7
   return harbors;
 }
 
-// 陸タイル定義表（タイルID→種別/数字/盗賊）から固定盤面を作る共通ビルダ。
-// 表に無いタイルは海(sea)。19タイル footprint 内で陸塊を海で分離する航海者マップ用。
-// 海岸線には港を自動配置する（沿岸開拓地の交易価値）。
+// 陸タイル定義表（タイルID→種別/数字/盗賊）。表は「島の骨格（どこが陸か）＋公式準拠の
+// 資源/数字の構成（多重集合）」を表す“正”。中身の配置は randomizeLandMap で毎ゲームシャッフルする。
 type LandMap = Record<string, { type: TileType; number: number | null; robber?: boolean }>;
-function buildFromLandMap(landMap: LandMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
-  return (geo) => {
-    const tiles: Record<TileId, Tile> = {};
-    // 盤面の全タイル（シナリオの coords() が決めた footprint）を走査。表に無いタイルは海。
-    for (const id of Object.keys(geo.tileToVertices)) {
-      const coord = parseTileId(id);
-      const land = landMap[id];
-      tiles[id] = land
-        ? { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber }
-        : { id, coord, type: 'sea', number: null, hasRobber: false }; // 表に無い＝海
-    }
-    return { tiles, harbors: coastalHarbors(geo, tiles) };
+
+// 固定の landMap から tiles を組む（ランダム化なし・内部用）。表に無いタイルは海。
+function buildTilesFromLandMap(geo: BoardGeometry, landMap: LandMap): Record<TileId, Tile> {
+  const tiles: Record<TileId, Tile> = {};
+  for (const id of Object.keys(geo.tileToVertices)) {
+    const coord = parseTileId(id);
+    const land = landMap[id];
+    tiles[id] = land
+      ? { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber }
+      : { id, coord, type: 'sea', number: null, hasRobber: false }; // 表に無い＝海
+  }
+  return tiles;
+}
+
+// 公式構成（資源/数字の枚数）を維持して中身を毎ゲームランダム化し、港もランダム配置して盤を組む共通ビルダ。
+// opts.desertsOnMain: 砂漠を本島へ固定（干ばつ＝本島は痩せ地）。
+function buildFromLandMap(landMap: LandMap, opts: { desertsOnMain?: boolean } = {}): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  return (geo, rng) => {
+    const tiles = buildTilesFromLandMap(geo, randomizeLandMap(landMap, rng, opts));
+    return { tiles, harbors: randomHarbors(geo, tiles, rng) };
   };
 }
 
 // 霧(fog)ヘックス定義: 表向きは海として扱い、探索で公開すると本来の地形/数字になる（S3 霧の島）。
 type FogMap = Record<string, { type: TileType; number: number | null }>;
 // landMap（確定の陸/海）＋ fogMap（霧）から盤を作る。霧は type='sea'＋tile.fog に本来値を隠す。
+// 本島・霧の中身は毎ゲームランダム化（霧はどのセルが陸/海か・地形・数字をシャッフル。枚数は不変）。
 function buildFromLandFogMap(landMap: LandMap, fogMap: FogMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
-  return (geo) => {
+  return (geo, rng) => {
+    const home = randomizeLandMap(landMap, rng);
+    const fog = randomizeFogMap(fogMap, rng);
     const tiles: Record<TileId, Tile> = {};
     for (const id of Object.keys(geo.tileToVertices)) {
       const coord = parseTileId(id);
-      const land = landMap[id];
-      const fog = fogMap[id];
+      const land = home[id];
+      const f = fog[id];
       if (land) {
         tiles[id] = { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber };
-      } else if (fog) {
-        tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false, fog: { type: fog.type, number: fog.number } };
+      } else if (f) {
+        tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false, fog: { type: f.type, number: f.number } };
       } else {
         tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false };
       }
     }
-    return { tiles, harbors: coastalHarbors(geo, tiles) };
+    return { tiles, harbors: randomHarbors(geo, tiles, rng) };
   };
 }
 
@@ -205,8 +221,50 @@ const seafarersNewShores: Scenario = {
   name: '航海者：新たな海岸を目指して',
   description: '本島から海を渡り、対岸の新島へ入植。新しい島への初入植ごとに+2点（14点で勝利）。',
   category: 'seafarers',
-  coords: BIG_COORDS,
+  coords: HUGE_COORDS, // 51ヘックス（公式アプリ4人盤＝中央本島＋四方の小島）
   build: buildFromLandMap(NEW_SHORES_LAND),
+  victoryTarget: 14,
+  rules: { newIslandBonusVp: 2 },
+};
+
+// ---- 公式アプリ「干ばつ」（51ヘックス・公式アプリ4人盤に準拠／photo/IMG_6400） ----
+// 本島(中央15)は砂漠が広がる痩せ地（砂漠3・山多め・麦少なめ）。周囲の小島(四隅・各2)が豊か。
+//   砂漠は本島へ固定（desertsOnMain）、金は小島へランダム。小島ごとに初入植+2点。14点で勝利。
+//   下記は構成（枚数）の“正”＝陸23（砂漠3/山4/丘2/森3/畑4/牧草5/金2）。
+const DROUGHT_LAND: LandMap = {
+  // 中央本島（15・砂漠3を含む痩せ地。砂漠は randomizeLandMap が本島へ固定し、その1枚に盗賊）
+  '-2,0':  { type: 'desert',   number: null, robber: true },
+  '-2,1':  { type: 'mountain', number: 8 },
+  '-1,-1': { type: 'mountain', number: 5 },
+  '-1,0':  { type: 'forest',   number: 10 },
+  '-1,1':  { type: 'desert',   number: null },
+  '-1,2':  { type: 'pasture',  number: 9 },
+  '0,-1':  { type: 'mountain', number: 4 },
+  '0,0':   { type: 'forest',   number: 11 },
+  '0,1':   { type: 'hill',     number: 3 },
+  '1,-2':  { type: 'mountain', number: 6 },
+  '1,-1':  { type: 'desert',   number: null },
+  '1,0':   { type: 'forest',   number: 2 },
+  '1,1':   { type: 'hill',     number: 9 },
+  '2,-1':  { type: 'field',    number: 10 },
+  '2,0':   { type: 'pasture',  number: 5 },
+  // 豊かな離れ小島（四隅・各2タイル）。金2はここにランダム配置。
+  '-4,0':  { type: 'gold',     number: 4 },   // 北西
+  '-4,1':  { type: 'field',    number: 5 },
+  '-4,3':  { type: 'pasture',  number: 6 },   // 南西
+  '-3,3':  { type: 'field',    number: 11 },
+  '3,-3':  { type: 'pasture',  number: 8 },   // 北東
+  '4,-3':  { type: 'field',    number: 9 },
+  '4,-1':  { type: 'pasture',  number: 3 },   // 南東
+  '4,0':   { type: 'gold',     number: 12 },
+};
+const seafarersDrought: Scenario = {
+  id: 'seafarers_drought',
+  name: '航海者：干ばつ',
+  description: '砂漠が広がる本島は痩せ地。豊かな周囲の小島へ船で渡り、入植した小島ごとに+2点（14点で勝利）。',
+  category: 'seafarers',
+  coords: HUGE_COORDS, // 51ヘックス（公式アプリ4人盤＝中央本島＋四方の小島）
+  build: buildFromLandMap(DROUGHT_LAND, { desertsOnMain: true }),
   victoryTarget: 14,
   rules: { newIslandBonusVp: 2 },
 };
@@ -378,15 +436,15 @@ const NEW_WORLD_LAND: LandMap = {
   '3,0':   { type: 'hill',     number: 3 },
 };
 
-// 公式New Worldの趣旨「制約付きランダム生成」: 島の位置（陸座標21）は固定したまま、毎ゲーム
-// タイル種別と数字を rng でシャッフルする。制約=(a)赤数字6/8を辺で隣接させない (b)金タイルに赤数字を置かない。
-const NEW_WORLD_COORDS = Object.keys(NEW_WORLD_LAND); // 21陸セル（本島15＋小島3＋小島3）
-const NEW_WORLD_TYPES: TileType[] = [
-  ...Array<TileType>(4).fill('forest'), ...Array<TileType>(4).fill('field'),
-  ...Array<TileType>(4).fill('pasture'), ...Array<TileType>(3).fill('hill'),
-  ...Array<TileType>(3).fill('mountain'), 'desert', 'gold', 'gold',
-]; // 計21（NEW_WORLD_LAND と同じ構成）
-const NEW_WORLD_NUMBERS = [2, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12]; // 20=非砂漠タイル数
+// ============================================================
+// 中身ランダム化エンジン（島の骨格は固定・公式の資源/数字構成は維持）
+// ============================================================
+// landMap（“正”＝どこが陸か＋資源/数字の枚数）を受け取り、毎ゲーム:
+//   - 資源種別をシャッフル（枚数は不変＝公式構成を保つ）
+//   - 金は「離れ小島（本島以外の連結成分）」のランダムなセルへ（本島には出さない）
+//   - 数字をシャッフル（赤6/8を辺で隣接させない・金に赤数字を置かない＝公式の盤面ルール）
+//   - 砂漠=盗賊初期。砂漠が無い盤は本島の非赤タイルに盗賊を置く。
+//   制約を満たすまでリトライ。失敗時は元の landMap を返す。
 const NW_NB: ReadonlyArray<readonly [number, number]> = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 const isRedNum = (n: number | null | undefined): boolean => n === 6 || n === 8;
 function shuffleWithRng<T>(arr: readonly T[], rng: () => number): T[] {
@@ -397,20 +455,81 @@ function shuffleWithRng<T>(arr: readonly T[], rng: () => number): T[] {
   }
   return a;
 }
-function generateNewWorldLand(rng: () => number): LandMap {
-  for (let attempt = 0; attempt < 300; attempt++) {
-    const types = shuffleWithRng(NEW_WORLD_TYPES, rng);
+
+// 陸セル集合を辺隣接で連結成分に分割する（最大成分＝本島）。
+function landComponents(cells: readonly string[]): string[][] {
+  const set = new Set(cells);
+  const seen = new Set<string>();
+  const comps: string[][] = [];
+  for (const start of cells) {
+    if (seen.has(start)) continue;
+    const stack = [start];
+    seen.add(start);
+    const comp: string[] = [];
+    while (stack.length) {
+      const cur = stack.pop()!;
+      comp.push(cur);
+      const [q, r] = cur.split(',').map(Number) as [number, number];
+      for (const [dq, dr] of NW_NB) {
+        const n = `${q + dq},${r + dr}`;
+        if (set.has(n) && !seen.has(n)) { seen.add(n); stack.push(n); }
+      }
+    }
+    comps.push(comp);
+  }
+  return comps;
+}
+
+function randomizeLandMap(landMap: LandMap, rng: () => number, opts: { desertsOnMain?: boolean } = {}): LandMap {
+  const cells = Object.keys(landMap);
+  const typePool: TileType[] = cells.map(c => landMap[c]!.type);
+  const numberPool: number[] = cells
+    .filter(c => landMap[c]!.type !== 'desert')
+    .map(c => landMap[c]!.number)
+    .filter((n): n is number => n != null);
+  const goldCount = typePool.filter(t => t === 'gold').length;
+  const nonGoldTypes = typePool.filter(t => t !== 'gold');
+  // 本島=最大連結成分、離れ小島=その他のセル。
+  const comps = landComponents(cells).sort((a, b) => b.length - a.length);
+  const main = comps[0] ?? cells;
+  const mainSet = new Set(main);
+  const outlying = cells.filter(c => !mainSet.has(c));
+  // 干ばつ等: 砂漠を本島に固定（本島=痩せ地、小島=豊か というテーマを保つ）。
+  const desertCount = nonGoldTypes.filter(t => t === 'desert').length;
+  const desertsOnMain = !!opts.desertsOnMain && desertCount > 0;
+  const freeTypes = desertsOnMain ? nonGoldTypes.filter(t => t !== 'desert') : nonGoldTypes;
+
+  for (let attempt = 0; attempt < 400; attempt++) {
+    // 1) 金を離れ小島のランダムなセルへ（不足時のみ任意セルで補う）。
+    const goldCells = shuffleWithRng(outlying, rng).slice(0, goldCount);
+    if (goldCells.length < goldCount) {
+      const more = shuffleWithRng(cells.filter(c => !goldCells.includes(c)), rng)
+        .slice(0, goldCount - goldCells.length);
+      goldCells.push(...more);
+    }
+    const goldSet = new Set(goldCells);
+    // 1b) 干ばつ: 砂漠を本島のランダムなセルへ（金と重ならないよう）。
+    const desertCells = desertsOnMain
+      ? shuffleWithRng(main.filter(c => !goldSet.has(c)), rng).slice(0, desertCount)
+      : [];
+    const fixedSet = new Set([...goldCells, ...desertCells]);
+    // 2) 残りセルへ（金・固定砂漠を除く）種別をシャッフル配置。
+    const rest = cells.filter(c => !fixedSet.has(c));
+    const shuffledTypes = shuffleWithRng(freeTypes, rng);
     const tType: Record<string, TileType> = {};
-    NEW_WORLD_COORDS.forEach((c, i) => { tType[c] = types[i]!; });
-    const numbered = NEW_WORLD_COORDS.filter(c => tType[c] !== 'desert');
-    const nums = shuffleWithRng(NEW_WORLD_NUMBERS, rng);
+    for (const c of goldCells) tType[c] = 'gold';
+    for (const c of desertCells) tType[c] = 'desert';
+    rest.forEach((c, i) => { tType[c] = shuffledTypes[i]!; });
+    // 3) 数字を非砂漠セルへシャッフル配置。
+    const numbered = cells.filter(c => tType[c] !== 'desert');
+    const nums = shuffleWithRng(numberPool, rng);
     const tNum: Record<string, number> = {};
     numbered.forEach((c, i) => { tNum[c] = nums[i]!; });
-    // (b) 金に赤数字を置かない
+    // 制約(b) 金に赤数字を置かない。
     if (numbered.some(c => tType[c] === 'gold' && isRedNum(tNum[c]))) continue;
-    // (a) 赤数字(6/8)が辺で隣接しない
+    // 制約(a) 赤6/8が辺で隣接しない（陸同士のみ＝別島は海で隔つため非隣接）。
     let ok = true;
-    for (const c of NEW_WORLD_COORDS) {
+    for (const c of cells) {
       if (!isRedNum(tNum[c])) continue;
       const [q, r] = c.split(',').map(Number) as [number, number];
       for (const [dq, dr] of NW_NB) {
@@ -419,15 +538,40 @@ function generateNewWorldLand(rng: () => number): LandMap {
       if (!ok) break;
     }
     if (!ok) continue;
+    // 盗賊: 砂漠（あれば最初の1枚）。無ければ本島の非赤タイル。
+    let robberCell = cells.find(c => tType[c] === 'desert');
+    if (!robberCell) {
+      robberCell = shuffleWithRng(main, rng).find(c => !isRedNum(tNum[c])) ?? main[0];
+    }
     const map: LandMap = {};
-    for (const c of NEW_WORLD_COORDS) {
+    for (const c of cells) {
       map[c] = tType[c] === 'desert'
-        ? { type: 'desert', number: null, robber: true }
-        : { type: tType[c]!, number: tNum[c]! };
+        ? { type: 'desert', number: null, robber: c === robberCell }
+        : { type: tType[c]!, number: tNum[c]!, robber: c === robberCell };
     }
     return map;
   }
-  return NEW_WORLD_LAND; // フォールバック（固定マップ・制約充足済み）
+  return landMap; // フォールバック（元マップ・制約充足済みの“正”）
+}
+
+// 霧マップ（fogMap）の中身を毎ゲームランダム化（どのセルが陸/海か・地形・数字をシャッフル。枚数不変）。
+function randomizeFogMap(fogMap: FogMap, rng: () => number): FogMap {
+  const cells = Object.keys(fogMap);
+  const landTypes = cells.filter(c => fogMap[c]!.type !== 'sea').map(c => fogMap[c]!.type);
+  const numbers = cells
+    .filter(c => fogMap[c]!.type !== 'sea')
+    .map(c => fogMap[c]!.number)
+    .filter((n): n is number => n != null);
+  const seaCount = cells.length - landTypes.length;
+  const shuffled = shuffleWithRng(cells, rng);
+  const seaCells = new Set(shuffled.slice(0, seaCount));
+  const landCells = shuffled.slice(seaCount);
+  const types = shuffleWithRng(landTypes, rng);
+  const nums = shuffleWithRng(numbers, rng);
+  const out: FogMap = {};
+  for (const c of seaCells) out[c] = { type: 'sea', number: null };
+  landCells.forEach((c, i) => { out[c] = { type: types[i]!, number: nums[i]! }; });
+  return out;
 }
 
 const seafarersThroughDesert: Scenario = {
@@ -446,8 +590,8 @@ const seafarersNewWorld: Scenario = {
   description: 'どの島にも入植でき、自分の出発島以外への初入植ごとに+1点。毎回ランダムな自由構築（12点）。',
   category: 'seafarers',
   coords: BIG_COORDS,
-  // 制約付きランダム生成（島座標は固定・種別/数字を毎回ランダム）。公式New Worldの「自由構築」を再現。
-  build: (geo, rng) => buildFromLandMap(generateNewWorldLand(rng))(geo, rng),
+  // 制約付きランダム生成（島座標は固定・種別/数字/港/金位置を毎回ランダム）。公式New Worldの「自由構築」を再現。
+  build: buildFromLandMap(NEW_WORLD_LAND),
   victoryTarget: 12,
   rules: { newIslandBonusVp: 1, setupAnywhere: true },
 };
@@ -481,6 +625,77 @@ const seafarersFogIslands: Scenario = {
   build: buildFromLandFogMap(BIG_MAIN_ISLAND, FOG_HIDDEN),
   victoryTarget: 12,
   rules: { newIslandBonusVp: 0 }, // 探索の報酬は資源（島ボーナスVPは無し）
+};
+
+// ---- 公式アプリ「宝島」（51ヘックス・公式アプリ4人盤に準拠／photo/IMG_6401） ----
+// 中央の本島(15・本拠)を霧の海域が取り囲む。四方の小島は霧に隠れており、船で近づくと晴れて
+//   島(=初入植+2点)か海が現れる。海辺には財宝トークン（船で到達＝資源2枚 or 開発カード1枚）。13点。
+const TREASURE_LAND: LandMap = {
+  // 中央本島（15・本拠＝出発島。全5資源・金は霧の小島側に出す）
+  '-2,0':  { type: 'forest',   number: 8 },
+  '-2,1':  { type: 'field',    number: 5 },
+  '-1,-1': { type: 'pasture',  number: 10 },
+  '-1,0':  { type: 'hill',     number: 4 },
+  '-1,1':  { type: 'mountain', number: 9 },
+  '-1,2':  { type: 'field',    number: 6 },
+  '0,-1':  { type: 'pasture',  number: 3 },
+  '0,0':   { type: 'forest',   number: 11 },
+  '0,1':   { type: 'hill',     number: 4 },
+  '1,-2':  { type: 'field',    number: 8 },
+  '1,-1':  { type: 'pasture',  number: 5 },
+  '1,0':   { type: 'forest',   number: 9 },
+  '1,1':   { type: 'mountain', number: 2 },
+  '2,-1':  { type: 'pasture',  number: 10 },
+  '2,0':   { type: 'hill',     number: 3 },
+};
+// 霧（四隅の小島8セル・5陸/3海）。randomizeFogMap がどのセルが陸/海か・地形・数字をランダム化。
+const TREASURE_FOG: FogMap = {
+  '-4,0':  { type: 'gold',     number: 5 },
+  '-4,1':  { type: 'sea',      number: null },
+  '-4,3':  { type: 'field',    number: 9 },
+  '-3,3':  { type: 'forest',   number: 4 },
+  '3,-3':  { type: 'pasture',  number: 8 },
+  '4,-3':  { type: 'sea',      number: null },
+  '4,-1':  { type: 'mountain', number: 10 },
+  '4,0':   { type: 'sea',      number: null },
+};
+function buildTreasureIslands(landMap: LandMap, fogMap: FogMap, treasureCount: number): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  return (geo, rng) => {
+    const home = randomizeLandMap(landMap, rng);
+    const fog = randomizeFogMap(fogMap, rng);
+    const tiles: Record<TileId, Tile> = {};
+    for (const id of Object.keys(geo.tileToVertices)) {
+      const coord = parseTileId(id);
+      const land = home[id];
+      const f = fog[id];
+      if (land) tiles[id] = { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber };
+      else if (f) tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false, fog: { type: f.type, number: f.number } };
+      else tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false };
+    }
+    // 財宝トークンを「沿岸の外洋辺（両側が海・片端が陸に面する）」へ決定論的に等間隔配置。到達しやすい位置。
+    const seaEdges = Object.values(geo.edges).filter(e => {
+      const tids = edgeTileIds(e, geo.vertices);
+      const bothSea = tids.length > 0 && tids.every(t => tiles[t]?.type === 'sea');
+      if (!bothSea) return false;
+      return e.vertexIds.some(vid => (geo.vertices[vid]?.adjacentTileIds ?? []).some(t => tiles[t] && tiles[t]!.type !== 'sea'));
+    }).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const edgeTokens: Record<string, EdgeTokenKind> = {};
+    const step = Math.max(1, Math.floor(seaEdges.length / treasureCount));
+    for (let i = 0; i < treasureCount && i * step < seaEdges.length; i++) {
+      edgeTokens[seaEdges[i * step]!.id] = 'treasure';
+    }
+    return { tiles, harbors: randomHarbors(geo, tiles, rng), edgeTokens };
+  };
+}
+const seafarersTreasure: Scenario = {
+  id: 'seafarers_treasure',
+  name: '航海者：宝島',
+  description: '本島を霧が取り囲む。船で霧を晴らして島を発見（初入植+2点）、海辺の財宝で資源や発展カードを得る（13点）。',
+  category: 'seafarers',
+  coords: HUGE_COORDS, // 51ヘックス（中央本島＋四方の霧の小島）
+  build: buildTreasureIslands(TREASURE_LAND, TREASURE_FOG, 6),
+  victoryTarget: 13,
+  rules: { newIslandBonusVp: 2 },
 };
 
 // ---- 公式S5「忘れられた部族」: 本島(左15・全数字)＋右の海域に VP/開発カード/港 トークン。
@@ -577,16 +792,16 @@ const CLOTH_VILLAGE_NUMBERS: Record<string, number> = {
   '1,-3': 5, '1,-2': 9, '1,0': 8, '1,2': 6, '3,-2': 4, '3,-1': 10, '3,0': 8, '2,1': 11,
 };
 function buildClothScenario(landMap: LandMap, villageNumbers: Record<string, number>): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
-  const fullLand: LandMap = { ...landMap };
-  for (const [tid, num] of Object.entries(villageNumbers)) {
-    fullLand[tid] = { type: 'pasture', number: num }; // 村タイル（隣接建物不可なので資源は産出しない）
-  }
-  const base = buildFromLandMap(fullLand);
+  const villageTids = Object.keys(villageNumbers);
   return (geo, rng) => {
-    const board = base(geo, rng);
+    // 本島の中身は毎ゲームランダム化。村は位置固定（機構上）・数字だけシャッフルする。
+    const fullLand: LandMap = { ...randomizeLandMap(landMap, rng) };
+    const vnums = shuffleWithRng(Object.values(villageNumbers), rng);
+    villageTids.forEach((tid, i) => { fullLand[tid] = { type: 'pasture', number: vnums[i]! }; });
+    const tiles = buildTilesFromLandMap(geo, fullLand);
     const villages: Record<string, number> = {};
-    for (const tid of Object.keys(villageNumbers)) villages[tid] = 5; // 各村の織物供給5
-    return { ...board, villages };
+    for (const tid of villageTids) villages[tid] = 5; // 各村の織物供給5
+    return { tiles, harbors: randomHarbors(geo, tiles, rng), villages };
   };
 }
 const seafarersCloth: Scenario = {
@@ -650,16 +865,16 @@ const PIRATE_FORTRESS_TILES: Record<string, { type: TileType; number: number }> 
 };
 const PIRATE_FLEET_PATH: string[] = ['0,-2', '0,-1', '0,0', '0,1', '0,2']; // 中央の海を縦に巡回
 function buildPirateIslands(homeMap: LandMap, fortressTiles: Record<string, { type: TileType; number: number }>, fleetPath: string[]): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
-  const fullLand: LandMap = { ...homeMap };
-  for (const [tid, ft] of Object.entries(fortressTiles)) fullLand[tid] = { type: ft.type, number: ft.number };
-  const base = buildFromLandMap(fullLand);
   return (geo, rng) => {
-    const board = base(geo, rng);
+    // 本島の中身は毎ゲームランダム化。要塞タイルは位置・地形固定（機構上＝奪取後に各色が別資源を産む）。
+    const fullLand: LandMap = { ...randomizeLandMap(homeMap, rng) };
+    for (const [tid, ft] of Object.entries(fortressTiles)) fullLand[tid] = { type: ft.type, number: ft.number };
+    const tiles = buildTilesFromLandMap(geo, fullLand);
     // 各要塞タイルの代表頂点（攻略対象）。タイルの最初の頂点を採用。
     const fortressVertices = Object.keys(fortressTiles)
       .map(tid => (geo.tileToVertices[tid] ?? [])[0])
       .filter((v): v is string => !!v);
-    return { ...board, fortressVertices, fleetPath };
+    return { tiles, harbors: randomHarbors(geo, tiles, rng), fortressVertices, fleetPath };
   };
 }
 const seafarersPirateIslands: Scenario = {
@@ -718,8 +933,10 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
   // 公式航海者シナリオ
   seafarers_newshores: seafarersNewShores,
+  seafarers_drought: seafarersDrought,
   seafarers_fourislands: seafarersFourIslands,
   seafarers_fogislands: seafarersFogIslands,
+  seafarers_treasure: seafarersTreasure,
   seafarers_throughdesert: seafarersThroughDesert,
   seafarers_forgottentribe: seafarersForgottenTribe,
   seafarers_cloth: seafarersCloth,

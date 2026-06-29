@@ -61,6 +61,19 @@ export function placeHeldHarborAt(state: GameState, playerId: PlayerId, vid: Ver
   };
 }
 
+/** 開発カードを1枚引く（今ターン購入扱い）。山札が空なら no-op。 */
+function drawDevCard(state: GameState, playerId: PlayerId): GameState {
+  if (state.devDeck.length === 0) return state;
+  const [drawn, ...remaining] = state.devDeck;
+  const card: DevCard = { ...drawn!, purchasedOnTurn: state.globalTurnNumber };
+  const player = state.players[playerId]!;
+  return {
+    ...state,
+    devDeck: remaining,
+    players: { ...state.players, [playerId]: { ...player, devCards: [...player.devCards, card] } },
+  };
+}
+
 /**
  * 指定の辺に海辺トークンがあれば、active プレイヤーが獲得する（種別に応じて効果適用）。
  * トークンが無ければ state をそのまま返す（no-op）。
@@ -77,14 +90,20 @@ export function collectEdgeToken(state: GameState, edgeId: EdgeId, playerId: Pla
   if (kind === 'vp') {
     next = { ...next, tokenVp: { ...(next.tokenVp ?? {}), [playerId]: ((next.tokenVp ?? {})[playerId] ?? 0) + 1 } };
   } else if (kind === 'dev') {
-    if (next.devDeck.length > 0) {
-      const [drawn, ...remaining] = next.devDeck;
-      const card: DevCard = { ...drawn!, purchasedOnTurn: next.globalTurnNumber };
+    next = drawDevCard(next, playerId);
+  } else if (kind === 'treasure') {
+    // 宝島の財宝: 公式は「資源・街道/船を作る能力・発展カード」のいずれか。
+    // ここでは決定論（edgeId 由来）で「発展カード1枚」か「資源2枚」を付与（簡略）。
+    const hash = [...edgeId].reduce((a, c) => a + c.charCodeAt(0), 0);
+    if (hash % 3 === 0 && next.devDeck.length > 0) {
+      next = drawDevCard(next, playerId);
+    } else {
+      const RES = ['wood', 'brick', 'wool', 'grain', 'ore'] as const;
+      const a = RES[hash % 5]!, b = RES[(hash + 2) % 5]!;
       const player = next.players[playerId]!;
       next = {
         ...next,
-        devDeck: remaining,
-        players: { ...next.players, [playerId]: { ...player, devCards: [...player.devCards, card] } },
+        players: { ...next.players, [playerId]: { ...player, hand: { ...player.hand, [a]: player.hand[a] + 1, [b]: player.hand[b] + 1 } } },
       };
     }
   } else { // harbor
