@@ -18,6 +18,13 @@ function isCoastalVertex(state: GameState, vid: VertexId): boolean {
   return v.adjacentTileIds.some(t => state.tiles[t]?.type === 'sea');
 }
 
+/** 隣接頂点に既存の港があるか（公式: 港同士は1辺以上空ける）。 */
+function adjacentToHarbor(state: GameState, vid: VertexId): boolean {
+  const v = state.vertices[vid];
+  if (!v) return false;
+  return v.adjacentVertexIds.some(av => state.vertices[av]?.harborType != null);
+}
+
 /**
  * 港トークンを、指定プレイヤーの「沿岸にあり港未設置の建物頂点」へ1つ設置する。
  * 置けたら新 state を、置けなければ null を返す（呼び出し側で保留にする）。
@@ -26,7 +33,8 @@ function placeHarborForPlayer(state: GameState, playerId: PlayerId): GameState |
   const cand = Object.keys(state.vertices)
     .filter(vid => {
       const v = state.vertices[vid]!;
-      return v.building?.playerId === playerId && v.harborType == null && isCoastalVertex(state, vid);
+      return v.building?.playerId === playerId && v.harborType == null
+        && isCoastalVertex(state, vid) && !adjacentToHarbor(state, vid); // 港同士は1辺以上空ける
     })
     .sort();
   const vid = cand[0];
@@ -44,7 +52,7 @@ export function placeHeldHarborAt(state: GameState, playerId: PlayerId, vid: Ver
   const held = (state.heldHarbors ?? {})[playerId] ?? 0;
   if (held <= 0) return state;
   const v = state.vertices[vid];
-  if (!v || v.harborType != null || !isCoastalVertex(state, vid)) return state;
+  if (!v || v.harborType != null || !isCoastalVertex(state, vid) || adjacentToHarbor(state, vid)) return state;
   return {
     ...state,
     vertices: { ...state.vertices, [vid]: { ...v, harborType: 'generic' } },

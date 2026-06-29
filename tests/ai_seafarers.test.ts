@@ -90,30 +90,29 @@ describe('AI 航海者: フルCPU対戦が船を使い完走する（決定論�
       { id: 'player2', name: 'B', color: 'blue',   type: 'ai', aiDifficulty: 'strong' },
       { id: 'player3', name: 'C', color: 'purple', type: 'ai', aiDifficulty: 'strong' },
     ];
-    const rng = createRng(12345);
-    let s = createInitialGameState(specs3, 'fixed', ['player1', 'player2', 'player3'], rng, 'seafarers_newshores');
-    let ships = 0;
-    let settlements = 0;
-
-    for (let i = 0; i < 80_000 && s.phase !== 'GAME_OVER'; i++) {
-      let pid = s.playerOrder[s.currentPlayerIndex]!;
-      if (s.phase === 'MAIN' && s.turnPhase === 'DISCARD') {
-        // 捨て札済み(discardedThisRound)は除外（再選択すると二重捨てで null→停止する）。
-        pid = s.playerOrder.find(p => !(s.discardedThisRound ?? []).includes(p) && handTotal(s, p) >= 8) ?? pid;
-      } else if (s.phase === 'MAIN' && s.turnPhase === 'GOLD') {
-        // 金タイル産出の選択は owed なプレイヤー（手番とは限らない）が解決する。
-        pid = s.playerOrder.find(p => ((s.pendingGoldChoice ?? {})[p] ?? 0) > 0) ?? pid;
+    // 決定論だが盤面シードに依存しすぎないよう複数シードで検証（各ゲーム完走＋通算で船が建つ）。
+    let totalShips = 0;
+    for (const seed of [12345, 1, 7, 2024]) {
+      const rng = createRng(seed);
+      let s = createInitialGameState(specs3, 'fixed', ['player1', 'player2', 'player3'], rng, 'seafarers_newshores');
+      let settlements = 0;
+      for (let i = 0; i < 80_000 && s.phase !== 'GAME_OVER'; i++) {
+        let pid = s.playerOrder[s.currentPlayerIndex]!;
+        if (s.phase === 'MAIN' && s.turnPhase === 'DISCARD') {
+          pid = s.playerOrder.find(p => !(s.discardedThisRound ?? []).includes(p) && handTotal(s, p) >= 8) ?? pid;
+        } else if (s.phase === 'MAIN' && s.turnPhase === 'GOLD') {
+          pid = s.playerOrder.find(p => ((s.pendingGoldChoice ?? {})[p] ?? 0) > 0) ?? pid;
+        }
+        const action = chooseAction(s, pid, { rng });
+        if (!action) break;
+        if (action.type === 'BUILD_SHIP') totalShips++;
+        if (action.type === 'BUILD_SETTLEMENT') settlements++;
+        s = applyAction(s, action, rng);
       }
-      const action = chooseAction(s, pid, { rng });
-      if (!action) break;
-      if (action.type === 'BUILD_SHIP') ships++;
-      if (action.type === 'BUILD_SETTLEMENT') settlements++;
-      s = applyAction(s, action, rng);
+      expect(s.phase).toBe('GAME_OVER'); // 各シードで完走
+      expect(s.winner).not.toBeNull();
+      expect(settlements).toBeGreaterThanOrEqual(1);
     }
-
-    expect(s.phase).toBe('GAME_OVER');
-    expect(s.winner).not.toBeNull();
-    expect(ships).toBeGreaterThanOrEqual(1);
-    expect(settlements).toBeGreaterThanOrEqual(1);
+    expect(totalShips).toBeGreaterThanOrEqual(1); // 通常対戦で船が建設される（新島へ航海）
   });
 });

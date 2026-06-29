@@ -257,6 +257,16 @@ export function updateLongestRoad(state: GameState): GameState {
  *     同数では移動しない（現保持者優先）。
  */
 export function updateLargestArmy(state: GameState): GameState {
+  // 航海者 S7 海賊の島々: 最大騎士力タイルを使わない（騎士＝軍船化で本数に数えない）。
+  // 保持者を常に null・全員 hasLargestArmy=false にする。
+  if (state.useLargestArmy === false) {
+    let ns = state;
+    for (const pid of state.playerOrder) {
+      ns = { ...ns, players: { ...ns.players, [pid]: { ...ns.players[pid]!, hasLargestArmy: false } } };
+    }
+    return { ...ns, largestArmyHolder: null };
+  }
+
   const currentHolder = state.largestArmyHolder;
   let newHolder = currentHolder;
 

@@ -110,3 +110,64 @@ describe('航海者: 基本ゲーム（classic）は船の影響を受けない'
     expect(canBuildShip({ ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD' }, 'player1', anyEdge)).toBe(false);
   });
 });
+
+describe('航海者: 街道建設カード（道2／船2／道1+船1）', () => {
+  // [B1] 監査: 無料配置の本数が「残り道コマ数」だけでキャップされ、船2/道1+船1 を配れなかった不具合の回帰防止。
+  function withRoadBuildingCard(s: GameState, roads: number, ships: number): GameState {
+    return {
+      ...s,
+      globalTurnNumber: 5,
+      devCardPlayedThisTurn: false,
+      players: {
+        ...s.players,
+        player1: {
+          ...s.players.player1!,
+          remainingRoads: roads,
+          remainingShips: ships,
+          devCards: [{ id: 'rb1', type: 'road_building', purchasedOnTurn: 0 }],
+        },
+      },
+    };
+  }
+
+  it('道コマ0でも船在庫があれば2本配置できる（船2・海のある盤）', () => {
+    const s = withRoadBuildingCard(seafarersMain(), 0, 15);
+    const next = applyAction(s, { type: 'PLAY_ROAD_BUILDING' });
+    expect(next.roadBuildingRoadsRemaining).toBe(2);
+  });
+
+  it('道コマ1＋船在庫ありなら2本配置できる（道1+船1）', () => {
+    const s = withRoadBuildingCard(seafarersMain(), 1, 15);
+    const next = applyAction(s, { type: 'PLAY_ROAD_BUILDING' });
+    expect(next.roadBuildingRoadsRemaining).toBe(2);
+  });
+
+  it('街道建設中は資源を消費せず船を無料配置でき、残数が減る', () => {
+    const s = applyAction(withRoadBuildingCard(seafarersMain(), 0, 15), { type: 'PLAY_ROAD_BUILDING' });
+    expect(s.roadBuildingRoadsRemaining).toBe(2);
+    const coastVid = Object.entries(s.vertices).find(([, v]) => v.building?.playerId === 'player1')![0] as VertexId;
+    const seaEdge = s.vertices[coastVid]!.adjacentEdgeIds.find(eid => isSeaEdge(s.edges[eid]!, s.vertices, s.tiles)) as EdgeId;
+    const handBefore = { ...s.players.player1!.hand };
+    const next = applyAction(s, { type: 'BUILD_SHIP', edgeId: seaEdge });
+    expect(next.edges[seaEdge]!.ship?.playerId).toBe('player1');
+    expect(next.roadBuildingRoadsRemaining).toBe(1);
+    expect(next.players.player1!.hand).toEqual(handBefore); // 無料配置（資源不変）
+  });
+
+  it('classic（海なし）では船在庫を数えず、残り道コマ数でキャップ', () => {
+    const g = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(3), 'classic');
+    const s: GameState = {
+      ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null,
+      diceRolledThisTurn: true, currentPlayerIndex: 0, globalTurnNumber: 5, devCardPlayedThisTurn: false,
+      players: {
+        ...g.players,
+        player1: {
+          ...g.players.player1!, remainingRoads: 1, remainingShips: 15,
+          devCards: [{ id: 'rb1', type: 'road_building', purchasedOnTurn: 0 }],
+        },
+      },
+    };
+    const next = applyAction(s, { type: 'PLAY_ROAD_BUILDING' });
+    expect(next.roadBuildingRoadsRemaining).toBe(1);
+  });
+});

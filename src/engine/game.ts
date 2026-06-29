@@ -16,7 +16,7 @@ import {
   canBuildCity, buildCity,
   hasEnoughResources,
 } from './actions';
-import { moveRobber, movePirate, discardResources, stealResource, getRobbablePlayerIds, getPirateRobbablePlayerIds, discardCount, robbableCardCount, findPendingDiscarder } from './robber';
+import { moveRobber, movePirate, discardResources, stealResource, stealResourceOrCloth, getRobbablePlayerIds, getPirateRobbablePlayerIds, discardCount, robbableCardCount, pirateRobbableCount, findPendingDiscarder } from './robber';
 import {
   isCk, applyEventDie, distributeCkProduction,
   canBuildKnight, buildKnight, canActivateKnight, activateKnight, canUpgradeKnight, upgradeKnight,
@@ -32,7 +32,7 @@ import { revealFogAround } from './explore';
 import { collectEdgeToken, placeHeldHarborAt } from './seaTokens';
 import { connectVillagesAround, produceCloth, checkClothEnd } from './cloth';
 import { canBuildWonder, buildWonder } from './wonders';
-import { canAttackFortress, attackFortress, moveFleet } from './pirateIslands';
+import { canAttackFortress, attackFortress, moveFleet, playWarship } from './pirateIslands';
 
 // ============================================================
 // 内部ユーティリティ
@@ -170,11 +170,16 @@ export function applyAction(
       if (state.pirateFleet) next = moveFleet(next, Math.min(d1, d2), rng);
 
       if (total === 7) {
-        const needsDiscard = state.playerOrder.some(p => {
-          const h = state.players[p]!.hand;
+        // S7 海賊の島々では上の moveFleet が「資源収集前」に略奪して手札を減らしうる。
+        // 捨て札要否は略奪後の手札(next)で判定する（state だと8→7に減った人がいても DISCARD に
+        // 入り、実際は誰も捨てる必要が無く手詰まりになる）。非艦隊シナリオでは next===state で不変。
+        const needsDiscard = next.playerOrder.some(p => {
+          const h = next.players[p]!.hand;
           return RESOURCE_TYPES.reduce((s, r) => s + h[r], 0) >= 8;
         });
-        next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : 'ROBBER' };
+        // S7 海賊の島々（useRobber=false）: 盗賊不使用。7は手札破棄のみで盗賊移動・盗みは無し。
+        const afterDiscard = state.useRobber === false ? 'TRADE_BUILD' : 'ROBBER';
+        next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : afterDiscard };
       } else {
         next = distributeResources({ ...next, turnPhase: 'TRADE_BUILD' }, total);
         // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
@@ -272,7 +277,8 @@ export function applyAction(
       // まだ捨てが必要なプレイヤーがいるか（資源＋商品で判定・既に捨てた人は除外）。
       // 騎士と商人で初回襲来前は盗賊が凍結＝捨て後は ROBBER ではなく TRADE_BUILD へ。
       if (!findPendingDiscarder(next)) {
-        const robberFrozen = isCk(next) && (next.barbarianAttacks ?? 0) < 1;
+        // 盗賊凍結: CKは初回襲来前、S7（useRobber=false）は常に盗賊不使用 → 捨て後は TRADE_BUILD。
+        const robberFrozen = (isCk(next) && (next.barbarianAttacks ?? 0) < 1) || next.useRobber === false;
         next = { ...next, turnPhase: robberFrozen ? 'TRADE_BUILD' : 'ROBBER', discardedThisRound: [] };
       }
 
@@ -358,6 +364,9 @@ export function applyAction(
     // ----------------------------------------------------------
     case 'MOVE_PIRATE': {
       if (state.turnPhase !== 'ROBBER') throw new Error('MOVE_PIRATE: not in ROBBER phase');
+      // S6 カタンの織物: 海賊は「最初の村接続」が出来るまで動かせない（公式）。それまでは盗賊(陸)のみ。
+      if (state.villages && !Object.values(state.villageConn ?? {}).some(arr => arr.length > 0))
+        throw new Error('MOVE_PIRATE: pirate is frozen until the first village connection (S6)');
       const { tileId, stealFromPlayerId } = action;
       const tile = state.tiles[tileId];
       if (!tile || tile.type !== 'sea') throw new Error('MOVE_PIRATE: must target a sea tile');
@@ -365,17 +374,28 @@ export function applyAction(
 
       let next = movePirate(state, tileId);
 
+      // S6 カタンの織物: 海賊移動時は「資源か織物」を強奪（公式）。村のある盤でのみ織物を含める。
+      const stealsCloth = !!state.villages;
+      const countFn = stealsCloth ? pirateRobbableCount : robbableCardCount;
       // 強奪は必須（盗賊と同様）: 海賊タイルに隣接して船を持ち手札のある相手がいるなら必ず盗む。
-      const pirateRobbable = getPirateRobbablePlayerIds(next, tileId, pid).filter(p => robbableCardCount(next, p) > 0);
+      const pirateRobbable = getPirateRobbablePlayerIds(next, tileId, pid).filter(p => countFn(next, p) > 0);
       if (stealFromPlayerId != null) {
         // 盗む相手は「海賊タイルに隣接する船を持つ相手」に限る。
         if (!getPirateRobbablePlayerIds(next, tileId, pid).includes(stealFromPlayerId))
           throw new Error('MOVE_PIRATE: steal target has no ship adjacent to the pirate tile');
         if (pirateRobbable.length > 0 && !pirateRobbable.includes(stealFromPlayerId))
           throw new Error('MOVE_PIRATE: must steal from an adjacent ship owner who holds cards');
-        next = stealResource(next, pid, stealFromPlayerId, rng);
+        next = stealsCloth
+          ? stealResourceOrCloth(next, pid, stealFromPlayerId, rng)
+          : stealResource(next, pid, stealFromPlayerId, rng);
       } else if (pirateRobbable.length > 0) {
         throw new Error('MOVE_PIRATE: must steal from an adjacent ship owner who holds cards');
+      }
+
+      // 織物強奪は VP を動かしうる（2枚=1VP）ため勝利判定（資源のみなら no-op 相当）。
+      if (stealsCloth) {
+        next = checkVictory(next, pid);
+        if (next.phase === 'GAME_OVER') return next;
       }
 
       const nextPhase = state.diceRolledThisTurn ? 'TRADE_BUILD' : 'PRE_ROLL';
@@ -486,13 +506,17 @@ export function applyAction(
       // S5 忘れられた部族: 港トークンを保留していれば、この沿岸開拓地に設置（無ければ no-op）。
       next = placeHeldHarborAt(next, pid, vertexId);
 
-      // SETUP 後半: 2個目の配置。
-      const isSecondPlacement = state.phase === 'SETUP_BACKWARD' && state.setupSubPhase === 'PLACE_SETTLEMENT';
-      if (isSecondPlacement && isCk(state)) {
+      // SETUP の「最後の開拓地」で初期資源を配る。標準/航海者は2軒目、S6 織物は3軒目。
+      // 公式: 最後の1軒の隣接タイルから資源を取得（それ以前の軒は資源なし）。
+      // 配置数は全建物で数える（CK は2軒目を都市へ昇格させるため）。
+      const setupTarget = state.startingSettlements ?? 2;
+      const placedNow = Object.values(next.vertices).filter(v => v.building?.playerId === pid).length;
+      const isLastSetupPlacement = _isSetupS && placedNow >= setupTarget;
+      if (isLastSetupPlacement && isCk(state)) {
         // 騎士と商人: 2個目は「都市」。開拓地→都市へ昇格し、都市の初期産出(資源+商品)を配る。
         next = ckSetupSecondCity(next, pid, vertexId);
-      } else if (isSecondPlacement) {
-        // 基本/航海者: 2個目開拓地の隣接タイルから初期資源を配布（setupGainFor に一本化）。
+      } else if (isLastSetupPlacement) {
+        // 基本/航海者: 最後の開拓地の隣接タイルから初期資源を配布（setupGainFor に一本化）。
         for (const resource of setupGainFor(next, vertexId, next.bank)) {
           next = {
             ...next,
@@ -644,6 +668,22 @@ export function applyAction(
       const newCards = player.devCards.filter((_, i) => i !== cardIdx);
       const usedCard = player.devCards[cardIdx]!;
 
+      // S7 海賊の島々: 騎士＝軍船化。起点に最も近い通常船を1隻軍船化する（盗賊・最大騎士力は無効）。
+      if (state.fortresses !== undefined) {
+        const warshipped = playWarship(state, pid);
+        if (!warshipped) throw new Error('PLAY_KNIGHT: no normal ship to convert into a warship');
+        return {
+          ...warshipped,
+          devCardPlayedThisTurn: true,
+          devDiscardPile: [...state.devDiscardPile, usedCard],
+          players: { ...warshipped.players, [pid]: { ...warshipped.players[pid]!, devCards: newCards } },
+        };
+      }
+
+      // それ以外で盗賊不使用のシナリオでは騎士は使用不可（現状 S7 以外に該当なし・防御的）。
+      if (state.useRobber === false) throw new Error('PLAY_KNIGHT: knights are disabled in this scenario');
+
+      // 通常（盗賊版）: 「盗賊か海賊を動かす」フェーズへ。最大騎士力を再計算。
       let next: GameState = {
         ...state,
         devCardPlayedThisTurn: true,
@@ -771,7 +811,13 @@ export function applyAction(
       const newCards = player.devCards.filter((_, i) => i !== cardIdx);
       const usedCard = player.devCards[cardIdx]!;
 
-      const roadsAvailable = Math.min(2, player.remainingRoads);
+      // 航海者: 街道建設カードは「道2／船2／道1+船1」のいずれか。無料配置できる本数は
+      // 道コマ在庫だけでなく船コマ在庫も加味する（海のある盤のみ。基本ゲームは海辺が無く
+      // 船を置けないので船在庫は数えない＝従来挙動を維持）。各配置時の在庫は
+      // canBuildRoad/canBuildShip がそれぞれ remainingRoads/remainingShips で担保する。
+      const hasSeaForRb = Object.values(state.tiles).some(t => t.type === 'sea');
+      const freePieces = player.remainingRoads + (hasSeaForRb ? (player.remainingShips ?? 0) : 0);
+      const roadsAvailable = Math.min(2, freePieces);
       return {
         ...state,
         devCardPlayedThisTurn: true,
@@ -1003,44 +1049,37 @@ export function applyAction(
 function advanceSetup(state: GameState): GameState {
   const total = state.playerOrder.length;
   const idx = state.currentPlayerIndex;
+  // 初期配置の開拓地数（既定2。S6 織物=3）。スネークドラフトを target ラウンド繰り返す。
+  const target = state.startingSettlements ?? 2;
+  const round = state.setupRound ?? 1; // 現在のラウンド番号（1始まり）。
+
+  const toMain: GameState = {
+    ...state,
+    phase: 'MAIN',
+    turnPhase: 'PRE_ROLL',
+    currentPlayerIndex: 0,
+    setupSubPhase: null,
+    diceRolledThisTurn: false,
+    devCardPlayedThisTurn: false,
+  };
 
   if (state.phase === 'SETUP_FORWARD') {
     if (idx < total - 1) {
-      // 次のプレイヤーへ
-      return {
-        ...state,
-        currentPlayerIndex: idx + 1,
-        setupSubPhase: 'PLACE_SETTLEMENT',
-      };
-    } else {
-      // 後半開始: 最後のプレイヤーが前半を終えたらそのまま後半へ（同プレイヤーが続ける）
-      return {
-        ...state,
-        phase: 'SETUP_BACKWARD',
-        setupSubPhase: 'PLACE_SETTLEMENT',
-      };
+      // 同一ラウンド内: 次のプレイヤーへ
+      return { ...state, currentPlayerIndex: idx + 1, setupSubPhase: 'PLACE_SETTLEMENT' };
     }
+    // 順方向ラウンドの最後のプレイヤー。目標ラウンドに達していたら終了、未達なら逆方向へ折り返す（同プレイヤー続行）。
+    if (round >= target) return toMain;
+    return { ...state, phase: 'SETUP_BACKWARD', setupRound: round + 1, setupSubPhase: 'PLACE_SETTLEMENT' };
   }
 
   if (state.phase === 'SETUP_BACKWARD') {
     if (idx > 0) {
-      return {
-        ...state,
-        currentPlayerIndex: idx - 1,
-        setupSubPhase: 'PLACE_SETTLEMENT',
-      };
-    } else {
-      // 全員配置完了 → MAIN フェーズへ
-      return {
-        ...state,
-        phase: 'MAIN',
-        turnPhase: 'PRE_ROLL',
-        currentPlayerIndex: 0,
-        setupSubPhase: null,
-        diceRolledThisTurn: false,
-        devCardPlayedThisTurn: false,
-      };
+      return { ...state, currentPlayerIndex: idx - 1, setupSubPhase: 'PLACE_SETTLEMENT' };
     }
+    // 逆方向ラウンドの先頭プレイヤー。目標ラウンドに達したら MAIN、未達なら3軒目以降の順方向ラウンドへ（同プレイヤー続行）。
+    if (round >= target) return toMain;
+    return { ...state, phase: 'SETUP_FORWARD', setupRound: round + 1, setupSubPhase: 'PLACE_SETTLEMENT' };
   }
 
   return state;

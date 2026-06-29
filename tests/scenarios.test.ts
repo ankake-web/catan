@@ -49,12 +49,19 @@ describe('scenarios: classic は従来どおり（非破壊）', () => {
 describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
 
-  it('公式S1級 footprint（37ヘックス）で陸22・海15・砂漠1・金2（公式S1は金タイル2枚）', () => {
+  it('公式S1の陸構成（丘4/森3/牧草5/畑4/山4/金2/砂漠0＝陸22）に一致・数字22', () => {
     expect(Object.keys(s.tiles)).toHaveLength(37);
     expect(count(s.tiles, 'sea')).toBe(15);
     expect(count(s.tiles, 'gold')).toBe(2);
-    expect(count(s.tiles, 'desert')).toBe(1);
-    expect(37 - 15).toBe(22); // 海以外＝陸22（金タイルも陸に含む）
+    expect(count(s.tiles, 'desert')).toBe(0);   // 公式S1は砂漠なし
+    expect(count(s.tiles, 'hill')).toBe(4);
+    expect(count(s.tiles, 'forest')).toBe(3);
+    expect(count(s.tiles, 'pasture')).toBe(5);
+    expect(count(s.tiles, 'field')).toBe(4);
+    expect(count(s.tiles, 'mountain')).toBe(4);
+    // 陸22（金2含む）・数字トークン22（砂漠が無く全陸に数字）
+    expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(22);
+    expect(Object.values(s.tiles).filter(t => t.number != null)).toHaveLength(22);
   });
 
   it('公式S1: 勝利点は14・新島初入植ボーナスは+2', () => {
@@ -71,7 +78,7 @@ describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', (
 
   it('海峡(q=0列)が全て海で左右の陸塊を分離（船が必要）', () => {
     for (const r of [-3, -2, -1, 0, 1, 2, 3]) expect(s.tiles[`0,${r}`]?.type).toBe('sea');
-    expect(s.tiles['-1,-1']?.type).toBe('desert'); // 本島の砂漠
+    expect(s.tiles['-1,-1']?.type).toBe('pasture'); // 公式S1は砂漠なし＝盗賊初期は牧草に置く
     expect(s.tiles['1,-1']?.type).toBe('gold');    // 新島の金
   });
 
@@ -86,10 +93,10 @@ describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', (
     }
   });
 
-  it('盗賊は本島の砂漠(-1,-1)から開始', () => {
+  it('盗賊は本島(-1,-1)から開始（公式S1は砂漠なしのため牧草上に置く）', () => {
     const robber = Object.values(s.tiles).find(t => t.hasRobber)!;
     expect(robber.id).toBe('-1,-1');
-    expect(robber.type).toBe('desert');
+    expect(robber.type).toBe('pasture');
   });
 
   it('盤面が viewBox に収まるよう、基本盤より頂点/辺が多い（大きい盤）', () => {
@@ -120,8 +127,9 @@ describe('scenarios: 航海者「群島」', () => {
   it('海岸線に港が配置され、沿岸の陸頂点に harborType が付く（両航海者マップ）', () => {
     for (const id of ['seafarers_newshores', 'seafarers_archipelago'] as const) {
       const st = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), id);
-      expect(st.harbors.length).toBeGreaterThan(0);
-      expect(st.harbors.length).toBeLessThanOrEqual(4);
+      // [D1] 港は公式に寄せて複数配置（旧実装の4個固定をやめた）。
+      expect(st.harbors.length).toBeGreaterThanOrEqual(5);
+      expect(st.harbors.length).toBeLessThanOrEqual(9);
       for (const h of st.harbors) {
         for (const v of h.vertexIds) {
           expect(st.vertices[v]?.harborType).toBe(h.type);
@@ -131,6 +139,18 @@ describe('scenarios: 航海者「群島」', () => {
         }
       }
     }
+  });
+
+  it('[D1] 大きな航海者盤では5種の専門港(2:1)と3:1港の両方が配置される', () => {
+    const st = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
+    const types = st.harbors.map(h => h.type);
+    const specific = new Set(types.filter(t => t !== 'generic'));
+    // 旧実装は木/レンガの2:1のみだった。5資源すべての2:1港が出ること。
+    for (const r of ['wood', 'brick', 'wool', 'grain', 'ore']) {
+      expect(specific.has(r as never)).toBe(true);
+    }
+    // 3:1（generic）港も少なくとも1つ。
+    expect(types.includes('generic')).toBe(true);
   });
 
   it('新島A・Bは本島と隣接しない（航海でのみ到達）', () => {
@@ -147,16 +167,46 @@ describe('scenarios: 航海者「群島」', () => {
 
 describe('scenarios: 航海者「砂漠を越えて」(公式S4)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_throughdesert');
-  it('公式S4: 勝利点14・金2・砂漠2（本島の盗賊砂漠＋新天地の砂漠）', () => {
+  it('公式S4の陸構成（砂漠3/森5/山4/丘3/牧草4/畑4/金2＝陸25）に一致・数字22', () => {
     expect(s.victoryTarget).toBe(14);
     expect(count(s.tiles, 'gold')).toBe(2);
-    expect(count(s.tiles, 'desert')).toBe(2);
+    expect(count(s.tiles, 'desert')).toBe(3);   // 大きな砂漠帯（本島1＋新天地2）
+    expect(count(s.tiles, 'forest')).toBe(5);
+    expect(count(s.tiles, 'mountain')).toBe(4);
+    expect(count(s.tiles, 'hill')).toBe(3);
+    expect(count(s.tiles, 'pasture')).toBe(4);
+    expect(count(s.tiles, 'field')).toBe(4);
+    expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(25);
+    expect(Object.values(s.tiles).filter(t => t.number != null)).toHaveLength(22);
   });
-  it('本島(最大15)と新天地が海で分かれる2島', () => {
+  it('本島(最大15)と新天地(10)が海で分かれる2島', () => {
     const repOf = computeIslandReps(s.tiles);
     const sizes = [...new Set(Object.values(repOf))]
       .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
-    expect(sizes).toEqual([15, 7]);
+    expect(sizes).toEqual([15, 10]);
+  });
+});
+
+describe('scenarios: 航海者「新世界」(公式New World・制約付きランダム生成)', () => {
+  it('陸構成は固定(森4/畑4/牧草4/丘3/山3/砂漠1/金2)・島15/3/3・シードで盤が変わる', () => {
+    const a = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newworld');
+    const b = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(2), 'seafarers_newworld');
+    for (const s of [a, b]) {
+      expect(count(s.tiles, 'forest')).toBe(4);
+      expect(count(s.tiles, 'field')).toBe(4);
+      expect(count(s.tiles, 'pasture')).toBe(4);
+      expect(count(s.tiles, 'hill')).toBe(3);
+      expect(count(s.tiles, 'mountain')).toBe(3);
+      expect(count(s.tiles, 'desert')).toBe(1);
+      expect(count(s.tiles, 'gold')).toBe(2);
+      const repOf = computeIslandReps(s.tiles);
+      const sizes = [...new Set(Object.values(repOf))]
+        .map(r => Object.values(repOf).filter(x => x === r).length).sort((x, y) => y - x);
+      expect(sizes).toEqual([15, 3, 3]); // 島構造は固定（本島15＋小島3+3）
+    }
+    // 異なるシードでタイル配置が変わる（＝ランダム生成）。
+    const sig = (s: typeof a) => Object.entries(s.tiles).map(([id, t]) => `${id}:${t.type}:${t.number}`).join('|');
+    expect(sig(a)).not.toBe(sig(b));
   });
 });
 

@@ -156,6 +156,21 @@ function isOpenShipEnd(
  *   - from は「開放端を持つ」船（行き止まりの船）だけ動かせる。
  *   - 移動先は from の船を取り除いた状態で自分のネットワークに接続する。
  */
+/**
+ * S6 カタンの織物: 「村につないだ航路は closed（移動不可）」。
+ * その辺が、playerId が接続済みの村タイルに面しているなら locked とみなす。
+ * villages の無い盤では常に false。
+ */
+export function isVillageLockedShip(state: GameState, playerId: PlayerId, edgeId: EdgeId): boolean {
+  if (!state.villages) return false;
+  const e = state.edges[edgeId];
+  if (!e || e.ship?.playerId !== playerId) return false;
+  for (const tid of edgeTileIds(e, state.vertices)) {
+    if (tid in state.villages && (state.villageConn?.[tid]?.includes(playerId))) return true;
+  }
+  return false;
+}
+
 export function canMoveShip(
   state: GameState, playerId: PlayerId, fromEdgeId: EdgeId, toEdgeId: EdgeId,
 ): boolean {
@@ -163,6 +178,8 @@ export function canMoveShip(
   // 建てたばかりの船（このターン建設）は移動できない（航海者の標準ルール）。
   if (state.shipsBuiltThisTurn?.includes(fromEdgeId)) return false;
   if (fromEdgeId === toEdgeId) return false;
+  // S6 カタンの織物: 村につないだ航路（村タイルに面する自分の船）は closed＝移動できない（延長/分岐は可）。
+  if (isVillageLockedShip(state, playerId, fromEdgeId)) return false;
 
   const from = state.edges[fromEdgeId];
   const to = state.edges[toEdgeId];
@@ -195,6 +212,7 @@ export function isShipMovable(state: GameState, playerId: PlayerId, fromEdgeId: 
   if (from?.ship?.playerId !== playerId) return false;
   // 高コストな移動先探索の前に cheap-fail（描画毎の playerHasMovableShip 連打を軽くする）。
   if (state.shipsBuiltThisTurn?.includes(fromEdgeId)) return false;          // 今ターン建設は不可
+  if (isVillageLockedShip(state, playerId, fromEdgeId)) return false;        // S6 村航路は closed
   if (state.piratePosition != null && edgeTileIds(from, state.vertices).includes(state.piratePosition)) return false; // 海賊封鎖
   if (!from.vertexIds.some(v => isOpenShipEnd(state, playerId, v, fromEdgeId))) return false; // 開放端なし
   return Object.keys(state.edges).some(to => canMoveShip(state, playerId, fromEdgeId, to));

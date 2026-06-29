@@ -7,7 +7,7 @@ import { RESOURCE_TYPES, BUILD_COSTS, CK_COSTS, VP_TABLE } from '../constants';
 import { calcVP, calcPublicVP, victoryTarget } from '../engine/scoring';
 import { LONGEST_ROAD_MIN, LARGEST_ARMY_MIN } from '../constants';
 import { hasEnoughResources, playerHasMovableShip } from '../engine/actions';
-import { canAttackFortress } from '../engine/pirateIslands';
+import { canAttackFortress, canPlayWarship } from '../engine/pirateIslands';
 import { bestWonderAction } from '../engine/wonders';
 import { canBankTrade, getEffectiveTradeRate, isCommodity } from '../engine/trade';
 import { findPendingDiscarder, discardCount, robbableCardCount } from '../engine/robber';
@@ -1229,12 +1229,18 @@ function appendDevCardButtons(
   if (playable.length === 0) return;
 
   const devAlreadyPlayed = state.devCardPlayedThisTurn;
+  // S7 海賊の島々: 騎士＝軍船化（盗賊は不使用）。表記を「軍船化」にし、軍船化できる通常船が無い時は無効化。
+  const warshipMode = state.fortresses !== undefined;
   for (const { type, count } of playable) {
-    const label = `${DEV_CARD_NAMES[type] ?? type}${count > 1 ? ` ×${count}` : ''}`;
+    const isWarship = type === 'knight' && warshipMode;
+    const baseName = isWarship ? '🚢 軍船化' : (DEV_CARD_NAMES[type] ?? type);
+    const label = `${baseName}${count > 1 ? ` ×${count}` : ''}`;
+    const knightDisabled = type === 'knight' && warshipMode && !canPlayWarship(state, player.id);
+    const disabled = devAlreadyPlayed || knightDisabled;
     const btn = makeBtn(
       label,
-      devAlreadyPlayed ? 'btn-disabled' : 'btn-build',
-      devAlreadyPlayed,
+      disabled ? 'btn-disabled' : 'btn-build',
+      disabled,
       () => {
         if (type === 'knight')         dispatch({ type: 'PLAY_KNIGHT' });
         if (type === 'road_building')  dispatch({ type: 'PLAY_ROAD_BUILDING' });
@@ -1242,12 +1248,13 @@ function appendDevCardButtons(
         if (type === 'monopoly')       setUIPhase({ type: 'monopoly', resource: null });
       },
     );
+    if (isWarship) btn.title = '騎士カードで、起点に最も近い通常船を1隻「軍船」にします（艦隊戦の戦力）。';
     // 騎士は ⚔ 絵文字の代わりに騎士フィギュア画像をアイコンとして先頭に表示。
     if (type === 'knight') {
-      btn.textContent = label.replace('⚔ ', '');
+      btn.textContent = label.replace('⚔ ', '').replace('🚢 ', '');
       const ic = document.createElement('img');
       ic.className = 'dev-knight-icon';
-      ic.src = knightImg; ic.alt = '騎士'; ic.draggable = false;
+      ic.src = knightImg; ic.alt = isWarship ? '軍船化' : '騎士'; ic.draggable = false;
       btn.prepend(ic);
     }
     div.appendChild(btn);
