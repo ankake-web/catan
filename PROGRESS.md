@@ -13,10 +13,22 @@
 `docs/ClaudeCode_カタン全ルール監査プロンプト.md`（2026-06-29 にリポジトリへ取り込み・docs/ に集約）。
 
 ## 2. 現在の状態（最重要）
-- ブランチ **`seafarers-audit-and-fixes`**（origin に push 済み）。**2026-06-29 追補で +3コミット**（後述）。
-- **PR #3 作成済み・未マージ**: https://github.com/ankake-web/catan/pull/3 （マージ＝本番デプロイは許可待ち）。
-- **テスト 842 緑** / `tsc --noEmit` 緑 / `npm run build` 緑（最終確認 2026-06-29 追補）。
-- ローカル main は origin/main と同期（このブランチは main 先行）。
+- **PR #3 は main へマージ済み＝本番デプロイ完了**（2026-06-29・ユーザ許可後）。航海者版の監査・公式準拠化が
+  https://ankake-web.github.io/catan/ に反映。GitHub Actions `deploy.yml` が main push で自動デプロイ（success）。
+- **新規: 初心者支援機能を `beginner-mode` ブランチ＋PR #4 で実装**（ホバー説明＋初心者モード）。**未マージ・デプロイ可否は確認待ち**。
+- **テスト 858 緑** / `tsc --noEmit` 緑 / `npm run build` 緑（最終確認 2026-06-29）。
+- 旧ブランチ `seafarers-audit-and-fixes` はマージ済み。現在の作業ブランチは `beginner-mode`（main 先行）。
+
+### 2.0 2026-06-29 後半（初心者支援・PR #4。テスト864緑）
+- **ヘックスの説明（常時ON）**: 地形・産出資源・出やすさをツールチップ表示。**マウス=ホバー／タッチ=長押し**
+  （長押し成立時は直後のタップを握りつぶし誤配置を防止）（`src/renderer/hexTooltip.ts`）。
+- **初心者モード（ホームで切替・localStorage）**:
+  - 局面ガイド（助言バナー）: 初期配置/サイコロ/7捨て札/盗賊/金/建設・交易/相手の手番＋**手札超過の7警告**。
+  - **交易の損得アドバイス**: 自分宛て提案に得/損/同等＋建設解禁を表示（`beginnerHints.ts` tradeOfferHint）。
+  - 初期配置のおすすめ⭐（`recommendedSetupVertices`）。
+  - 「🔰 遊び方」ヘルプ overlay（目的・手番の流れ・建設コスト・コツ／`src/renderer/beginnerHelp.ts`）。
+  - 実ブラウザ(Playwright)で表示・OFF時非表示・ヘルプ overlay・エラー0を確認。
+- 次の一手候補（任意・未実装）: 用語の?ヘルプ、CPUの手番の見える化など。
 
 ### 2.1 2026-06-29 追補セッション（PROGRESS §5 残タスクの消化）
 - **[D6] S6 海賊移動時の織物強奪を実装**（commit e95ed82）。公式どおり「資源か織物」を無作為に1枚奪う。
