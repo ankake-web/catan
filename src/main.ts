@@ -30,6 +30,7 @@ import type { RollSpec, DiceGLController } from './renderer/diceGL';
 import { renderBoard } from './renderer/board';
 import type { BoardRenderOptions, BoardViewport } from './renderer/board';
 import { installHexTooltip } from './renderer/hexTooltip';
+import { beginnerHint, recommendedSetupVertices } from './renderer/beginnerHints';
 import { renderUI, syncBoardDrawWidth, showAssetGallery } from './renderer/ui';
 import type { UIPhase } from './renderer/ui';
 import { attachBoardEvents, attachBoardGestures, resolvePlacePreviewAction, centeredZoom, ZOOM_LIMITS } from './renderer/events';
@@ -156,6 +157,28 @@ function renderHome(
   countField.appendChild(countLabel);
   countField.appendChild(countGroup);
   cpuForm.appendChild(countField);
+
+  // ---- 初心者モード（操作ヒント＋初期配置のおすすめ表示）。即 localStorage 永続。----
+  const begField = document.createElement('div');
+  begField.className = 'home-field home-beginner-field';
+  const begRow = document.createElement('label');
+  begRow.className = 'home-beginner-row';
+  const begInput = document.createElement('input');
+  begInput.type = 'checkbox';
+  begInput.id = 'beginnerToggle';
+  begInput.checked = beginnerMode;
+  begInput.addEventListener('change', () => setBeginnerMode(begInput.checked));
+  const begLabelEl = document.createElement('span');
+  begLabelEl.className = 'home-beginner-label';
+  begLabelEl.textContent = '🔰 初心者モード';
+  begRow.appendChild(begInput);
+  begRow.appendChild(begLabelEl);
+  const begDesc = document.createElement('div');
+  begDesc.className = 'home-beginner-desc';
+  begDesc.textContent = '今やることのヒントを表示し、初期配置のおすすめ場所を光らせます。';
+  begField.appendChild(begRow);
+  begField.appendChild(begDesc);
+  cpuForm.appendChild(begField);
 
   const diffField = document.createElement('div');
   diffField.className = 'home-field';
@@ -598,9 +621,12 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
 
   if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
     if (state.setupSubPhase === 'PLACE_SETTLEMENT') {
-      opts.validVertexIds = new Set(
+      const valid = new Set(
         Object.keys(state.vertices).filter(vid => canBuildSettlement(state, pid, vid)),
       );
+      opts.validVertexIds = valid;
+      // 初心者モード: 出やすさ＋資源の多様性で上位の地点に⭐を出す。
+      if (beginnerMode) opts.recommendedVertexIds = recommendedSetupVertices(state, valid);
     } else if (state.setupSubPhase === 'PLACE_ROAD') {
       opts.validEdgeIds = new Set(
         Object.keys(state.edges).filter(eid => canBuildRoad(state, pid, eid)),
@@ -783,6 +809,16 @@ let inGame = false;
 // （前回CPU対戦の「最速」がLANに漏れて全演出が消える等の混線を防ぐ）。
 function fxSpeed(): CpuSpeed {
   return netMode ? 'normal' : (lastConfig?.cpuSpeed ?? 'normal');
+}
+
+// 初心者モード（localStorage保存）: 局面ガイド（助言バナー）＋初期配置のおすすめ地点を表示。
+const BEGINNER_KEY = 'catan_beginner';
+let beginnerMode: boolean = (() => {
+  try { return localStorage.getItem(BEGINNER_KEY) === '1'; } catch { return false; }
+})();
+function setBeginnerMode(v: boolean): void {
+  beginnerMode = v;
+  try { localStorage.setItem(BEGINNER_KEY, v ? '1' : '0'); } catch { /* ignore */ }
 }
 
 // サイコロ演出の速さ設定（CPU速度とは独立・localStorage保存）。off=演出なしで即結果。
@@ -971,6 +1007,7 @@ function redraw(skipBoard = false): void {
     updatePlaceConfirmBar();
     updateZoomControls();
     updateLandscapeSheet();
+    updateBeginnerHint();
     return;
   }
 
@@ -993,6 +1030,7 @@ function redraw(skipBoard = false): void {
   // CPUが責任を持つ場面ならフリーズ対策ウォッチドッグを再武装
   armCpuWatchdog();
   updateLandscapeSheet();
+  updateBeginnerHint();
 }
 
 // ============================================================
@@ -2612,6 +2650,35 @@ function maybeScrollToTradeOffer(prevState: GameState, newState: GameState): voi
 
 // 盤面メッセージ（中央上に短く出す汎用トースト。交易申し込みなどの通知に使う）。
 // レイアウトは崩さない absolute 配置。約2.2秒で自動消滅。
+// 初心者モードの局面ガイド（助言バナー）を盤面下部に表示・更新する。
+// renderUI に消されないよう #board-area 直下に別管理で持つ。OFF/該当なしでは除去。
+function updateBeginnerHint(): void {
+  const host = document.getElementById('board-area');
+  if (!host) return;
+  const existing = document.getElementById('beginner-hint');
+  const hint = beginnerMode && state ? beginnerHint(state, selfPlayerId() ?? null) : null;
+  if (!hint) { existing?.remove(); return; }
+
+  const el = existing ?? document.createElement('div');
+  if (!existing) { el.id = 'beginner-hint'; host.appendChild(el); }
+  el.innerHTML = '';
+  const icon = document.createElement('span');
+  icon.className = 'bh-icon';
+  icon.textContent = hint.icon;
+  const txt = document.createElement('div');
+  txt.className = 'bh-text';
+  const t = document.createElement('div');
+  t.className = 'bh-title';
+  t.textContent = hint.title;
+  const b = document.createElement('div');
+  b.className = 'bh-body';
+  b.textContent = hint.body;
+  txt.appendChild(t);
+  txt.appendChild(b);
+  el.appendChild(icon);
+  el.appendChild(txt);
+}
+
 function showBoardNotice(text: string, color = '#e0a948'): void {
   const host = document.getElementById('board-area');
   if (!host) return;

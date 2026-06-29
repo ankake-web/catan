@@ -65,6 +65,8 @@ export interface BoardRenderOptions {
   selectedTileId?: string;
   // 騎士と商人: タッチ確認中に選択した頂点（騎士の起動/昇格対象）を青で明示。
   selectedVertexId?: string;
+  // 初心者モード: 初期配置のおすすめ頂点（⭐ を描いて誘導）。
+  recommendedVertexIds?: Set<string>;
   // ピンチズーム/パンの永続ビューポート（viewBox座標系）。再描画後も維持される。
   viewport?: BoardViewport;
 }
@@ -670,6 +672,14 @@ function renderVertices(
       if (isValid) dot.classList.add('valid');
       setAttrs(dot, { cx: vx, cy: vy, r: isValid ? 7 : 5 });
       vg.appendChild(dot);
+      // 初心者モード: おすすめの初期配置地点に⭐を出して誘導。
+      if (opts?.recommendedVertexIds?.has(vertex.id)) {
+        const star = svgEl('text');
+        star.classList.add('vertex-recommend');
+        setAttrs(star, { x: vx, y: vy - 12, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': '16' });
+        star.textContent = '⭐';
+        vg.appendChild(star);
+      }
     }
 
     // 仮置きプレビュー（確定待ち）のゴースト。建物の有無に関わらず目立つリングを出す。
