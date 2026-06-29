@@ -89,35 +89,37 @@ const BIG_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 3, 3);
 const HUGE_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(4, 3, 4);  // 51ヘックス
 const FOUR_ISLANDS_COORDS = BIG_COORDS; // S2 は 37ヘックス（4島）
 
-// ---- 航海者「新たな海岸を目指して」（公式S1・37ヘックス級） ----
-// 本島(左 q=-3..-1 = 15タイル・全5資源＋砂漠)＋海峡(q=0列＝海)＋新しい島(右 7タイル・金2)。
-//   公式コンポ目安(35)に寄せた拡張版。本島が一意最大・新島へは船で渡り初入植+2点。
+// ---- 航海者「新たな海岸を目指して」（公式S1・51ヘックス＝公式アプリ4人盤に準拠） ----
+// 公式アプリ(photo/IMG_6399)の「中央に本島＋四方に離れた小島」を51マス盤で再現。
+//   中央本島15＋四隅の小島4つ(各2タイル)。金は小島にランダム配置（randomizeLandMap が
+//   最大連結成分=本島以外＝離れ小島へ金を置く）。中身（資源/数字/港/金位置）は毎ゲームランダム。
+//   下記は構成（枚数）の“正”＝森4/畑4/牧草5/丘4/山4/金2＝陸23・砂漠なし。
 const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; robber?: boolean }> = {
-  // 本島（左 15・全5資源＋砂漠=盗賊初期）
-  '-3,0':  { type: 'forest',   number: 8 },
-  '-3,1':  { type: 'field',    number: 5 },
-  '-3,2':  { type: 'pasture',  number: 10 },
-  '-3,3':  { type: 'hill',     number: 4 },
-  '-2,-1': { type: 'mountain', number: 9 },
-  '-2,0':  { type: 'field',    number: 4 },  // 赤数字6/8の隣接回避（-3,0=8と隣接のため非赤4に）
-  '-2,1':  { type: 'forest',   number: 11 },
-  '-2,2':  { type: 'pasture',  number: 3 },
-  '-2,3':  { type: 'hill',     number: 6 },
-  '-1,-2': { type: 'field',    number: 4 },
-  // 公式S1は砂漠なし。盗賊初期はこの牧草(数字3・非赤)に置く＝盤上のヘックス数を公式(牧草5/砂漠0)に一致。
-  '-1,-1': { type: 'pasture',  number: 3, robber: true },
-  '-1,0':  { type: 'mountain', number: 2 },
-  '-1,1':  { type: 'pasture',  number: 9 },
-  '-1,2':  { type: 'forest',   number: 10 },
-  '-1,3':  { type: 'mountain', number: 5 },
-  // 新しい島（右 7・連続・金2）。残りの q>=1 と q=0 列は海。
-  '1,-2':  { type: 'field',    number: 4 },
-  '1,-1':  { type: 'gold',     number: 5 },  // 金（任意資源）
-  '1,0':   { type: 'pasture',  number: 11 },
-  '2,-2':  { type: 'hill',     number: 9 },  // 公式の丘4/森3に合わせ森→丘
-  '2,-1':  { type: 'hill',     number: 3 },
-  '3,-2':  { type: 'gold',     number: 4 },  // 金2枚目
-  '3,-1':  { type: 'mountain', number: 6 },
+  // 中央本島（15・全5資源・砂漠なし＝盗賊は本島の非赤タイルへ）
+  '-2,0':  { type: 'forest',   number: 8 },
+  '-2,1':  { type: 'field',    number: 5 },
+  '-1,-1': { type: 'pasture',  number: 10 },
+  '-1,0':  { type: 'hill',     number: 4 },
+  '-1,1':  { type: 'mountain', number: 9 },
+  '-1,2':  { type: 'field',    number: 6 },
+  '0,-1':  { type: 'pasture',  number: 3 },
+  '0,0':   { type: 'forest',   number: 11 },
+  '0,1':   { type: 'hill',     number: 4 },
+  '1,-2':  { type: 'field',    number: 8 },
+  '1,-1':  { type: 'pasture',  number: 5 },
+  '1,0':   { type: 'forest',   number: 9 },
+  '1,1':   { type: 'mountain', number: 2 },
+  '2,-1':  { type: 'pasture',  number: 10 },
+  '2,0':   { type: 'hill',     number: 3 },
+  // 離れ小島（四隅・各2タイル）。金2はここにランダム配置される。
+  '-4,0':  { type: 'gold',     number: 5 },   // 北西
+  '-4,1':  { type: 'mountain', number: 6 },
+  '-4,3':  { type: 'field',    number: 11 },  // 南西
+  '-3,3':  { type: 'forest',   number: 4 },
+  '3,-3':  { type: 'hill',     number: 12 },  // 北東
+  '4,-3':  { type: 'pasture',  number: 9 },
+  '4,-1':  { type: 'mountain', number: 10 },  // 南東
+  '4,0':   { type: 'gold',     number: 4 },
 };
 
 // 海岸線（陸1・海1 に面する辺）に港を毎ゲームランダム配置する。
@@ -216,7 +218,7 @@ const seafarersNewShores: Scenario = {
   name: '航海者：新たな海岸を目指して',
   description: '本島から海を渡り、対岸の新島へ入植。新しい島への初入植ごとに+2点（14点で勝利）。',
   category: 'seafarers',
-  coords: BIG_COORDS,
+  coords: HUGE_COORDS, // 51ヘックス（公式アプリ4人盤＝中央本島＋四方の小島）
   build: buildFromLandMap(NEW_SHORES_LAND),
   victoryTarget: 14,
   rules: { newIslandBonusVp: 2 },

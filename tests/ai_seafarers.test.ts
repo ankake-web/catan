@@ -14,11 +14,23 @@ const AI_SPECS: PlayerSpec[] = [
   { id: 'player2', name: 'B', color: 'blue', type: 'ai', aiDifficulty: 'strong' },
 ];
 
-const HOME_REP = '-1,-1';
-const NEW_REP = '1,-1';
-
 const seafarers = (seed = 1): GameState =>
   createInitialGameState(AI_SPECS, 'fixed', ['player1', 'player2'], createRng(seed), 'seafarers_newshores');
+
+// 島代表（島の骨格は固定なので中身ランダム化に依らず一定）。本島=最大成分、新島=本島以外のひとつ。
+function mainRepOf(s: GameState): string {
+  const repOf = computeIslandReps(s.tiles);
+  const size: Record<string, number> = {};
+  for (const r of Object.values(repOf)) size[r] = (size[r] ?? 0) + 1;
+  return Object.entries(size).sort((a, b) => b[1] - a[1])[0]![0];
+}
+function anyOutlyingRepOf(s: GameState): string {
+  const repOf = computeIslandReps(s.tiles);
+  const m = mainRepOf(s);
+  return [...new Set(Object.values(repOf))].find(r => r !== m)!;
+}
+const HOME_REP = mainRepOf(seafarers());
+const NEW_REP = anyOutlyingRepOf(seafarers());
 
 const handTotal = (s: GameState, pid: string): number =>
   RESOURCE_TYPES.reduce((sum, r) => sum + s.players[pid]!.hand[r], 0);
@@ -27,12 +39,11 @@ describe('AI 航海者: 海峡を渡る船の建設（Phase 5・基本AI）', ()
   it('海峡に面した本島の沿岸開拓地から、CPU は新島へ向け船を建てる', () => {
     const g = seafarers();
     const repOf = computeIslandReps(g.tiles);
-    // 海峡(q=0 列の海)に面した本島の頂点を探す（=新島へ向かう launch 点）。
-    const straitVid = Object.values(g.vertices).find(v => {
-      const onHome = v.adjacentTileIds.some(t => repOf[t] === HOME_REP);
-      const facesStrait = v.adjacentTileIds.some(t => g.tiles[t]?.type === 'sea' && t.startsWith('0,'));
-      return onHome && facesStrait;
-    })!.id as VertexId;
+    // 本島の沿岸（海に面した陸）頂点を launch 点に（=新島へ向け船を出す起点）。
+    const straitVid = Object.values(g.vertices).find(v =>
+      v.adjacentTileIds.some(t => repOf[t] === HOME_REP)
+      && v.adjacentEdgeIds.some(eid => isSeaEdge(g.edges[eid]!, g.vertices, g.tiles)),
+    )!.id as VertexId;
 
     const s: GameState = {
       ...g,

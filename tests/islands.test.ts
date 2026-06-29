@@ -18,10 +18,20 @@ const seafarers = (seed = 1): GameState =>
 const classic = (seed = 1): GameState =>
   createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(seed), 'classic');
 
-// 島代表は連結成分内で文字列順最小の TileId。
-// 本島(左 q=-1,-2)の最小は "-1,-1"、新島(右 q=1,2)の最小は "1,-1"。
-const HOME_REP = '-1,-1';
-const NEW_REP = '1,-1';
+// 島代表は連結成分内で文字列順最小の TileId（島の骨格は固定なので seed/中身ランダム化に依らず一定）。
+function mainRepOf(s: GameState): string {
+  const repOf = computeIslandReps(s.tiles);
+  const size: Record<string, number> = {};
+  for (const r of Object.values(repOf)) size[r] = (size[r] ?? 0) + 1;
+  return Object.entries(size).sort((a, b) => b[1] - a[1])[0]![0];
+}
+function anyOutlyingRepOf(s: GameState): string {
+  const repOf = computeIslandReps(s.tiles);
+  const m = mainRepOf(s);
+  return [...new Set(Object.values(repOf))].find(r => r !== m)!;
+}
+const HOME_REP = mainRepOf(seafarers());        // 中央本島（最大の島）
+const NEW_REP = anyOutlyingRepOf(seafarers());  // 離れ小島のひとつ
 
 // 指定島代表に属する頂点を1つ返す（陸に面した頂点）。
 function vertexOnIsland(s: GameState, rep: string, exclude: Set<string> = new Set()): VertexId {
@@ -35,22 +45,20 @@ function vertexOnIsland(s: GameState, rep: string, exclude: Set<string> = new Se
 }
 
 describe('islands: 連結成分（航海者「新たな海岸を求めて」）', () => {
-  it('海で分断され、本島(12)と新島(9)の2島に分かれる', () => {
+  it('海で分断され、中央本島(15)＋四方の小島4つ(各2)の5島に分かれる（公式アプリ4人盤）', () => {
     const repOf = computeIslandReps(seafarers().tiles);
     const reps = new Set(Object.values(repOf));
-    expect(reps.size).toBe(2);
+    expect(reps.size).toBe(5);
     expect(reps.has(HOME_REP)).toBe(true);
     expect(reps.has(NEW_REP)).toBe(true);
-    const homeCount = Object.values(repOf).filter(r => r === HOME_REP).length;
-    const newCount = Object.values(repOf).filter(r => r === NEW_REP).length;
-    expect(homeCount).toBe(15); // 砂漠含む本島15タイル（公式S1級・37ヘックス）
-    expect(newCount).toBe(7);   // 新島7タイル
+    const sizes = [...reps].map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
+    expect(sizes).toEqual([15, 2, 2, 2, 2]); // 本島15＋小島2×4
   });
 
   it('海タイルは島に含まれない', () => {
     const repOf = computeIslandReps(seafarers().tiles);
-    for (const id of ['0,0', '0,-1', '0,1', '2,-2']) {
-      // q=0列と外周は海 → repが無い
+    for (const id of ['2,-2', '0,-3', '-2,-1', '3,0']) {
+      // 本島と小島の間・外周は海 → repが無い
       if (seafarers().tiles[id]?.type === 'sea') expect(repOf[id]).toBeUndefined();
     }
   });
