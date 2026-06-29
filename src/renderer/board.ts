@@ -17,6 +17,18 @@ const knightBasicImg = ASSETS.knight.basic;
 // 騎士と商人: 強さ(1/2/3)→騎士コマ画像。色はプレイヤー色の土台ディスクで示す。
 const KNIGHT_IMG: Record<number, string> = { 1: ASSETS.knight.basic, 2: ASSETS.knight.strong, 3: ASSETS.knight.mighty };
 
+// 地形タイルのイラスト（ヘックスの塗りに使う）。TileType と一致するキーのみ。
+const TILE_IMG: Record<string, string> = {
+  forest: ASSETS.tile.forest, field: ASSETS.tile.field, pasture: ASSETS.tile.pasture,
+  hill: ASSETS.tile.hill, mountain: ASSETS.tile.mountain, desert: ASSETS.tile.desert,
+  gold: ASSETS.tile.gold, sea: ASSETS.tile.sea,
+};
+// 画像参照に失敗したとき用のフォールバック色（style.css の地形色と対応）。
+const TERRAIN_FALLBACK: Record<string, string> = {
+  forest: '#2d6a2d', field: '#c8a830', pasture: '#6dbf4a', hill: '#b85c2a',
+  mountain: '#888888', desert: '#d4b870', sea: '#1f6f8b', gold: '#ffd11a',
+};
+
 // プレイヤーID→色キー。建物画像（屋根/上部をプレイヤー色に着色済み）の選択に使う。
 const BUILDING_COLOR_KEY: Record<string, string> = {
   player1: 'red', player2: 'blue', player3: 'purple', player4: 'orange',
@@ -201,6 +213,12 @@ function renderTile(
   const poly = svgEl('polygon');
   poly.setAttribute('points', hexCorners(cx, cy, size - 1));
   poly.classList.add('hex-tile', tile.type);
+  // 地形イラストを塗りに使う（霧タイルは隠したままなので適用しない）。
+  // インラインstyleで class の色塗りを上書きしつつ、参照失敗時は地形色にフォールバック。
+  if (!tile.fog && TILE_IMG[tile.type]) {
+    const fallback = TERRAIN_FALLBACK[tile.type] ?? '#888';
+    poly.style.fill = `url(#tilepat-${tile.type}) ${fallback}`;
+  }
   // 発明家: 1枚目に選んだタイルは確定済みの強調（青）、それ以外の候補は通常の黄ハイライト。
   if (isChosen) poly.classList.add('tile-chosen');
   else if (isValidRobber) poly.classList.add('valid-robber');
@@ -750,6 +768,18 @@ export function renderBoard(
   const g3 = svgEl('stop'); setAttrs(g3, { offset: '1', 'stop-color': '#d99000' });
   gold.appendChild(g1); gold.appendChild(g2); gold.appendChild(g3);
   defs.appendChild(gold);
+  // 地形タイルのイラストを「塗り」に使うパターン（ヘックスの bbox にカバー表示）。
+  // ポリゴンの fill をこのパターンに差し替えるだけなので、ホバー/産出フラッシュ/盗賊ハイライト
+  // （filter・stroke ベース）はそのまま効く。霧タイルには使わない。
+  for (const [type, href] of Object.entries(TILE_IMG)) {
+    const pat = svgEl('pattern');
+    setAttrs(pat, { id: `tilepat-${type}`, patternUnits: 'objectBoundingBox', patternContentUnits: 'objectBoundingBox', width: '1', height: '1' });
+    const im = svgEl('image');
+    setAttrs(im, { href, x: '0', y: '0', width: '1', height: '1', preserveAspectRatio: 'xMidYMid slice' });
+    im.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href); // 旧ブラウザ互換
+    pat.appendChild(im);
+    defs.appendChild(pat);
+  }
   svgEl_.appendChild(defs);
 
   const sea = svgEl('rect');

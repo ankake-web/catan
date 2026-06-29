@@ -55,6 +55,16 @@ import resWool from './res-wool.png';
 import resGrain from './res-grain.png';
 import resOre from './res-ore.png';
 
+// ---- 地形タイルのイラスト（ヘックスに敷く・俯瞰の手描き調） ----
+import tileForest from './tile-forest.jpg';
+import tileField from './tile-field.jpg';
+import tilePasture from './tile-pasture.jpg';
+import tileHill from './tile-hill.jpg';
+import tileMountain from './tile-mountain.jpg';
+import tileDesert from './tile-desert.jpg';
+import tileGold from './tile-gold.jpg';
+import tileSea from './tile-sea.jpg';
+
 // ---- 商品3 ----
 import comPaper from './com-paper.png';
 import comCloth from './com-cloth.png';
@@ -140,6 +150,11 @@ export const ASSETS = {
   },
   knight: { basic: knightBasic, strong: knightStrong, mighty: knightMighty } as Record<'basic' | 'strong' | 'mighty', string>,
   resource: { lumber: resLumber, brick: resBrick, wool: resWool, grain: resGrain, ore: resOre } as Record<'lumber' | 'brick' | 'wool' | 'grain' | 'ore', string>,
+  // 地形タイルのイラスト（ヘックスの塗りに使う・TileType に対応）
+  tile: {
+    forest: tileForest, field: tileField, pasture: tilePasture, hill: tileHill,
+    mountain: tileMountain, desert: tileDesert, gold: tileGold, sea: tileSea,
+  } as Record<'forest' | 'field' | 'pasture' | 'hill' | 'mountain' | 'desert' | 'gold' | 'sea', string>,
   commodity: { paper: comPaper, cloth: comCloth, coin: comCoin } as Record<'paper' | 'cloth' | 'coin', string>,
   // 改良建築: トラック → レベル(3/4) → 画像
   building: {
