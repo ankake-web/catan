@@ -111,6 +111,33 @@ describe('S5 忘れられた部族: 海辺トークン', () => {
     expect(r.heldHarbors!.player1).toBe(1);       // 保留のまま
   });
 
+  it('[宝島] 開始時に霧と財宝(treasure)トークンが配置され、VP13・島ボーナス+2', () => {
+    const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_treasure');
+    expect(s.victoryTarget).toBe(13);
+    expect(s.newIslandBonusVp).toBe(2);
+    // 霧（中央本島を取り囲む）
+    expect(Object.values(s.tiles).some(t => t.fog != null)).toBe(true);
+    // 財宝トークン
+    const kinds = Object.values(s.edgeTokens ?? {});
+    expect(kinds.length).toBeGreaterThan(0);
+    expect(kinds.every(k => k === 'treasure')).toBe(true);
+  });
+
+  it('[宝島] 財宝トークンを船で回収すると資源2枚 or 開発カード1枚を得てトークンが消える', () => {
+    const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_treasure');
+    const e = Object.keys(s.edgeTokens ?? {}).find(k => s.edgeTokens![k] === 'treasure')!;
+    const handTotal = (st: GameState, pid: string): number =>
+      (['wood', 'brick', 'wool', 'grain', 'ore'] as const).reduce((sum, r) => sum + st.players[pid]!.hand[r], 0);
+    const beforeHand = handTotal(s, 'player1');
+    const beforeDev = s.players.player1!.devCards.length;
+    const next = collectEdgeToken(s, e, 'player1');
+    expect(next.edgeTokens![e]).toBeUndefined(); // トークン除去
+    const gainedRes = handTotal(next, 'player1') - beforeHand;
+    const gainedDev = next.players.player1!.devCards.length - beforeDev;
+    // 資源2枚 または 開発カード1枚のいずれか。
+    expect((gainedRes === 2 && gainedDev === 0) || (gainedRes === 0 && gainedDev === 1)).toBe(true);
+  });
+
   it('numberHexOnly: 数字ヘックスに隣接しない陸頂点には開拓地を置けない（あれば）', () => {
     const s = tribe();
     const noNumberV = Object.keys(s.vertices).find(vid => {

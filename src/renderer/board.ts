@@ -561,7 +561,7 @@ function renderEdges(
       const label = svgEl('text');
       label.classList.add('edge-token-label');
       setAttrs(label, { x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'central' });
-      label.textContent = token === 'vp' ? 'V' : token === 'dev' ? 'D' : 'H';
+      label.textContent = token === 'vp' ? 'V' : token === 'dev' ? 'D' : token === 'treasure' ? '財' : 'H';
       g.appendChild(label);
     }
   }

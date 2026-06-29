@@ -20,6 +20,7 @@ export type ScenarioId =
   | 'seafarers_drought'        // 公式アプリ「干ばつ」（本島は砂漠の痩せ地・小島が豊か）
   | 'seafarers_fourislands'    // 公式S2 4つの島
   | 'seafarers_fogislands'     // 公式S3 霧の島
+  | 'seafarers_treasure'       // 公式アプリ「宝島」（霧＋海辺の財宝トークン）
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
   | 'seafarers_forgottentribe' // 公式S5 忘れられた部族
   | 'seafarers_cloth'          // 公式S6 カタンの織物
@@ -626,6 +627,77 @@ const seafarersFogIslands: Scenario = {
   rules: { newIslandBonusVp: 0 }, // 探索の報酬は資源（島ボーナスVPは無し）
 };
 
+// ---- 公式アプリ「宝島」（51ヘックス・公式アプリ4人盤に準拠／photo/IMG_6401） ----
+// 中央の本島(15・本拠)を霧の海域が取り囲む。四方の小島は霧に隠れており、船で近づくと晴れて
+//   島(=初入植+2点)か海が現れる。海辺には財宝トークン（船で到達＝資源2枚 or 開発カード1枚）。13点。
+const TREASURE_LAND: LandMap = {
+  // 中央本島（15・本拠＝出発島。全5資源・金は霧の小島側に出す）
+  '-2,0':  { type: 'forest',   number: 8 },
+  '-2,1':  { type: 'field',    number: 5 },
+  '-1,-1': { type: 'pasture',  number: 10 },
+  '-1,0':  { type: 'hill',     number: 4 },
+  '-1,1':  { type: 'mountain', number: 9 },
+  '-1,2':  { type: 'field',    number: 6 },
+  '0,-1':  { type: 'pasture',  number: 3 },
+  '0,0':   { type: 'forest',   number: 11 },
+  '0,1':   { type: 'hill',     number: 4 },
+  '1,-2':  { type: 'field',    number: 8 },
+  '1,-1':  { type: 'pasture',  number: 5 },
+  '1,0':   { type: 'forest',   number: 9 },
+  '1,1':   { type: 'mountain', number: 2 },
+  '2,-1':  { type: 'pasture',  number: 10 },
+  '2,0':   { type: 'hill',     number: 3 },
+};
+// 霧（四隅の小島8セル・5陸/3海）。randomizeFogMap がどのセルが陸/海か・地形・数字をランダム化。
+const TREASURE_FOG: FogMap = {
+  '-4,0':  { type: 'gold',     number: 5 },
+  '-4,1':  { type: 'sea',      number: null },
+  '-4,3':  { type: 'field',    number: 9 },
+  '-3,3':  { type: 'forest',   number: 4 },
+  '3,-3':  { type: 'pasture',  number: 8 },
+  '4,-3':  { type: 'sea',      number: null },
+  '4,-1':  { type: 'mountain', number: 10 },
+  '4,0':   { type: 'sea',      number: null },
+};
+function buildTreasureIslands(landMap: LandMap, fogMap: FogMap, treasureCount: number): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  return (geo, rng) => {
+    const home = randomizeLandMap(landMap, rng);
+    const fog = randomizeFogMap(fogMap, rng);
+    const tiles: Record<TileId, Tile> = {};
+    for (const id of Object.keys(geo.tileToVertices)) {
+      const coord = parseTileId(id);
+      const land = home[id];
+      const f = fog[id];
+      if (land) tiles[id] = { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber };
+      else if (f) tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false, fog: { type: f.type, number: f.number } };
+      else tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false };
+    }
+    // 財宝トークンを「沿岸の外洋辺（両側が海・片端が陸に面する）」へ決定論的に等間隔配置。到達しやすい位置。
+    const seaEdges = Object.values(geo.edges).filter(e => {
+      const tids = edgeTileIds(e, geo.vertices);
+      const bothSea = tids.length > 0 && tids.every(t => tiles[t]?.type === 'sea');
+      if (!bothSea) return false;
+      return e.vertexIds.some(vid => (geo.vertices[vid]?.adjacentTileIds ?? []).some(t => tiles[t] && tiles[t]!.type !== 'sea'));
+    }).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const edgeTokens: Record<string, EdgeTokenKind> = {};
+    const step = Math.max(1, Math.floor(seaEdges.length / treasureCount));
+    for (let i = 0; i < treasureCount && i * step < seaEdges.length; i++) {
+      edgeTokens[seaEdges[i * step]!.id] = 'treasure';
+    }
+    return { tiles, harbors: randomHarbors(geo, tiles, rng), edgeTokens };
+  };
+}
+const seafarersTreasure: Scenario = {
+  id: 'seafarers_treasure',
+  name: '航海者：宝島',
+  description: '本島を霧が取り囲む。船で霧を晴らして島を発見（初入植+2点）、海辺の財宝で資源や発展カードを得る（13点）。',
+  category: 'seafarers',
+  coords: HUGE_COORDS, // 51ヘックス（中央本島＋四方の霧の小島）
+  build: buildTreasureIslands(TREASURE_LAND, TREASURE_FOG, 6),
+  victoryTarget: 13,
+  rules: { newIslandBonusVp: 2 },
+};
+
 // ---- 公式S5「忘れられた部族」: 本島(左15・全数字)＋右の海域に VP/開発カード/港 トークン。
 //   船で到達して獲得。開拓地・盗賊は数字ヘックスのみ。金2。13点。 ----
 // 本島(BIG_MAIN_ISLAND)＋海域に金2(小島)。公式『金2』を満たす（船で到達・数字ヘックス=入植可）。
@@ -864,6 +936,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   seafarers_drought: seafarersDrought,
   seafarers_fourislands: seafarersFourIslands,
   seafarers_fogislands: seafarersFogIslands,
+  seafarers_treasure: seafarersTreasure,
   seafarers_throughdesert: seafarersThroughDesert,
   seafarers_forgottentribe: seafarersForgottenTribe,
   seafarers_cloth: seafarersCloth,
