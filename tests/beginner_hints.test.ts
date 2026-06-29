@@ -75,6 +75,52 @@ describe('beginnerHint（初心者の局面ガイド）', () => {
   });
 });
 
+describe('beginnerHint: 交易の損得アドバイス', () => {
+  // player2 が player1 に提案: player1 は give を受け取り receive を渡す。
+  const tradeTo1 = (give: Record<string, number>, receive: Record<string, number>): GameState => {
+    let s = withState({ phase: 'MAIN', turnPhase: 'TRADE_BUILD', currentPlayerIndex: 1 });
+    s = { ...s, pendingTrade: {
+      state: 'TRADE_OFFER', initiatorId: 'player2', offer: { give, receive },
+      targetPlayerIds: ['player1'], responses: {}, selectedResponderId: null,
+    } };
+    return s;
+  };
+
+  it('1対1の提案は「枚数は同じ」と渡す/もらう資源を示す', () => {
+    let s = tradeTo1({ wood: 1 }, { ore: 1 });
+    s = setHand(s, 'player1', { ore: 1 });
+    const h = beginnerHint(s, 'player1')!;
+    expect(h.title).toContain('交易');
+    expect(h.body).toContain('鉄1'); // 渡す
+    expect(h.body).toContain('木1'); // もらう
+    expect(h.body).toContain('同じ');
+  });
+
+  it('渡す方が多い提案は「損」と判定', () => {
+    let s = tradeTo1({ wood: 1 }, { ore: 2 });
+    s = setHand(s, 'player1', { ore: 2 });
+    expect(beginnerHint(s, 'player1')!.body).toContain('損');
+  });
+
+  it('渡す資源が足りなければ断るよう促す', () => {
+    const s = tradeTo1({ wood: 1 }, { ore: 1 }); // player1 は鉄を持たない
+    expect(beginnerHint(s, 'player1')!.body).toContain('足りません');
+  });
+
+  it('交易で建設が解禁されるなら強く勧める', () => {
+    let s = tradeTo1({ grain: 1 }, { ore: 1 }); // 麦をもらい鉄を渡す
+    s = setHand(s, 'player1', { wood: 1, brick: 1, wool: 1, ore: 1 }); // 麦が来れば開拓地が建つ
+    expect(beginnerHint(s, 'player1')!.body).toContain('開拓地');
+  });
+
+  it('自分宛てでない提案には交易助言を出さない', () => {
+    let s = tradeTo1({ wood: 1 }, { ore: 1 });
+    s = { ...s, pendingTrade: { ...s.pendingTrade!, targetPlayerIds: ['player2'] } };
+    // player1 は対象外 → 交易助言ではなく通常の「相手の手番」案内になる。
+    expect(beginnerHint(s, 'player1')!.title).not.toContain('交易');
+  });
+});
+
 describe('recommendedSetupVertices（初期配置のおすすめ地点）', () => {
   it('置ける頂点の中から上位N件を返し、すべて配置可能な頂点である', () => {
     const s = base();

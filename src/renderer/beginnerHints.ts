@@ -5,10 +5,59 @@
 // 現在の局面（フェーズ・手番・手札）から「今すべきこと」を平易な日本語で1つ返す。
 // 純粋関数（DOM非依存）でテスト可能。DOM への描画は main.ts 側が担当する。
 
-import type { GameState, PlayerId } from '../types';
-import { BUILD_COSTS, TILE_RESOURCE_MAP } from '../constants';
+import type { GameState, PlayerId, PendingTrade, ResourceHand } from '../types';
+import { BUILD_COSTS, TILE_RESOURCE_MAP, RESOURCE_TYPES } from '../constants';
 import { hasEnoughResources } from '../engine/actions';
 import { findPendingDiscarder, discardCount } from '../engine/robber';
+
+// 交易バナー用の短い資源名（コンパクト表示）。
+const RES_SHORT: Record<string, string> = { wood: '木', brick: 'レンガ', wool: '羊', grain: '麦', ore: '鉄' };
+function formatRes(h: Partial<ResourceHand>): string {
+  const parts: string[] = [];
+  for (const r of RESOURCE_TYPES) { const n = h[r] ?? 0; if (n > 0) parts.push(`${RES_SHORT[r]}${n}`); }
+  return parts.length > 0 ? parts.join('・') : 'なし';
+}
+
+/**
+ * 自分（responder）宛ての交易提案を「得/損/同等」で評価する助言。
+ * offer は発案者視点（発案者が give を渡し receive を受け取る）＝自分は give を受け取り receive を渡す。
+ */
+function tradeOfferHint(state: GameState, selfId: PlayerId, tr: PendingTrade): BeginnerHint {
+  const me = state.players[selfId];
+  const gain = tr.offer.give;     // 自分が受け取る
+  const cost = tr.offer.receive;  // 自分が渡す
+  const initiator = state.players[tr.initiatorId]?.name ?? '相手';
+  const giveStr = formatRes(cost);
+  const getStr = formatRes(gain);
+  const title = `🤝 ${initiator} から交易の提案`;
+
+  if (!me) return { icon: '🤝', title, body: `${giveStr} を渡して ${getStr} をもらう提案です。` };
+
+  // 渡す資源が手札にあるか。
+  const canPay = RESOURCE_TYPES.every(r => (me.hand[r] ?? 0) >= (cost[r] ?? 0));
+  if (!canPay) {
+    return { icon: '🤝', title, body: `${giveStr} を渡す提案ですが、その資源が足りません。「断る」でOK。` };
+  }
+
+  // 交易後に建設が解禁されるか（一番うれしいケース）。
+  const after = { ...me.hand };
+  for (const r of RESOURCE_TYPES) after[r] += (gain[r] ?? 0) - (cost[r] ?? 0);
+  const unlocks = (c: ResourceHand): boolean => hasEnoughResources(after, c) && !hasEnoughResources(me.hand, c);
+  let unlock = '';
+  if (unlocks(BUILD_COSTS.city)) unlock = 'これで都市(+1点)が作れます！';
+  else if (unlocks(BUILD_COSTS.settlement)) unlock = 'これで開拓地(+1点)が作れます！';
+  else if (unlocks(BUILD_COSTS.dev_card)) unlock = 'これで発展カードが買えます！';
+
+  const totalGain = RESOURCE_TYPES.reduce((s, r) => s + (gain[r] ?? 0), 0);
+  const totalCost = RESOURCE_TYPES.reduce((s, r) => s + (cost[r] ?? 0), 0);
+  let verdict: string;
+  if (totalCost > totalGain) verdict = '枚数では損（渡す方が多い）';
+  else if (totalGain > totalCost) verdict = '枚数では得（もらう方が多い）';
+  else verdict = '枚数は同じ（1対1）';
+
+  const tail = unlock !== '' ? unlock : 'ほしい資源なら「応じる」、いらなければ「断る」。';
+  return { icon: '🤝', title, body: `${giveStr} → ${getStr}。${verdict}。${tail}` };
+}
 
 // 2個のサイコロで各数字が出る「組み合わせ数」（=出やすさ）。
 const WAYS: Record<number, number> = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
@@ -84,6 +133,13 @@ export function beginnerHint(state: GameState, selfId: PlayerId | null | undefin
   }
 
   if (state.phase !== 'MAIN') return null;
+
+  // ---- 交易の提案が自分宛て（相手の手番でも割り込んで助言する）----
+  const tr = state.pendingTrade;
+  if (tr && tr.targetPlayerIds.includes(selfId) && !tr.responses[selfId]
+      && (tr.state === 'TRADE_OFFER' || tr.state === 'TRADE_RESPONSE')) {
+    return tradeOfferHint(state, selfId, tr);
+  }
 
   // ---- 7 の手札捨て ----
   if (state.turnPhase === 'DISCARD') {
