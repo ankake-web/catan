@@ -20,3 +20,6 @@ tests/*.js
 # ルート直下のスクラッチ用playwrightスクリプト（検証専用・共有しない）
 /screenshot.mjs
 /_verify*.mjs
+
+# 地形画像の元データ（リサイズ前の大きいPNG・リポジトリには含めない）
+image/
