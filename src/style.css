@@ -3128,3 +3128,21 @@ html.reduce-motion .mini-panel.mine.bonus-flash { animation: none; }
 }
 html.reduce-motion .mini-panel.mine { animation: none; }
 
+/* ヘックスのホバー説明（取れる資源・出やすさ）。カーソル追従・クリック透過。 */
+.hex-tooltip {
+  position: fixed;
+  z-index: 9000;
+  pointer-events: none;
+  max-width: 220px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(20, 24, 32, 0.94);
+  border: 1px solid rgba(208, 168, 108, 0.5);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  color: #f3ead8;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.hex-tooltip-title { font-weight: 700; color: #ffd98a; margin-bottom: 1px; }
+.hex-tooltip-line { color: #e7e0d2; }
+

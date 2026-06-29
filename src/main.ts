@@ -29,6 +29,7 @@ import type { CkTrack, CommodityType } from './types';
 import type { RollSpec, DiceGLController } from './renderer/diceGL';
 import { renderBoard } from './renderer/board';
 import type { BoardRenderOptions, BoardViewport } from './renderer/board';
+import { installHexTooltip } from './renderer/hexTooltip';
 import { renderUI, syncBoardDrawWidth, showAssetGallery } from './renderer/ui';
 import type { UIPhase } from './renderer/ui';
 import { attachBoardEvents, attachBoardGestures, resolvePlacePreviewAction, centeredZoom, ZOOM_LIMITS } from './renderer/events';
@@ -3504,6 +3505,7 @@ function attachBoardEventsOnce(): void {
     () => smithFirstKnight, setSmithFirst,
   );
   attachBoardGestures(svgBoard, () => boardViewport, setBoardViewport);
+  installHexTooltip(svgBoard, () => state);
   boardEventsAttached = true;
 }
 
