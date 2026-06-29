@@ -78,8 +78,10 @@ describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', (
 
   it('海峡(q=0列)が全て海で左右の陸塊を分離（船が必要）', () => {
     for (const r of [-3, -2, -1, 0, 1, 2, 3]) expect(s.tiles[`0,${r}`]?.type).toBe('sea');
-    expect(s.tiles['-1,-1']?.type).toBe('pasture'); // 公式S1は砂漠なし＝盗賊初期は牧草に置く
-    expect(s.tiles['1,-1']?.type).toBe('gold');    // 新島の金
+    // 金は新島（右の離れ小島 q>=1）にのみ出る（本島 q<=-1 には置かない＝毎ゲームランダム配置）。
+    const gold = Object.values(s.tiles).filter(t => t.type === 'gold');
+    expect(gold).toHaveLength(2);
+    expect(gold.every(t => t.coord.q >= 1)).toBe(true);
   });
 
   it('海タイルは数字なし・盗賊なし。陸タイルは砂漠以外に数字あり', () => {
@@ -93,10 +95,11 @@ describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', (
     }
   });
 
-  it('盗賊は本島(-1,-1)から開始（公式S1は砂漠なしのため牧草上に置く）', () => {
+  it('盗賊は本島の陸タイルから開始（公式S1は砂漠なしのため資源タイル上に置く）', () => {
     const robber = Object.values(s.tiles).find(t => t.hasRobber)!;
-    expect(robber.id).toBe('-1,-1');
-    expect(robber.type).toBe('pasture');
+    expect(robber.coord.q).toBeLessThanOrEqual(-1); // 本島（左 q<=-1）の上
+    expect(robber.type).not.toBe('sea');
+    expect(robber.type).not.toBe('desert');         // 公式S1は砂漠なし
   });
 
   it('盤面が viewBox に収まるよう、基本盤より頂点/辺が多い（大きい盤）', () => {
@@ -160,8 +163,10 @@ describe('scenarios: 航海者「群島」', () => {
     expect(s.tiles['1,0']?.type).toBe('sea');
     expect(s.tiles['2,0']?.type).toBe('sea');
     expect(s.tiles['3,0']?.type).toBe('sea');
-    // 金は新島Aの玄関口(1,-1)
-    expect(s.tiles['1,-1']?.type).toBe('gold');
+    // 金は離れ小島（右 q>=1）にのみ出る（本島には置かない＝毎ゲームランダム配置）。
+    const gold = Object.values(s.tiles).filter(t => t.type === 'gold');
+    expect(gold).toHaveLength(1);
+    expect(gold.every(t => t.coord.q >= 1)).toBe(true);
   });
 });
 
