@@ -17,6 +17,7 @@ import { createRandomBoard } from './setup';
 export type ScenarioId =
   | 'classic'
   | 'seafarers_newshores'      // 公式S1 新たな海岸を目指して
+  | 'seafarers_drought'        // 公式アプリ「干ばつ」（本島は砂漠の痩せ地・小島が豊か）
   | 'seafarers_fourislands'    // 公式S2 4つの島
   | 'seafarers_fogislands'     // 公式S3 霧の島
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
@@ -178,9 +179,10 @@ function buildTilesFromLandMap(geo: BoardGeometry, landMap: LandMap): Record<Til
 }
 
 // 公式構成（資源/数字の枚数）を維持して中身を毎ゲームランダム化し、港もランダム配置して盤を組む共通ビルダ。
-function buildFromLandMap(landMap: LandMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+// opts.desertsOnMain: 砂漠を本島へ固定（干ばつ＝本島は痩せ地）。
+function buildFromLandMap(landMap: LandMap, opts: { desertsOnMain?: boolean } = {}): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
   return (geo, rng) => {
-    const tiles = buildTilesFromLandMap(geo, randomizeLandMap(landMap, rng));
+    const tiles = buildTilesFromLandMap(geo, randomizeLandMap(landMap, rng, opts));
     return { tiles, harbors: randomHarbors(geo, tiles, rng) };
   };
 }
@@ -220,6 +222,48 @@ const seafarersNewShores: Scenario = {
   category: 'seafarers',
   coords: HUGE_COORDS, // 51ヘックス（公式アプリ4人盤＝中央本島＋四方の小島）
   build: buildFromLandMap(NEW_SHORES_LAND),
+  victoryTarget: 14,
+  rules: { newIslandBonusVp: 2 },
+};
+
+// ---- 公式アプリ「干ばつ」（51ヘックス・公式アプリ4人盤に準拠／photo/IMG_6400） ----
+// 本島(中央15)は砂漠が広がる痩せ地（砂漠3・山多め・麦少なめ）。周囲の小島(四隅・各2)が豊か。
+//   砂漠は本島へ固定（desertsOnMain）、金は小島へランダム。小島ごとに初入植+2点。14点で勝利。
+//   下記は構成（枚数）の“正”＝陸23（砂漠3/山4/丘2/森3/畑4/牧草5/金2）。
+const DROUGHT_LAND: LandMap = {
+  // 中央本島（15・砂漠3を含む痩せ地。砂漠は randomizeLandMap が本島へ固定し、その1枚に盗賊）
+  '-2,0':  { type: 'desert',   number: null, robber: true },
+  '-2,1':  { type: 'mountain', number: 8 },
+  '-1,-1': { type: 'mountain', number: 5 },
+  '-1,0':  { type: 'forest',   number: 10 },
+  '-1,1':  { type: 'desert',   number: null },
+  '-1,2':  { type: 'pasture',  number: 9 },
+  '0,-1':  { type: 'mountain', number: 4 },
+  '0,0':   { type: 'forest',   number: 11 },
+  '0,1':   { type: 'hill',     number: 3 },
+  '1,-2':  { type: 'mountain', number: 6 },
+  '1,-1':  { type: 'desert',   number: null },
+  '1,0':   { type: 'forest',   number: 2 },
+  '1,1':   { type: 'hill',     number: 9 },
+  '2,-1':  { type: 'field',    number: 10 },
+  '2,0':   { type: 'pasture',  number: 5 },
+  // 豊かな離れ小島（四隅・各2タイル）。金2はここにランダム配置。
+  '-4,0':  { type: 'gold',     number: 4 },   // 北西
+  '-4,1':  { type: 'field',    number: 5 },
+  '-4,3':  { type: 'pasture',  number: 6 },   // 南西
+  '-3,3':  { type: 'field',    number: 11 },
+  '3,-3':  { type: 'pasture',  number: 8 },   // 北東
+  '4,-3':  { type: 'field',    number: 9 },
+  '4,-1':  { type: 'pasture',  number: 3 },   // 南東
+  '4,0':   { type: 'gold',     number: 12 },
+};
+const seafarersDrought: Scenario = {
+  id: 'seafarers_drought',
+  name: '航海者：干ばつ',
+  description: '砂漠が広がる本島は痩せ地。豊かな周囲の小島へ船で渡り、入植した小島ごとに+2点（14点で勝利）。',
+  category: 'seafarers',
+  coords: HUGE_COORDS, // 51ヘックス（公式アプリ4人盤＝中央本島＋四方の小島）
+  build: buildFromLandMap(DROUGHT_LAND, { desertsOnMain: true }),
   victoryTarget: 14,
   rules: { newIslandBonusVp: 2 },
 };
@@ -435,7 +479,7 @@ function landComponents(cells: readonly string[]): string[][] {
   return comps;
 }
 
-function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
+function randomizeLandMap(landMap: LandMap, rng: () => number, opts: { desertsOnMain?: boolean } = {}): LandMap {
   const cells = Object.keys(landMap);
   const typePool: TileType[] = cells.map(c => landMap[c]!.type);
   const numberPool: number[] = cells
@@ -449,6 +493,10 @@ function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
   const main = comps[0] ?? cells;
   const mainSet = new Set(main);
   const outlying = cells.filter(c => !mainSet.has(c));
+  // 干ばつ等: 砂漠を本島に固定（本島=痩せ地、小島=豊か というテーマを保つ）。
+  const desertCount = nonGoldTypes.filter(t => t === 'desert').length;
+  const desertsOnMain = !!opts.desertsOnMain && desertCount > 0;
+  const freeTypes = desertsOnMain ? nonGoldTypes.filter(t => t !== 'desert') : nonGoldTypes;
 
   for (let attempt = 0; attempt < 400; attempt++) {
     // 1) 金を離れ小島のランダムなセルへ（不足時のみ任意セルで補う）。
@@ -459,11 +507,17 @@ function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
       goldCells.push(...more);
     }
     const goldSet = new Set(goldCells);
-    // 2) 残りセルへ非金種別をシャッフル配置。
-    const rest = cells.filter(c => !goldSet.has(c));
-    const shuffledTypes = shuffleWithRng(nonGoldTypes, rng);
+    // 1b) 干ばつ: 砂漠を本島のランダムなセルへ（金と重ならないよう）。
+    const desertCells = desertsOnMain
+      ? shuffleWithRng(main.filter(c => !goldSet.has(c)), rng).slice(0, desertCount)
+      : [];
+    const fixedSet = new Set([...goldCells, ...desertCells]);
+    // 2) 残りセルへ（金・固定砂漠を除く）種別をシャッフル配置。
+    const rest = cells.filter(c => !fixedSet.has(c));
+    const shuffledTypes = shuffleWithRng(freeTypes, rng);
     const tType: Record<string, TileType> = {};
     for (const c of goldCells) tType[c] = 'gold';
+    for (const c of desertCells) tType[c] = 'desert';
     rest.forEach((c, i) => { tType[c] = shuffledTypes[i]!; });
     // 3) 数字を非砂漠セルへシャッフル配置。
     const numbered = cells.filter(c => tType[c] !== 'desert');
@@ -807,6 +861,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
   // 公式航海者シナリオ
   seafarers_newshores: seafarersNewShores,
+  seafarers_drought: seafarersDrought,
   seafarers_fourislands: seafarersFourIslands,
   seafarers_fogislands: seafarersFogIslands,
   seafarers_throughdesert: seafarersThroughDesert,
