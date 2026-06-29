@@ -89,34 +89,88 @@ function positionTip(tip: HTMLDivElement, clientX: number, clientY: number): voi
   tip.style.top = `${Math.max(4, y)}px`;
 }
 
+/** ツールチップの中身を tileId から組み立てて表示する。タイルが無ければ false。 */
+function renderTip(
+  tip: HTMLDivElement, getState: () => GameState | null | undefined, id: string | null, clientX: number, clientY: number,
+): boolean {
+  const st = getState();
+  const tile = id ? st?.tiles?.[id] : null;
+  if (!tile) { tip.style.display = 'none'; return false; }
+  const isVillage = !!(st?.villages && id != null && id in st.villages);
+  const lines = hexTooltipLines(tile, { isVillage });
+  tip.innerHTML = '';
+  lines.forEach((ln, i) => {
+    const d = document.createElement('div');
+    d.className = i === 0 ? 'hex-tooltip-title' : 'hex-tooltip-line';
+    d.textContent = ln;
+    tip.appendChild(d);
+  });
+  tip.style.display = 'block';
+  positionTip(tip, clientX, clientY);
+  return true;
+}
+
+const tileIdAt = (target: EventTarget | null): string | null =>
+  (target as Element | null)?.closest?.('[data-tile-id]')?.getAttribute('data-tile-id') ?? null;
+
+const LONG_PRESS_MS = 500;     // タッチ: これ以上の長押しで説明を表示（通常タップ＝配置は妨げない）
+const MOVE_CANCEL_PX = 12;     // 押下後この距離動いたらパン扱いで長押し中止
+const TOUCH_TIP_MS = 2600;     // タッチで出した説明の自動消去
+
 /**
- * #board にホバーツールチップを設置（一度だけ呼ぶ）。state は最新を返す getter で渡す。
+ * #board にヘックス説明を設置（一度だけ呼ぶ）。state は最新を返す getter で渡す。
+ * マウス=ホバーで表示／タッチ=長押しで表示（長押し成立時は直後のタップを握りつぶし誤配置を防ぐ）。
  */
 export function installHexTooltip(board: SVGSVGElement, getState: () => GameState | null | undefined): void {
   const tip = ensureTip();
   const hide = (): void => { tip.style.display = 'none'; };
 
-  board.addEventListener('pointermove', (e: PointerEvent) => {
-    if (e.pointerType === 'touch') { hide(); return; } // タッチはホバー無し
-    const g = (e.target as Element | null)?.closest?.('[data-tile-id]') ?? null;
-    const id = g?.getAttribute('data-tile-id') ?? null;
-    const st = getState();
-    const tile = id ? st?.tiles?.[id] : null;
-    if (!tile) { hide(); return; }
+  // タッチ長押しの状態。
+  let lpTimer: number | null = null;
+  let lpStart: { x: number; y: number } | null = null;
+  let lpPointerId: number | null = null;
+  let swallowNextClick = false;
+  let autoHide: number | null = null;
+  const clearLP = (): void => {
+    if (lpTimer != null) { clearTimeout(lpTimer); lpTimer = null; }
+    lpStart = null; lpPointerId = null;
+  };
 
-    const isVillage = !!(st?.villages && id != null && id in st.villages);
-    const lines = hexTooltipLines(tile, { isVillage });
-    tip.innerHTML = '';
-    lines.forEach((ln, i) => {
-      const d = document.createElement('div');
-      d.className = i === 0 ? 'hex-tooltip-title' : 'hex-tooltip-line';
-      d.textContent = ln;
-      tip.appendChild(d);
-    });
-    tip.style.display = 'block';
-    positionTip(tip, e.clientX, e.clientY);
+  board.addEventListener('pointermove', (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      // 長押し待機中に指が動いたら（パン/誤操作）長押しを中止。
+      if (lpStart && Math.hypot(e.clientX - lpStart.x, e.clientY - lpStart.y) > MOVE_CANCEL_PX) clearLP();
+      return;
+    }
+    renderTip(tip, getState, tileIdAt(e.target), e.clientX, e.clientY);
   });
 
-  board.addEventListener('pointerleave', hide);
-  board.addEventListener('pointerdown', hide);
+  board.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (e.pointerType !== 'touch') { hide(); return; }   // マウス押下＝ホバー説明を消す
+    if (autoHide != null) { clearTimeout(autoHide); autoHide = null; }
+    hide();
+    if (lpPointerId != null) { clearLP(); return; }       // 2本目の指＝ピンチ/パン → 長押し中止
+    const id = tileIdAt(e.target);
+    if (!id) return;
+    lpStart = { x: e.clientX, y: e.clientY };
+    lpPointerId = e.pointerId;
+    lpTimer = window.setTimeout(() => {
+      lpTimer = null;
+      const ok = lpStart != null && renderTip(tip, getState, id, lpStart.x, lpStart.y);
+      if (ok) {
+        swallowNextClick = true;                          // 長押し成立 → 直後のタップで配置しない
+        autoHide = window.setTimeout(hide, TOUCH_TIP_MS);
+      }
+    }, LONG_PRESS_MS);
+  });
+
+  const endTouch = (e: PointerEvent): void => { if (e.pointerType === 'touch') clearLP(); };
+  board.addEventListener('pointerup', endTouch);
+  board.addEventListener('pointercancel', endTouch);
+  board.addEventListener('pointerleave', (e: PointerEvent) => { if (e.pointerType !== 'touch') hide(); });
+
+  // 長押しで説明を出したときの「離した瞬間のクリック」を握りつぶす（配置イベントより先＝キャプチャ）。
+  board.addEventListener('click', (e) => {
+    if (swallowNextClick) { swallowNextClick = false; e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
 }
