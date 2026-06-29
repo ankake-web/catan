@@ -7,8 +7,21 @@
 // 委譲リスナー（#board 1箇所）で実装するため、盤の再描画に強い。タッチ端末は
 // ホバーが無いので発火しない（配置タップとの誤爆を避ける）。
 
-import type { GameState, Tile, TileType } from '../types';
+import type { GameState, Tile, TileType, ResourceType } from '../types';
 import { TILE_RESOURCE_MAP } from '../constants';
+import { ASSETS } from '../assets/manifest';
+
+// 資源アイコン画像（ツールチップの「産出：」行に添える）。
+const RES_IMG: Record<string, string> = {
+  wood: ASSETS.resource.lumber, brick: ASSETS.resource.brick, wool: ASSETS.resource.wool,
+  grain: ASSETS.resource.grain, ore: ASSETS.resource.ore,
+};
+
+/** このタイルが産出する資源（アイコン表示用）。村/霧/砂漠/海/金は null。 */
+function tileResource(tile: Tile, opts?: { isVillage?: boolean }): ResourceType | null {
+  if (opts?.isVillage || tile.fog) return null;
+  return TILE_RESOURCE_MAP[tile.type]; // 砂漠/海/金 → null
+}
 
 const RES_JP: Record<string, string> = {
   wood: '木材', brick: 'レンガ', wool: '羊毛', grain: '麦', ore: '鉄鉱',
@@ -98,11 +111,25 @@ function renderTip(
   if (!tile) { tip.style.display = 'none'; return false; }
   const isVillage = !!(st?.villages && id != null && id in st.villages);
   const lines = hexTooltipLines(tile, { isVillage });
+  const res = tileResource(tile, { isVillage });
   tip.innerHTML = '';
   lines.forEach((ln, i) => {
     const d = document.createElement('div');
     d.className = i === 0 ? 'hex-tooltip-title' : 'hex-tooltip-line';
-    d.textContent = ln;
+    // 「産出：◯◯」の行には資源アイコンを名称の前に添える。
+    if (res && ln.startsWith('産出：')) {
+      d.classList.add('hex-tooltip-resline');
+      const icon = document.createElement('img');
+      icon.className = 'hex-tooltip-resicon';
+      icon.src = RES_IMG[res] ?? '';
+      icon.alt = '';
+      icon.draggable = false;
+      const span = document.createElement('span');
+      span.textContent = ln;
+      d.append(icon, span);
+    } else {
+      d.textContent = ln;
+    }
     tip.appendChild(d);
   });
   tip.style.display = 'block';

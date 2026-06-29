@@ -3145,6 +3145,8 @@ html.reduce-motion .mini-panel.mine { animation: none; }
 }
 .hex-tooltip-title { font-weight: 700; color: #ffd98a; margin-bottom: 1px; }
 .hex-tooltip-line { color: #e7e0d2; }
+.hex-tooltip-resline { display: flex; align-items: center; gap: 4px; color: #e7e0d2; }
+.hex-tooltip-resicon { width: 17px; height: 17px; object-fit: contain; flex: 0 0 auto; }
 
 /* 初心者モード: 局面ガイド（盤面下部・クリック透過の帯）。 */
 #beginner-hint {
