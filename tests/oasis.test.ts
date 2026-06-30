@@ -104,6 +104,29 @@ describe('オアシス: 道で探索（霧→砂漠/オアシス）と財宝', (
     const gainedDev = next.players.player1!.devCards.length - devBefore;
     expect(gainedRes > 0 || gainedDev > 0).toBe(true);
   });
+
+  // バグ回帰: BUILD_ROAD/BUILD_SHIP の collectEdgeToken に setup 除外ガードが無く、無償の
+  //   初期道/船を財宝の辺に置くと財宝/開発カードを只取りできた（オアシス/宝島で再現）。
+  it('セットアップの無償の道では財宝を獲得しない（盤に残る）', () => {
+    const g = oasis();
+    const tEdgeId = Object.keys(g.edgeTokens ?? {}).find(eid => {
+      const e = g.edges[eid]!;
+      return g.edgeTokens![eid] === 'treasure' && isLandEdge(e, g.vertices, g.tiles) && e.road == null;
+    })!;
+    const E = g.edges[tEdgeId]!;
+    const v = E.vertexIds[0]!; // この頂点を直前に置いた開拓地＝道の anchor とする
+    // SETUP_FORWARD・道の配置サブフェーズ（道は無償・anchor接続のみ）。
+    const s: GameState = {
+      ...g, phase: 'SETUP_FORWARD', setupSubPhase: 'PLACE_ROAD', setupRoadAnchor: v, currentPlayerIndex: 0,
+      vertices: { ...g.vertices, [v]: { ...g.vertices[v]!, building: { type: 'settlement', playerId: 'player1' } } },
+      players: { ...g.players, player1: { ...g.players.player1!, hand: makeHand() } },
+    };
+    const devBefore = s.players.player1!.devCards.length;
+    const next = applyAction(s, { type: 'BUILD_ROAD', edgeId: tEdgeId });
+    expect(next.edges[tEdgeId]!.road?.playerId).toBe('player1'); // 道は置けている
+    expect(next.edgeTokens?.[tEdgeId]).toBe('treasure');          // ← 財宝は只取りされず盤に残る
+    expect(next.players.player1!.devCards.length).toBe(devBefore); // 開発カードも得ていない
+  });
 });
 
 // バグ回帰: randomizeFogMap が地形と数字を別シャッフルしていたため、砂漠を含む霧（オアシス）では

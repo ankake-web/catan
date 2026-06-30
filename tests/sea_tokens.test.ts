@@ -6,7 +6,7 @@ import { applyAction } from '../src/engine/game';
 import { collectEdgeToken, placeHeldHarborAt } from '../src/engine/seaTokens';
 import { calcVP, calcPublicVP } from '../src/engine/scoring';
 import { canBuildSettlement } from '../src/engine/actions';
-import { isLandVertex } from '../src/engine/board';
+import { isLandVertex, isSeaEdge } from '../src/engine/board';
 import type { GameState } from '../src/types';
 
 const SPECS: PlayerSpec[] = [
@@ -136,6 +136,28 @@ describe('S5 忘れられた部族: 海辺トークン', () => {
     const gainedDev = next.players.player1!.devCards.length - beforeDev;
     // 資源2枚 または 開発カード1枚のいずれか。
     expect((gainedRes === 2 && gainedDev === 0) || (gainedRes === 0 && gainedDev === 1)).toBe(true);
+  });
+
+  // バグ回帰: BUILD_SHIP の collectEdgeToken に setup 除外ガードが無く、無償の初期船を財宝の
+  //   辺に置くと只取りできた。SETUP 中は獲得しないこと（トークンが盤に残る）を検証。
+  it('[宝島] セットアップの無償の船では財宝を獲得しない（盤に残る）', () => {
+    const g = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_treasure');
+    const tEdgeId = Object.keys(g.edgeTokens ?? {}).find(k => {
+      const e = g.edges[k]!;
+      return g.edgeTokens![k] === 'treasure' && e.ship == null && e.road == null
+        && isSeaEdge(e, g.vertices, g.tiles);
+    })!;
+    const E = g.edges[tEdgeId]!;
+    const v = E.vertexIds[0]!; // 直前に置いた開拓地＝船の anchor
+    const s: GameState = {
+      ...g, phase: 'SETUP_FORWARD', setupSubPhase: 'PLACE_ROAD', setupRoadAnchor: v, currentPlayerIndex: 0,
+      vertices: { ...g.vertices, [v]: { ...g.vertices[v]!, building: { type: 'settlement', playerId: 'player1' } } },
+    };
+    const devBefore = s.players.player1!.devCards.length;
+    const next = applyAction(s, { type: 'BUILD_SHIP', edgeId: tEdgeId });
+    expect(next.edges[tEdgeId]!.ship?.playerId).toBe('player1'); // 船は置けている
+    expect(next.edgeTokens?.[tEdgeId]).toBe('treasure');          // ← 只取りされず盤に残る
+    expect(next.players.player1!.devCards.length).toBe(devBefore);
   });
 
   it('numberHexOnly: 数字ヘックスに隣接しない陸頂点には開拓地を置けない（あれば）', () => {

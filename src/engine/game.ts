@@ -430,7 +430,8 @@ export function applyAction(
       // 大カタン: 道で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
       next = revealPendingNumbers(next, edgeTileIds(next.edges[edgeId]!, next.vertices));
       // オアシス: 道で財宝の辺に到達したら獲得（資源＋発展カード等）。財宝の無い盤では no-op。
-      next = collectEdgeToken(next, edgeId, pid);
+      // セットアップの無償の初期道で財宝/開発カードを只取りできないよう、SETUP 中は獲得しない。
+      if (!_isSetup) next = collectEdgeToken(next, edgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
 
@@ -465,7 +466,8 @@ export function applyAction(
       // 大カタン: 船で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
       next = revealPendingNumbers(next, edgeTileIds(next.edges[edgeId]!, next.vertices));
       // S5 忘れられた部族: この辺に海辺トークンがあれば獲得（VP/開発カード/港）。無い盤では no-op。
-      next = collectEdgeToken(next, edgeId, pid);
+      // セットアップの無償の初期船で財宝/トークンを只取りできないよう、SETUP 中は獲得しない。
+      if (!_isSetupSh) next = collectEdgeToken(next, edgeId, pid);
       // S6 カタンの織物: この辺が村に隣接していれば航路接続（接続成立で即織物1枚）。無い盤では no-op。
       next = connectVillagesAround(next, edgeId, pid);
       next = updateLongestRoad(next);
