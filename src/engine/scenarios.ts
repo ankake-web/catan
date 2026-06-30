@@ -1051,3 +1051,16 @@ export function listScenarios(): ReadonlyArray<ScenarioInfo> {
     };
   });
 }
+
+// 選択UIに出すシナリオ（ユーザー選定）。他のシナリオは実装・テストは残すが、盤面選択カードには出さない。
+const VISIBLE_SCENARIO_IDS: ReadonlySet<ScenarioId> = new Set<ScenarioId>([
+  'classic',
+  'cities_knights',
+  'seafarers_newshores',
+  'seafarers_drought',
+  'seafarers_treasure',
+]);
+/** 盤面選択UIに表示するシナリオ一覧（listScenarios のうち VISIBLE のみ）。 */
+export function listVisibleScenarios(): ReadonlyArray<ScenarioInfo> {
+  return listScenarios().filter(s => VISIBLE_SCENARIO_IDS.has(s.id));
+}

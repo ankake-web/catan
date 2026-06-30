@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createInitialGameState } from '../src/engine/createState';
 import type { PlayerSpec } from '../src/engine/createState';
-import { getScenario, listScenarios, getScenarioRules } from '../src/engine/scenarios';
+import { getScenario, listScenarios, listVisibleScenarios, getScenarioRules } from '../src/engine/scenarios';
 import { computeIslandReps } from '../src/engine/islands';
 import { getAllTileCoords } from '../src/engine/board';
 import { createRng } from '../src/engine/setup';
@@ -25,6 +25,15 @@ describe('scenarios: registry', () => {
   it('unknown id falls back to classic', () => {
     // @ts-expect-error 故意に未知ID
     expect(getScenario('nope').id).toBe('classic');
+  });
+  it('表示シナリオは基本/都市と騎士/新たな岸へ/干ばつ/宝島の5つだけ（他は実装は残すが非表示）', () => {
+    const visible = listVisibleScenarios().map(s => s.id).sort();
+    expect(visible).toEqual(
+      ['classic', 'cities_knights', 'seafarers_newshores', 'seafarers_drought', 'seafarers_treasure'].sort(),
+    );
+    // 非表示シナリオも実装（getScenario）とフル一覧（listScenarios）には残る。
+    expect(listScenarios().length).toBeGreaterThan(visible.length);
+    expect(getScenario('seafarers_cloth').id).toBe('seafarers_cloth');
   });
   it('全シナリオに「このゲーム固有ルール」テキストがある／state に scenarioId が入る', () => {
     for (const { id } of listScenarios()) {
