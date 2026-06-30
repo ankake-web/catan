@@ -78,7 +78,9 @@ export function createInitialGameState(
       remainingRoads: scenario.rules?.startingRoads ?? 15,
       remainingShips: scenario.rules?.noShips ? 0 : 15,
       remainingSettlements: 5,
-      remainingCities: 4,
+      // 既定4。都市上限を引き上げるシナリオ（大カタン=8）では駒も同数用意しないと、
+      // remainingCities(駒)が先に0になり maxCities まで建てられず「都市8まで」が死にルールになる。
+      remainingCities: scenario.rules?.maxCities ?? 4,
       knightsPlayed: 0,
       longestRoadLength: 0,
       hasLongestRoad: false,

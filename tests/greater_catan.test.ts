@@ -93,6 +93,19 @@ describe('大カタン: 抜けている数値トークン', () => {
 });
 
 describe('大カタン: 都市制限8', () => {
+  it('createInitialGameState: 大カタンは都市8コマを用意する（既定4・回帰）', () => {
+    // バグ: remainingCities を全シナリオ4にハードコードしていたため、maxCities=8 でも
+    //   コマ(remainingCities)が先に0になり5個目以降を建てられず「都市8まで」が死にルールだった。
+    for (const id of ['seafarers_greatercatan', 'ck_seafarers_greatercatan'] as const) {
+      const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), id);
+      expect(s.maxCities).toBe(8);
+      for (const pid of s.playerOrder) expect(s.players[pid]!.remainingCities).toBe(8);
+    }
+    // 上限を上げないシナリオは既定どおり4コマ。
+    const classic = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'classic');
+    for (const pid of classic.playerOrder) expect(classic.players[pid]!.remainingCities).toBe(4);
+  });
+
   it('都市が8つ未満なら昇格でき、8つに達したら不可', () => {
     const g = greater();
     // player1 の開拓地を1つ用意し、都市資源を持たせる。
@@ -101,9 +114,11 @@ describe('大カタン: 都市制限8', () => {
     const base: GameState = {
       ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null, currentPlayerIndex: 0,
       vertices: { ...g.vertices, [settV]: { ...g.vertices[settV]!, building: { type: 'settlement', playerId: 'player1' } } },
-      players: { ...g.players, player1: { ...g.players.player1!, hand: makeHand({ grain: 2, ore: 3 }), remainingCities: 8 } },
+      // remainingCities は上書きしない＝createInitialGameState が大カタンで8コマを用意することに依存。
+      players: { ...g.players, player1: { ...g.players.player1!, hand: makeHand({ grain: 2, ore: 3 }) } },
     };
     expect(base.maxCities).toBe(8);
+    expect(base.players.player1!.remainingCities).toBe(8);
     expect(canBuildCity(base, 'player1', settV)).toBe(true);
     // すでに8都市保有なら、たとえコマが残っていても昇格不可。
     const verts = { ...base.vertices };
