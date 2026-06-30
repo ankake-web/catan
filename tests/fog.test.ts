@@ -28,6 +28,17 @@ describe('S3 霧の島: 霧ヘックスは海として扱われ、探索で公�
     }
   });
 
+  it('本島は砂漠なし(盗賊は7まで盤外)・霧の中に金鉱の島が2つ隠れている', () => {
+    const s = fog();
+    // 本島(表向きの陸)に砂漠は無く、盗賊は初期盤外。
+    expect(Object.values(s.tiles).some(t => t.type === 'desert')).toBe(false);
+    expect(Object.values(s.tiles).some(t => t.hasRobber)).toBe(false);
+    // 金鉱は霧の中（fog.type==='gold'）に2つ。表向きはまだ海なので gold は見えない。
+    const fogGold = Object.values(s.tiles).filter(t => t.fog?.type === 'gold');
+    expect(fogGold.length).toBe(2);
+    expect(Object.values(s.tiles).some(t => t.type === 'gold')).toBe(false); // 公開まで見えない
+  });
+
   it('基本ゲームには霧が無く revealFogAround は no-op', () => {
     const c = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'classic');
     expect(hasFog(c)).toBe(false);
@@ -36,7 +47,7 @@ describe('S3 霧の島: 霧ヘックスは海として扱われ、探索で公�
 
   it('霧の陸ヘックスを公開すると本来の地形になり、探索者が資源1枚を得る', () => {
     const s = fog();
-    const fogLand = Object.values(s.tiles).find(t => t.fog && t.fog.type !== 'sea')!;
+    const fogLand = Object.values(s.tiles).find(t => t.fog && TILE_RESOURCE_MAP[t.fog.type] != null)!;
     const res = TILE_RESOURCE_MAP[fogLand.fog!.type]!;
     const before = s.players.player1!.hand[res];
     const next = revealFogAround(s, [fogLand.id], 'player1');

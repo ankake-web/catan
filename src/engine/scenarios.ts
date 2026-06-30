@@ -21,6 +21,7 @@ export type ScenarioId =
   | 'seafarers_fourislands'    // 公式S2 4つの島
   | 'seafarers_fogislands'     // 公式S3 霧の島
   | 'seafarers_treasure'       // 公式アプリ「宝島」（霧＋海辺の財宝トークン）
+  | 'seafarers_oceania'        // 公式アプリ「オセアニア(4)」（霧に隠れた2つの始発島＋探索）
   | 'seafarers_throughdesert'  // 公式S4 砂漠を越えて
   | 'seafarers_forgottentribe' // 公式S5 忘れられた部族
   | 'seafarers_cloth'          // 公式S6 カタンの織物
@@ -30,7 +31,7 @@ export type ScenarioId =
   | 'seafarers_archipelago'    // 非公式
   | 'seafarers_goldenisles'    // 非公式
   | 'seafarers_chainisles'     // 非公式
-  | 'seafarers_greatercatan'   // 非公式
+  | 'seafarers_greatercatan'   // 公式アプリ「大カタン」（中央本島＋数字なし小島・抜けている数値トークン・都市8制限）
   | 'cities_knights';
 
 export interface ScenarioBoard {
@@ -44,6 +45,8 @@ export interface ScenarioBoard {
   fortressVertices?: string[];
   /** S7 海賊の島々: 海賊艦隊の固定経路（タイルID列）。 */
   fleetPath?: string[];
+  /** 砂漠を越えて: 特別VPの対象「地域」（北西地方）のタイルID。隣接初入植で +regionBonusVp。 */
+  bonusRegionTiles?: string[];
 }
 
 export interface Scenario {
@@ -89,7 +92,7 @@ const classic: Scenario = {
 const SEAFARERS_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 2, 3);
 const BIG_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 3, 3);   // 37ヘックス
 const HUGE_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(4, 3, 4);  // 51ヘックス
-const FOUR_ISLANDS_COORDS = BIG_COORDS; // S2 は 37ヘックス（4島）
+const FOUR_ISLANDS_COORDS = HUGE_COORDS; // S2 は 51ヘックス（公式アプリ4人盤・大きさの異なる4島）
 
 // ---- 航海者「新たな海岸を目指して」（公式S1・51ヘックス＝公式アプリ4人盤に準拠） ----
 // 公式アプリ(photo/IMG_6399)の「中央に本島＋四方に離れた小島」を51マス盤で再現。
@@ -359,25 +362,43 @@ const BIG_MAIN_ISLAND: LandMap = {
   '-1,3':  { type: 'mountain', number: 5 },
 };
 
-// ---- 公式S4「砂漠を越えて」：本島(左12)から広い大洋を渡った先に、砂漠を含む新天地（右奥 q=2,3）。
-//   長い航路で渡り、新天地への初入植ごとに各自+2VP。金タイル2枚。14点。
-//   ※公式の「砂漠帯で陸を分断」は、デジタル版では大洋＋砂漠を含む別島として表現（地図画像があれば作り込む）。
+// ---- 公式S4「砂漠を越えて(4)」(公式アプリ4人盤 photo/IMG_6412 実読): 本土の北西に砂漠帯が伸び、
+//   その向こうに陸続きの「北西地方」（岩山の豊かな地）がある。海には小島3つ。
+//   特別VP＝小島へ初入植するたび各+2点／北西地方へ初入植したら各+2点。14点。
+//   → 北西地方は砂漠帯(D)でしか本土とつながらない＝「砂漠を陸路で越えて」到達する（地域ボーナス
+//      regionBonusVp で +2）。小島は海で隔たれ島ボーナス(+2)。地形は固定し数字のみ毎ゲームrandom。
+//   構成: 北西の岩山3＋砂漠帯2(盗賊)＋本土10(森2/牧草2/丘2/畑2/山2)＋小島3つ(各2)＝陸21。
 const THROUGH_DESERT_LAND: LandMap = {
-  ...BIG_MAIN_ISLAND,                         // 本島15（全5資源＋砂漠 -1,-1=盗賊初期）
-  // 海を渡った新天地（右 10・連続）。砂漠帯を含み、金2。初入植+2点。
-  // 公式3人用の陸構成（砂漠3/森5/山4/丘3/牧草4/畑4/金2＝陸25・数字22）に一致させるため、
-  // 新天地を 7→10 へ拡張（海3枚を砂漠/森/山に。本島には触れない）。
-  '1,-2': { type: 'field',    number: 4 },
-  '1,-1': { type: 'gold',     number: 5 },    // 金1
-  '1,0':  { type: 'pasture',  number: 11 },
-  '2,-2': { type: 'desert',   number: null }, // 砂漠帯（盗賊なし）
-  '2,-1': { type: 'forest',   number: 9 },
-  '3,-2': { type: 'gold',     number: 4 },    // 金2
-  '3,-1': { type: 'hill',     number: 3 },
-  '1,-3': { type: 'forest',   number: 3 },    // 拡張: 森（公式森5へ）
-  '2,-3': { type: 'mountain', number: 11 },   // 拡張: 山（公式山4へ）
-  '3,-3': { type: 'desert',   number: null }, // 拡張: 砂漠帯（公式砂漠3へ）
+  // 北西地方（岩山3＝豊かなオレの地。砂漠帯を越えた先・陸続き）
+  '-4,0': { type: 'mountain', number: 6 },
+  '-4,1': { type: 'mountain', number: 9 },
+  '-3,0': { type: 'mountain', number: 5 },
+  // 砂漠帯（2・本土と北西地方をつなぐ唯一の陸橋。盗賊はここから開始）
+  '-2,0': { type: 'desert',   number: null, robber: true },
+  '-2,1': { type: 'desert',   number: null },
+  // 本土（中央10・出発地。全5資源）
+  '-1,0': { type: 'forest',   number: 8 },
+  '-1,1': { type: 'pasture',  number: 5 },
+  '-1,2': { type: 'hill',     number: 11 },
+  '0,-1': { type: 'mountain', number: 9 },
+  '0,0':  { type: 'field',    number: 4 },
+  '0,1':  { type: 'forest',   number: 6 },
+  '0,2':  { type: 'field',    number: 3 },
+  '1,-1': { type: 'pasture',  number: 10 },
+  '1,0':  { type: 'hill',     number: 5 },
+  '1,1':  { type: 'mountain', number: 11 },
+  // 小島1（北・畑/牧草）
+  '0,-3':  { type: 'field',    number: 10 },
+  '1,-3':  { type: 'pasture',  number: 8 },
+  // 小島2（北東・丘/畑）
+  '3,-3':  { type: 'hill',     number: 4 },
+  '4,-3':  { type: 'field',    number: 3 },
+  // 小島3（東・山/森）
+  '4,-1':  { type: 'mountain', number: 11 },
+  '4,0':   { type: 'forest',   number: 2 },
 };
+// 北西地方（地域ボーナス対象）のタイル。
+const THROUGH_DESERT_NW: string[] = ['-4,0', '-4,1', '-3,0'];
 
 // ---- 黄金諸島：右に2つの新島、合計3つの金タイル。ゴールドラッシュ。 ----
 const GOLDEN_ISLES_LAND: LandMap = {
@@ -408,22 +429,58 @@ const CHAIN_ISLES_LAND: LandMap = {
   '1,2':  { type: 'mountain', number: 10 },
 };
 
-// ---- 大連邦：海を少なくした大きな一枚陸。船は控えめ、人数多めでも遊べる大盤（12点）。 ----
-// 本島を右へ拡張して大陸化。沿岸に港、奥に金1。新島ボーナスは発生しない（1つの陸塊）。
+// ---- 公式「大カタン(4)」(航海者・photo/騎士と都市 大カタン IMG_6419/6420 実読): 中央の数字付き
+//   本島を、数字の無い小島群が取り囲む。小島は「抜けている数値トークン」で、道/船/開拓地で端に
+//   到達するまで数字が出ず産出しない。都市は各自8つまで。18点。 ----
+// 本島(中央16・砂漠1=盗賊初期)＋小島5つ(各2)。小島の数字は buildGreaterCatan が pendingNumber へ
+//   退避（到達で出現）。島ごとに資源構成を固定（randomizeLandMapPerIsland）。
 const GREATER_CATAN_LAND: LandMap = {
-  ...MAIN_ISLAND,
-  '0,-2': { type: 'forest',   number: 3 },
-  '0,-1': { type: 'field',    number: 11 },
-  '0,0':  { type: 'pasture',  number: 6 },
-  '0,1':  { type: 'hill',     number: 9 },   // 赤6/8隣接回避（0,0=6と隣接のため非赤9に）
-  '1,-2': { type: 'mountain', number: 4 },
-  '1,-1': { type: 'gold',     number: 10 },
-  '1,0':  { type: 'forest',   number: 9 },
-  '1,1':  { type: 'field',    number: 3 },
-  '2,-1': { type: 'pasture',  number: 5 },
-  '2,0':  { type: 'mountain', number: 11 },
-  '2,-2': { type: 'hill',     number: 12 },
+  // 中央の本島（16・全5資源＋砂漠1。数字は最初から見える）
+  '0,0':   { type: 'desert',   number: null, robber: true },
+  '1,0':   { type: 'forest',   number: 8 },
+  '1,-1':  { type: 'field',    number: 5 },
+  '0,-1':  { type: 'pasture',  number: 9 },
+  '-1,0':  { type: 'mountain', number: 4 },
+  '-1,1':  { type: 'hill',     number: 6 },
+  '0,1':   { type: 'forest',   number: 11 },
+  '2,0':   { type: 'field',    number: 3 },
+  '2,-1':  { type: 'pasture',  number: 10 },
+  '1,1':   { type: 'mountain', number: 5 },
+  '0,2':   { type: 'hill',     number: 9 },
+  '-1,2':  { type: 'forest',   number: 4 },
+  '-2,1':  { type: 'field',    number: 11 },
+  '-2,0':  { type: 'pasture',  number: 12 },
+  '1,-2':  { type: 'mountain', number: 12 },
+  '-1,-1': { type: 'hill',     number: 3 },
+  // 小島5つ（各2・数字なしで開始＝buildGreaterCatan が pendingNumber へ）。
+  '-4,0':  { type: 'forest',   number: 10 }, // 北西
+  '-4,1':  { type: 'mountain', number: 2 },
+  '-1,-3': { type: 'field',    number: 8 },  // 北
+  '0,-3':  { type: 'pasture',  number: 9 },
+  '3,-3':  { type: 'hill',     number: 4 },  // 北東
+  '4,-3':  { type: 'field',    number: 5 },
+  '4,-1':  { type: 'pasture',  number: 6 },  // 東
+  '4,0':   { type: 'forest',   number: 11 },
+  '-4,3':  { type: 'mountain', number: 10 }, // 南西
+  '-3,3':  { type: 'hill',     number: 3 },
 };
+// 大カタンの盤を組む: per-island シャッフル後、本島以外（小島）の数字を pendingNumber へ退避する。
+function buildGreaterCatan(landMap: LandMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  return (geo, rng) => {
+    const rand = randomizeLandMapPerIsland(landMap, rng);
+    const tiles = buildTilesFromLandMap(geo, rand);
+    // 本島＝最大の陸連結成分。小島タイルの数字を pendingNumber へ退避（到達するまで産出しない）。
+    const landCells = Object.keys(rand);
+    const comps = landComponents(landCells).sort((a, b) => b.length - a.length);
+    const mainSet = new Set(comps[0] ?? landCells);
+    for (const id of landCells) {
+      if (mainSet.has(id)) continue;
+      const t = tiles[id];
+      if (t && t.number != null) tiles[id] = { ...t, number: null, pendingNumber: t.number };
+    }
+    return { tiles, harbors: randomHarbors(geo, tiles, rng) };
+  };
+}
 
 // 非公式（公式S4「砂漠を越えて」とは別物の「遠い金の島」版。誤認を避け名前を変更）。
 // ---- 公式 New World（自由構築）: 本島＋複数の小島。どの島にも初期配置でき(setupAnywhere)、
@@ -489,16 +546,11 @@ function landComponents(cells: readonly string[]): string[][] {
 //   出るか）だけがランダム。本島の資源は本島内だけ・小島の資源は小島内だけでシャッフルするため、
 //   金（小島側に定義）は必ず小島へ、砂漠（干ばつ＝本島側に定義）は必ず本島に残る。
 //   数字は全島共通プールから配る（数字バランスは盤全体で取る）。
-function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
+// 種別を「グループ内だけ」でシャッフルする共通コア。groups は“一緒くたにシャッフルしてよい
+// セル集合”の配列（島内シャッフルの単位）。数字は全島共通プールから配る。制約（赤6/8非隣接・
+// 金に赤数字なし）を満たすまでリトライ。失敗時は元 landMap を返す。
+function randomizeLandMapCore(landMap: LandMap, rng: () => number, groups: string[][]): LandMap {
   const cells = Object.keys(landMap);
-  // 本島=最大連結成分、離れ小島=その他のセル。
-  const comps = landComponents(cells).sort((a, b) => b.length - a.length);
-  const main = comps[0] ?? cells;
-  const mainSet = new Set(main);
-  const outlying = cells.filter(c => !mainSet.has(c));
-  // 島ごとの資源多重集合（“正”の構成）。
-  const mainTypes: TileType[] = main.map(c => landMap[c]!.type);
-  const outlyingTypes: TileType[] = outlying.map(c => landMap[c]!.type);
   // 数字プール（非砂漠セルの数字を全島共通で配る）。
   const numberPool: number[] = cells
     .filter(c => landMap[c]!.type !== 'desert')
@@ -506,10 +558,12 @@ function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
     .filter((n): n is number => n != null);
 
   for (let attempt = 0; attempt < 400; attempt++) {
-    // 1) 種別を「島内だけ」でシャッフル（本島↔小島は混ざらない＝組み合わせ固定）。
+    // 1) 種別をグループ内だけでシャッフル（グループ間は混ざらない＝組み合わせ固定）。
     const tType: Record<string, TileType> = {};
-    shuffleWithRng(mainTypes, rng).forEach((t, i) => { tType[main[i]!] = t; });
-    shuffleWithRng(outlyingTypes, rng).forEach((t, i) => { tType[outlying[i]!] = t; });
+    for (const group of groups) {
+      const types: TileType[] = group.map(c => landMap[c]!.type);
+      shuffleWithRng(types, rng).forEach((t, i) => { tType[group[i]!] = t; });
+    }
     // 2) 数字を非砂漠セルへシャッフル配置。
     const numbered = cells.filter(c => tType[c] !== 'desert');
     const nums = shuffleWithRng(numberPool, rng);
@@ -542,6 +596,75 @@ function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
   return landMap; // フォールバック（元マップ・制約充足済みの“正”）
 }
 
+// グループ分け＝「本島(最大連結成分)」と「離れ小島(残り全部を1プール)」。小島同士は資源を
+// 共有してよい盤（新たな岸へ/干ばつ/宝島など。小島構成は“合計”で固定）。
+function mainOutlyingGroups(cells: string[]): string[][] {
+  const comps = landComponents(cells).sort((a, b) => b.length - a.length);
+  const main = comps[0] ?? cells;
+  const mainSet = new Set(main);
+  const outlying = cells.filter(c => !mainSet.has(c));
+  return outlying.length ? [main, outlying] : [main];
+}
+function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
+  return randomizeLandMapCore(landMap, rng, mainOutlyingGroups(Object.keys(landMap)));
+}
+// グループ分け＝「各連結成分（=各島）を独立に」。島ごとに資源の組み合わせを固定したい盤用
+// （4つの島など。島Aの資源は島A内だけ・島Bの資源は島B内だけでシャッフル）。
+function randomizeLandMapPerIsland(landMap: LandMap, rng: () => number): LandMap {
+  return randomizeLandMapCore(landMap, rng, landComponents(Object.keys(landMap)));
+}
+// 島ごとに資源構成を固定する盤を組む共通ビルダ（buildFromLandMap の per-island 版）。
+function buildPerIslandFromLandMap(landMap: LandMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  return (geo, rng) => {
+    const tiles = buildTilesFromLandMap(geo, randomizeLandMapPerIsland(landMap, rng));
+    return { tiles, harbors: randomHarbors(geo, tiles, rng) };
+  };
+}
+
+// 地形は固定したまま「数字だけ」毎ゲームシャッフルする（砂漠帯/岩山の位置を保ちたい盤用）。
+// 砂漠・盗賊位置は元 landMap のまま。赤6/8は辺で隣接させない制約は維持。
+function randomizeNumbersOnly(landMap: LandMap, rng: () => number): LandMap {
+  const cells = Object.keys(landMap);
+  const numberPool: number[] = cells
+    .filter(c => landMap[c]!.type !== 'desert')
+    .map(c => landMap[c]!.number)
+    .filter((n): n is number => n != null);
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const numbered = cells.filter(c => landMap[c]!.type !== 'desert');
+    const nums = shuffleWithRng(numberPool, rng);
+    const tNum: Record<string, number> = {};
+    numbered.forEach((c, i) => { tNum[c] = nums[i]!; });
+    let ok = true;
+    for (const c of cells) {
+      if (!isRedNum(tNum[c])) continue;
+      const [q, r] = c.split(',').map(Number) as [number, number];
+      for (const [dq, dr] of NW_NB) {
+        if (isRedNum(tNum[`${q + dq},${r + dr}`])) { ok = false; break; }
+      }
+      if (!ok) break;
+    }
+    if (!ok) continue;
+    const map: LandMap = {};
+    for (const c of cells) {
+      const t = landMap[c]!;
+      map[c] = t.type === 'desert'
+        ? { type: 'desert', number: null, robber: !!t.robber }
+        : { type: t.type, number: tNum[c]!, robber: false };
+    }
+    return map;
+  }
+  return landMap;
+}
+
+// 砂漠を越えて: 地形固定（砂漠帯/北西の岩山/小島の位置を保つ）＋数字シャッフル。北西地方タイルを
+//   bonusRegionTiles として返し、そこへ初入植したプレイヤーへ特別VP（regionBonusVp）を与える。
+function buildThroughDesert(landMap: LandMap, bonusRegionTiles: string[]): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  return (geo, rng) => {
+    const tiles = buildTilesFromLandMap(geo, randomizeNumbersOnly(landMap, rng));
+    return { tiles, harbors: randomHarbors(geo, tiles, rng), bonusRegionTiles };
+  };
+}
+
 // 霧マップ（fogMap）の中身を毎ゲームランダム化（どのセルが陸/海か・地形・数字をシャッフル。枚数不変）。
 function randomizeFogMap(fogMap: FogMap, rng: () => number): FogMap {
   const cells = Object.keys(fogMap);
@@ -565,12 +688,13 @@ function randomizeFogMap(fogMap: FogMap, rng: () => number): FogMap {
 const seafarersThroughDesert: Scenario = {
   id: 'seafarers_throughdesert',
   name: '航海者：砂漠を越えて',
-  description: '本島から広い大洋を渡り、砂漠を含む新天地へ。新天地への初入植ごとに+2点（14点で勝利）。',
+  description: '本土の北西に砂漠帯。砂漠を陸路で越えた先の北西地方や、海の小島へ。北西地方/小島への初入植で各+2点（14点）。',
   category: 'seafarers',
-  coords: BIG_COORDS,
-  build: buildFromLandMap(THROUGH_DESERT_LAND),
+  coords: HUGE_COORDS, // 51ヘックス（本土＋砂漠帯＋陸続きの北西地方＋小島3つ）
+  build: buildThroughDesert(THROUGH_DESERT_LAND, THROUGH_DESERT_NW),
   victoryTarget: 14,
-  rules: { newIslandBonusVp: 2 },
+  recommendedPlayers: '4人', // 公式アプリ「砂漠を越えて(4)」＝4人用
+  rules: { newIslandBonusVp: 2, regionBonusVp: 2 }, // 小島=島ボーナス / 北西地方=地域ボーナス
 };
 const seafarersNewWorld: Scenario = {
   id: 'seafarers_newworld',
@@ -584,35 +708,111 @@ const seafarersNewWorld: Scenario = {
   rules: { newIslandBonusVp: 1, setupAnywhere: true },
 };
 
-// ---- 公式S3「霧の島」: 本島(左12)の周りに霧の海域。船/道/開拓地で進むと霧が晴れ、
-//   陸なら数字＋資源1枚が出現（探索の報酬）。12点。 ----
-// 霧（右側 q>=1 の全15セル）。表向きは海、探索で公開＝陸9/海6。
+// ---- 公式S3「霧の島」(公式アプリ photo/IMG_6407 実読): 左の縦長の本島(15・砂漠なし)を
+//   右の霧の海域が取り囲む。船/道/開拓地で霧に近づくと晴れ、陸なら資源1枚を獲得（探索の報酬）。
+//   霧の中に「金鉱の眠る島（金タイル）」が隠れているのが核。12点。 ----
+// 本島（左 q<=-1 の15セル・砂漠なし＝盗賊は7まで盤外）。実読の構成＝牧草4/森4/丘3/畑2/山2。
+const FOG_HOME_LAND: LandMap = {
+  '-3,0':  { type: 'pasture',  number: 5 },
+  '-3,1':  { type: 'pasture',  number: 3 },
+  '-3,2':  { type: 'pasture',  number: 9 },
+  '-3,3':  { type: 'pasture',  number: 4 },
+  '-2,-1': { type: 'forest',   number: 8 },
+  '-2,0':  { type: 'forest',   number: 6 },
+  '-2,1':  { type: 'forest',   number: 12 },
+  '-2,2':  { type: 'forest',   number: 9 },
+  '-2,3':  { type: 'hill',     number: 10 },
+  '-1,-2': { type: 'hill',     number: 5 },
+  '-1,-1': { type: 'mountain', number: 3 },
+  '-1,0':  { type: 'hill',     number: 11 },
+  '-1,1':  { type: 'field',    number: 8 },
+  '-1,2':  { type: 'field',    number: 4 },
+  '-1,3':  { type: 'mountain', number: 6 },
+};
+// 霧（右側 q>=1 の全15セル）。表向きは海、探索で公開＝陸9（うち金鉱2）/海6。
+// randomizeFogMap がどのセルが陸/海か・地形・数字を毎ゲームシャッフル（金2は必ず霧の中に残る）。
 const FOG_HIDDEN: FogMap = {
   '1,-3': { type: 'sea',     number: null },
-  '1,-2': { type: 'forest',  number: 5 },
+  '1,-2': { type: 'gold',    number: 5 },   // 金鉱の島1
   '1,-1': { type: 'field',   number: 4 },
   '1,0':  { type: 'pasture', number: 9 },
   '1,1':  { type: 'sea',     number: null },
   '1,2':  { type: 'hill',    number: 3 },
   '2,-3': { type: 'sea',     number: null },
   '2,-2': { type: 'mountain',number: 6 },
-  '2,-1': { type: 'field',   number: 5 },
+  '2,-1': { type: 'forest',  number: 5 },
   '2,0':  { type: 'sea',     number: null },
   '2,1':  { type: 'forest',  number: 8 },
   '3,-3': { type: 'sea',     number: null },
-  '3,-2': { type: 'pasture', number: 4 },
-  '3,-1': { type: 'hill',    number: 9 },
+  '3,-2': { type: 'gold',    number: 4 },   // 金鉱の島2
+  '3,-1': { type: 'pasture', number: 9 },
   '3,0':  { type: 'sea',     number: null },
 };
 const seafarersFogIslands: Scenario = {
   id: 'seafarers_fogislands',
   name: '航海者：霧の島',
-  description: '霧に包まれた海域。船・道・開拓地で進むたびに霧が晴れ、島や資源が現れる（12点）。',
+  description: '霧に包まれた海域を探索。船・道・開拓地で霧が晴れ、島や資源が現れる。霧の中に金鉱の島が眠る（12点）。',
   category: 'seafarers',
   coords: BIG_COORDS,
-  build: buildFromLandFogMap(BIG_MAIN_ISLAND, FOG_HIDDEN),
+  build: buildFromLandFogMap(FOG_HOME_LAND, FOG_HIDDEN),
   victoryTarget: 12,
   rules: { newIslandBonusVp: 0 }, // 探索の報酬は資源（島ボーナスVPは無し）
+};
+
+// ---- 公式アプリ「オセアニア(4)」(photo/IMG_6409 実読): 霧に覆われた海に2つの始発島。
+//   どの島からでも始められ(setupAnywhere)、霧を晴らして新たな島や海を発見する。発見した陸
+//   からは資源1枚を獲得（島ボーナスVPは無し）。霧の中には金鉱の島も眠る。12点。 ----
+// 始発の2島（buildFromLandFogMap の landMap）。北東10＋南西7＝陸17（実読の構成）。
+//   北東(10): 森2/畑2/牧草3/山2/丘1   南西(7): 森2/山1/丘2/畑1/牧草1
+const OCEANIA_HOME_LAND: LandMap = {
+  // 北東の始発島（10）
+  '1,-3': { type: 'forest',   number: 9 },
+  '2,-3': { type: 'forest',   number: 3 },
+  '1,-2': { type: 'field',    number: 12 },
+  '2,-2': { type: 'mountain', number: 10 },
+  '3,-2': { type: 'pasture',  number: 5 },
+  '1,-1': { type: 'pasture',  number: 4 },
+  '2,-1': { type: 'hill',     number: 6 },
+  '3,-1': { type: 'field',    number: 6 },
+  '2,0':  { type: 'pasture',  number: 5 },
+  '3,0':  { type: 'mountain', number: 2 },
+  // 南西の始発島（7）
+  '-4,2': { type: 'forest',   number: 9 },
+  '-3,1': { type: 'forest',   number: 10 },
+  '-4,3': { type: 'mountain', number: 3 },
+  '-3,2': { type: 'hill',     number: 8 },
+  '-3,3': { type: 'hill',     number: 4 },
+  '-2,2': { type: 'field',    number: 8 },
+  '-2,3': { type: 'pasture',  number: 11 },
+};
+// 霧（15セル・陸7（うち金鉱2）/海8）。randomizeFogMap がどのセルが陸/海か・地形・数字をシャッフル。
+const OCEANIA_FOG: FogMap = {
+  '-4,0':  { type: 'sea',      number: null },
+  '-4,1':  { type: 'gold',     number: 5 },
+  '-3,-1': { type: 'sea',      number: null },
+  '-3,0':  { type: 'forest',   number: 9 },
+  '-2,-1': { type: 'sea',      number: null },
+  '-2,0':  { type: 'field',    number: 4 },
+  '-2,1':  { type: 'mountain', number: 10 },
+  '-1,0':  { type: 'sea',      number: null },
+  '-1,1':  { type: 'pasture',  number: 6 },
+  '-1,2':  { type: 'sea',      number: null },
+  '0,-1':  { type: 'sea',      number: null },
+  '0,1':   { type: 'sea',      number: null },
+  '0,2':   { type: 'hill',     number: 3 },
+  '1,1':   { type: 'sea',      number: null },
+  '1,2':   { type: 'gold',     number: 11 },
+};
+const seafarersOceania: Scenario = {
+  id: 'seafarers_oceania',
+  name: '航海者：オセアニア',
+  description: '霧に覆われた海に2つの始発島。どの島からでも始め、霧を晴らして島を発見（資源1枚）。金鉱の島も眠る（12点）。',
+  category: 'seafarers',
+  coords: HUGE_COORDS, // 51ヘックス（2始発島＋霧の海域）
+  build: buildFromLandFogMap(OCEANIA_HOME_LAND, OCEANIA_FOG),
+  victoryTarget: 12,
+  recommendedPlayers: '4人', // 公式アプリ「オセアニア(4)」＝4人用
+  rules: { newIslandBonusVp: 0, setupAnywhere: true }, // 報酬は資源・2島から自由に開始
 };
 
 // ---- 公式アプリ「宝島」（51ヘックス・公式アプリ4人盤に準拠／photo/IMG_6401） ----
@@ -731,34 +931,40 @@ const seafarersForgottenTribe: Scenario = {
 
 // ---- 公式S2「4つの島」: 海で隔てた4つの島。どの島にも初期配置でき(setupAnywhere)、
 //   自分の出発島以外への初入植ごとに+2点。各自にとって未探検の島が異なる。13点。 ----
-// 37ヘックス footprint に、互いに海で隔てた4島を配置。公式3人用の陸構成（各資源4ずつ＝陸20・
-// 砂漠0・金0・数字20）に一致させる: 島Aを6タイルへ拡張（'-3,0'牧草・島Aのみに隣接）し、
-// 島Bの砂漠を山に置換（盗賊初期は維持）。島サイズ A6/B5/C4/D5（公式『大きさの近い4島』）。
+// 51ヘックス footprint（公式アプリ4人盤・photo/4つの島/IMG_6406 実読）に、互いに海で隔てた
+// 大きさの異なる4島を配置。砂漠なし＝盗賊は7まで盤外・海賊は最遠の海から。各島は資源の
+// 組み合わせを固定（randomizeLandMapPerIsland＝島内だけシャッフル）。陸23・全23マスに数字。
+//   島A 北西(4): 丘1/山1/畑2    島B 北東(8): 森4/牧草2/山1/畑1
+//   島D 南西(7): 山2/畑2/牧草1/丘1/森1   島C 南東(4): 丘2/牧草2
+//   合計 丘4/山4/畑5/森5/牧草5＝陸23。数字の多重集合も実読どおり（配置のみ毎ゲームランダム）。
 const FOUR_ISLANDS_LAND: LandMap = {
-  // 島A（西・6）
-  '-3,0': { type: 'pasture',  number: 11 }, // 拡張: 島Aのみに隣接する海→牧草（公式 牧草4へ）
-  '-3,1': { type: 'forest',   number: 8 },
-  '-3,2': { type: 'field',    number: 5 },
-  '-2,1': { type: 'hill',     number: 9 },
-  '-2,2': { type: 'mountain', number: 4 },
-  '-3,3': { type: 'pasture',  number: 10 },
-  // 島B（北・5・盗賊初期）。公式S2は砂漠なし＝山に置換（盗賊はこの山に置く）。
-  '0,-3': { type: 'forest',   number: 6 },
-  '1,-3': { type: 'field',    number: 3 },
-  '0,-2': { type: 'mountain', number: 2, robber: true }, // 砂漠→山（公式 山4へ・盗賊初期）
-  '1,-2': { type: 'hill',     number: 5 },
-  '2,-3': { type: 'mountain', number: 9 },
-  // 島C（東）
-  '2,-1': { type: 'forest',   number: 4 },
-  '3,-2': { type: 'field',    number: 10 },
-  '3,-1': { type: 'pasture',  number: 8 },
-  '3,0':  { type: 'hill',     number: 4 },   // 赤数字6/8の隣接回避（3,-1=8と隣接のため非赤4に）
-  // 島D（南）
-  '0,1':  { type: 'forest',   number: 9 },
-  '0,2':  { type: 'field',    number: 5 },
-  '0,3':  { type: 'mountain', number: 4 },
-  '1,1':  { type: 'pasture',  number: 3 },
-  '1,2':  { type: 'hill',     number: 11 },
+  // 島A（北西・4）丘1/山1/畑2
+  '-3,-1': { type: 'hill',     number: 4 },
+  '-4,0':  { type: 'mountain', number: 11 },
+  '-3,0':  { type: 'field',    number: 11 },
+  '-4,1':  { type: 'field',    number: 5 },
+  // 島B（北東・8）森4/牧草2/山1/畑1
+  '2,-3':  { type: 'forest',   number: 8 },
+  '3,-3':  { type: 'pasture',  number: 4 },
+  '1,-2':  { type: 'mountain', number: 3 },
+  '2,-2':  { type: 'forest',   number: 2 },
+  '3,-2':  { type: 'forest',   number: 11 },
+  '1,-1':  { type: 'forest',   number: 8 },
+  '2,-1':  { type: 'field',    number: 9 },
+  '3,-1':  { type: 'pasture',  number: 9 },
+  // 島D（南西・7）山2/畑2/牧草1/丘1/森1
+  '-4,3':  { type: 'mountain', number: 3 },
+  '-3,2':  { type: 'field',    number: 10 },
+  '-3,3':  { type: 'pasture',  number: 9 },
+  '-2,1':  { type: 'field',    number: 10 },
+  '-2,2':  { type: 'mountain', number: 10 },
+  '-2,3':  { type: 'forest',   number: 12 },
+  '-1,1':  { type: 'hill',     number: 6 },
+  // 島C（南東・4）丘2/牧草2
+  '1,1':   { type: 'hill',     number: 5 },
+  '2,1':   { type: 'hill',     number: 5 },
+  '1,2':   { type: 'pasture',  number: 4 },
+  '2,2':   { type: 'pasture',  number: 6 },
 };
 const seafarersFourIslands: Scenario = {
   id: 'seafarers_fourislands',
@@ -766,7 +972,7 @@ const seafarersFourIslands: Scenario = {
   description: '海で隔てた4つの島。どの島から始めてもよく、出発島以外への初入植ごとに+2点（13点）。',
   category: 'seafarers',
   coords: FOUR_ISLANDS_COORDS,
-  build: buildFromLandMap(FOUR_ISLANDS_LAND),
+  build: buildPerIslandFromLandMap(FOUR_ISLANDS_LAND),
   victoryTarget: 13,
   rules: { newIslandBonusVp: 2, setupAnywhere: true },
 };
@@ -896,12 +1102,14 @@ const seafarersChainIsles: Scenario = {
 };
 const seafarersGreaterCatan: Scenario = {
   id: 'seafarers_greatercatan',
-  name: '航海者：大連邦（非公式）',
-  description: '【非公式】海を少なくした大きな一枚大陸。船は控えめの拡大版（12点）。',
+  name: '航海者：大カタン',
+  description: '中央の本島を、数字の無い小島群が取り囲む。小島は到達するまで産出しない（抜けている数値トークン）。都市は8つまで（18点）。',
   category: 'seafarers',
-  coords: SEAFARERS_COORDS,
-  build: buildFromLandMap(GREATER_CATAN_LAND),
-  victoryTarget: 12,
+  coords: HUGE_COORDS, // 51ヘックス（中央本島＋周囲の小島群）
+  build: buildGreaterCatan(GREATER_CATAN_LAND),
+  victoryTarget: 18,
+  recommendedPlayers: '4人', // 公式アプリ「大カタン(4)」＝4人用
+  rules: { newIslandBonusVp: 0, maxCities: 8, missingNumberTokens: true },
 };
 
 // ---- 騎士と商人(Cities & Knights) ----
@@ -925,6 +1133,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   seafarers_fourislands: seafarersFourIslands,
   seafarers_fogislands: seafarersFogIslands,
   seafarers_treasure: seafarersTreasure,
+  seafarers_oceania: seafarersOceania,
   seafarers_throughdesert: seafarersThroughDesert,
   seafarers_forgottentribe: seafarersForgottenTribe,
   seafarers_cloth: seafarersCloth,
@@ -976,11 +1185,18 @@ const SCENARIO_RULES: Record<ScenarioId, string[]> = {
   seafarers_fogislands: [
     '12点で勝ち。霧に包まれた海域を探索する盤。',
     '船・道・開拓地を霧へ伸ばすと晴れて、陸（資源1枚がもらえる）や海が現れる。',
+    '霧の中に金鉱の島（金タイル）が2つ眠っている。最初に見つけた人が有利。',
     '探索の報酬は資源。この盤では島ボーナスVPは無い。',
   ],
+  seafarers_oceania: [
+    '12点で勝ち。霧に覆われた海に始発の島が2つ。どちらの島からでも始められる。',
+    '船・道・開拓地を霧へ伸ばすと晴れて、新しい島（資源1枚がもらえる）や海が現れる。',
+    '霧の中に金鉱の島も眠る。探索の報酬は資源で、この盤では島ボーナスVPは無い。',
+  ],
   seafarers_throughdesert: [
-    '14点で勝ち。本島から広い大洋を渡って、砂漠を含む新天地へ。',
-    '新天地への初入植ごとに +2点（島ボーナス）。',
+    '14点で勝ち。中央の本土に砂漠帯（盗賊はそこから開始）。',
+    '広い砂漠が隔てる「北西地方」（岩山の豊かな地）や、海に点在する小島3つへ船で渡る。',
+    '北西地方や小島に初めて開拓地を建てるたびに +2点（島ボーナス）。',
   ],
   seafarers_forgottentribe: [
     '13点で勝ち。海に「勝利点・発展カード・港」のトークンが眠っている。',
@@ -1018,7 +1234,10 @@ const SCENARIO_RULES: Record<ScenarioId, string[]> = {
     '新しい島への初入植ごとに +2点（島ボーナス）。',
   ],
   seafarers_greatercatan: [
-    '【非公式】12点で勝ち。海を減らした大きな一枚大陸。船は控えめの拡大版。',
+    '18点で勝ち。中央の本島を、数字の無い小島群が取り囲む大きな盤。',
+    '小島は「抜けている数値トークン」。道・船・開拓地で小島タイルの端に到達すると、隠れていた数字が出現して産出を始める。',
+    '到達するまで小島は産出しない（早く船で渡って数字を出すのが鍵）。',
+    '都市は各プレイヤー8つまで建設できる（都市制限）。',
   ],
   cities_knights: [
     '13点で勝ち。商品・都市の発展・騎士・蛮族の襲来が加わる最も奥深い拡張。',
@@ -1056,9 +1275,15 @@ export function listScenarios(): ReadonlyArray<ScenarioInfo> {
 const VISIBLE_SCENARIO_IDS: ReadonlySet<ScenarioId> = new Set<ScenarioId>([
   'classic',
   'cities_knights',
+  // 航海者（公式アプリ準拠で画像から再構築済み）
   'seafarers_newshores',
   'seafarers_drought',
   'seafarers_treasure',
+  'seafarers_fourislands',
+  'seafarers_fogislands',
+  'seafarers_oceania',
+  'seafarers_throughdesert',
+  'seafarers_greatercatan',
 ]);
 /** 盤面選択UIに表示するシナリオ一覧（listScenarios のうち VISIBLE のみ）。 */
 export function listVisibleScenarios(): ReadonlyArray<ScenarioInfo> {

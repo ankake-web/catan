@@ -28,6 +28,7 @@ export function calcVP(state: GameState, playerId: PlayerId): number {
   if (player.hasLargestArmy) vp += VP_TABLE.largestArmy;
   vp += player.devCards.filter(c => c.type === 'victory_point').length * VP_TABLE.victoryPoint;
   vp += islandBonusVP(state, playerId);
+  vp += regionBonusVP(state, playerId); // 砂漠を越えて: 北西地方への初入植ボーナス
   vp += (state.tokenVp ?? {})[playerId] ?? 0; // 航海者 S5: 海辺VPトークン（各+1・公開）
   vp += Math.floor(((state.cloth ?? {})[playerId] ?? 0) / 2); // 航海者 S6: 織物2枚=1VP（公開）
   vp += player.defenderVP ?? 0; // 騎士と商人: 蛮族撃退の守護者VP
@@ -60,6 +61,11 @@ function islandBonusVP(state: GameState, playerId: PlayerId): number {
   return n;
 }
 
+/** 砂漠を越えて: 「北西地方」へ初入植したプレイヤーへの特別VP（地域ボーナス・公開情報）。 */
+function regionBonusVP(state: GameState, playerId: PlayerId): number {
+  return (state.regionBonus ?? []).includes(playerId) ? (state.regionBonusVp ?? 0) : 0;
+}
+
 /**
  * 他プレイヤーから見える「公開勝利点」を計算して返す。
  * 勝利点カードは非公開なので合算しない。
@@ -77,6 +83,7 @@ export function calcPublicVP(state: GameState, playerId: PlayerId): number {
   if (player.hasLargestArmy) vp += VP_TABLE.largestArmy;
   // 新島入植ボーナスは盤面で見える公開情報なので公開VPにも算入する。
   vp += islandBonusVP(state, playerId);
+  vp += regionBonusVP(state, playerId); // 砂漠を越えて: 北西地方ボーナスも公開
   vp += (state.tokenVp ?? {})[playerId] ?? 0; // 航海者 S5: 海辺VPトークンも公開情報
   vp += Math.floor(((state.cloth ?? {})[playerId] ?? 0) / 2); // 航海者 S6: 織物2枚=1VPも公開
   vp += player.defenderVP ?? 0; // 守護者VPも公開情報

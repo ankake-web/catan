@@ -36,6 +36,13 @@ export interface Tile {
   // 船/道/開拓地を隣接マスに置いて探索すると公開され、本来の type/number が確定する。
   // 公開された地形が陸なら、探索したプレイヤーが資源1枚を即獲得。
   fog?: { type: TileType; number: number | null };
+  // 航海者「大カタン」: 抜けている数値トークン。小島の地形タイルは最初は数字が無く(number=null)産出
+  // しない。プレイヤーが道/船/開拓地でそのタイルの端に到達すると、隠れていた数字(pendingNumber)が
+  // 出現して number に確定し、以後は通常どおり産出する。
+  pendingNumber?: number;
+  // 大カタン: 数値トークンの供給が尽きた後、小島へ数字を出すために本島から「抜かれた」タイル。
+  // number=null になり以後は産出しない（公式の「本島の数値トークンを持ち出す」）。
+  numberRemoved?: boolean;
 }
 
 // ---- 頂点（Vertex） ----
@@ -300,6 +307,14 @@ export interface ScenarioRules {
   wonders?: boolean;
   /** 海賊の島々モードを有効化するか（既定false）。S7=true（各自の要塞を攻略）。 */
   pirateIslands?: boolean;
+  /** 1プレイヤーが建設できる都市の上限（既定なし=コマ数まで）。大カタン=8。 */
+  maxCities?: number;
+  /** 抜けている数値トークン（既定false）。大カタン=true（小島は到達するまで数字なし＝産出しない）。 */
+  missingNumberTokens?: boolean;
+  /** 抜けている数値トークンの供給枚数（既定5）。これを使い切ると以後は本島の数字を抜いて配る。 */
+  numberTokenSupply?: number;
+  /** 特定の「地域」に初めて開拓地を建てたプレイヤーへの特別VP（既定0）。砂漠を越えて＝北西地方に2。 */
+  regionBonusVp?: number;
 }
 
 // 航海者 S5「忘れられた部族」/「宝島」: 海の辺に事前配置されるトークンの種別。
@@ -409,6 +424,13 @@ export interface GameState {
   setupAnywhere?: boolean;        // 初期配置をどの島にも置けるか（既定false。S2/New World=true）
   numberHexOnly?: boolean;        // 開拓地・盗賊を数字ヘックスのみに制限（既定false。S5=true）
   noIslandSettlement?: boolean;   // 小島（本島以外）に開拓地を建てられない（既定false。S6=true）
+  maxCities?: number;             // 1プレイヤーの都市建設上限（既定なし。大カタン=8）
+  // 大カタン「抜けている数値トークン」: 残りの供給枚数。0になると以後は本島の数字を抜いて小島へ配る。
+  numberTokenSupply?: number;
+  // 砂漠を越えて: 特別VP「地域ボーナス」。北西地方のタイル群＋VP値＋獲得済みプレイヤー。
+  bonusRegionTiles?: TileId[];    // この地域に隣接して初入植すると regionBonusVp を得る対象タイル
+  regionBonusVp?: number;         // 地域への初入植ボーナスVP（砂漠を越えて=2。既定0）
+  regionBonus?: PlayerId[];       // 地域ボーナスを既に得たプレイヤー（重複防止・公開情報）
   // 航海者 S5「忘れられた部族」: 海の辺に事前配置されたトークン（船で到達すると獲得）。辺ID→種別。
   edgeTokens?: Record<string, EdgeTokenKind>;
   // S5: 各プレイヤーが集めたVPトークン数（各+1VP・公開情報）。

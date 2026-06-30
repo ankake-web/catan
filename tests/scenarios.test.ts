@@ -26,10 +26,15 @@ describe('scenarios: registry', () => {
     // @ts-expect-error 故意に未知ID
     expect(getScenario('nope').id).toBe('classic');
   });
-  it('表示シナリオは基本/都市と騎士/新たな岸へ/干ばつ/宝島の5つだけ（他は実装は残すが非表示）', () => {
+  it('表示シナリオは基本/都市と騎士＋画像準拠で再構築した航海者7つ（他は実装は残すが非表示）', () => {
     const visible = listVisibleScenarios().map(s => s.id).sort();
     expect(visible).toEqual(
-      ['classic', 'cities_knights', 'seafarers_newshores', 'seafarers_drought', 'seafarers_treasure'].sort(),
+      [
+        'classic', 'cities_knights',
+        'seafarers_newshores', 'seafarers_drought', 'seafarers_treasure',
+        'seafarers_fourislands', 'seafarers_fogislands', 'seafarers_oceania',
+        'seafarers_throughdesert', 'seafarers_greatercatan',
+      ].sort(),
     );
     // 非表示シナリオも実装（getScenario）とフル一覧（listScenarios）には残る。
     expect(listScenarios().length).toBeGreaterThan(visible.length);
@@ -255,25 +260,39 @@ describe('scenarios: 航海者「群島」', () => {
   });
 });
 
-describe('scenarios: 航海者「砂漠を越えて」(公式S4)', () => {
+describe('scenarios: 航海者「砂漠を越えて」(公式S4・公式アプリ4人盤 photo/IMG_6412 実読)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_throughdesert');
-  it('公式S4の陸構成（砂漠3/森5/山4/丘3/牧草4/畑4/金2＝陸25）に一致・数字22', () => {
+  it('陸構成（山6/森3/牧草3/丘3/畑4/砂漠2・金なし＝陸21）に一致・数字19', () => {
     expect(s.victoryTarget).toBe(14);
-    expect(count(s.tiles, 'gold')).toBe(2);
-    expect(count(s.tiles, 'desert')).toBe(3);   // 大きな砂漠帯（本島1＋新天地2）
-    expect(count(s.tiles, 'forest')).toBe(5);
-    expect(count(s.tiles, 'mountain')).toBe(4);
+    expect(count(s.tiles, 'gold')).toBe(0);
+    expect(count(s.tiles, 'desert')).toBe(2);   // 砂漠帯
+    expect(count(s.tiles, 'forest')).toBe(3);
+    expect(count(s.tiles, 'mountain')).toBe(6);
     expect(count(s.tiles, 'hill')).toBe(3);
-    expect(count(s.tiles, 'pasture')).toBe(4);
+    expect(count(s.tiles, 'pasture')).toBe(3);
     expect(count(s.tiles, 'field')).toBe(4);
-    expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(25);
-    expect(Object.values(s.tiles).filter(t => t.number != null)).toHaveLength(22);
+    expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(21);
+    expect(Object.values(s.tiles).filter(t => t.number != null)).toHaveLength(19);
   });
-  it('本島(最大15)と新天地(10)が海で分かれる2島', () => {
+  it('大陸(本土＋砂漠帯＋陸続きの北西地方=15)＋海の小島3つ(各2)。砂漠帯が陸橋＝北西は本島扱い', () => {
     const repOf = computeIslandReps(s.tiles);
     const sizes = [...new Set(Object.values(repOf))]
       .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
-    expect(sizes).toEqual([15, 10]);
+    expect(sizes).toEqual([15, 2, 2, 2]); // 北西地方は砂漠帯で本土と陸続き＝最大成分に含まれる
+    expect(s.newIslandBonusVp).toBe(2);    // 小島は島ボーナス
+    expect(s.regionBonusVp).toBe(2);       // 北西地方は地域ボーナス
+    expect(s.bonusRegionTiles).toHaveLength(3);
+  });
+  it('北西地方(地域ボーナス対象)は最大成分(本島)に属する＝島ボーナスとは二重取りにならない', () => {
+    const repOf = computeIslandReps(s.tiles);
+    const sizeOf: Record<string, number> = {};
+    for (const r of Object.values(repOf)) sizeOf[r] = (sizeOf[r] ?? 0) + 1;
+    const mainRep = Object.entries(sizeOf).sort((a, b) => b[1] - a[1])[0]![0];
+    for (const tid of s.bonusRegionTiles!) expect(repOf[tid]).toBe(mainRep);
+    // 砂漠は陸橋として大陸に属し、盗賊はそこから開始。
+    const robber = Object.values(s.tiles).find(t => t.hasRobber)!;
+    expect(robber.type).toBe('desert');
+    expect(repOf[robber.id]).toBe(mainRep);
   });
 });
 
@@ -297,6 +316,43 @@ describe('scenarios: 航海者「新世界」(公式New World・制約付きラ�
     // 異なるシードでタイル配置が変わる（＝ランダム生成）。
     const sig = (s: typeof a) => Object.entries(s.tiles).map(([id, t]) => `${id}:${t.type}:${t.number}`).join('|');
     expect(sig(a)).not.toBe(sig(b));
+  });
+});
+
+describe('scenarios: 航海者「大カタン」(公式アプリ4人盤 photo/IMG_6420 実読・抜けている数値トークン)', () => {
+  const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_greatercatan');
+  it('51ヘックス・中央本島16＋数字なし小島5つ(各2)・18点・都市制限8', () => {
+    expect(Object.keys(s.tiles)).toHaveLength(51);
+    const repOf = computeIslandReps(s.tiles);
+    const sizes = [...new Set(Object.values(repOf))]
+      .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
+    expect(sizes).toEqual([16, 2, 2, 2, 2, 2]);
+    expect(s.victoryTarget).toBe(18);
+    expect(s.maxCities).toBe(8);
+    expect(s.newIslandBonusVp).toBe(0);
+  });
+  it('小島タイルは最初は数字なし(産出しない)＝pendingNumber を持つ。本島タイルは数字あり', () => {
+    const repOf = computeIslandReps(s.tiles);
+    const sizeOf: Record<string, number> = {};
+    for (const r of Object.values(repOf)) sizeOf[r] = (sizeOf[r] ?? 0) + 1;
+    const mainRep = Object.entries(sizeOf).sort((a, b) => b[1] - a[1])[0]![0];
+    for (const t of Object.values(s.tiles)) {
+      if (t.type === 'sea') continue;
+      if (repOf[t.id] === mainRep) {
+        // 本島: 砂漠以外は数字あり・pending なし
+        if (t.type !== 'desert') expect(t.number).not.toBeNull();
+        expect(t.pendingNumber).toBeUndefined();
+      } else {
+        // 小島: 数字なし・pendingNumber を保持（到達で出現）
+        expect(t.number).toBeNull();
+        expect(t.pendingNumber).toBeTypeOf('number');
+      }
+    }
+  });
+  it('砂漠は本島・盗賊は砂漠から開始。海賊は最も遠い海から', () => {
+    const robber = Object.values(s.tiles).find(t => t.hasRobber)!;
+    expect(robber.type).toBe('desert');
+    expect(s.tiles[s.piratePosition!]!.type).toBe('sea');
   });
 });
 
@@ -325,16 +381,47 @@ describe('航海者: 海賊コマは開始時から海ヘクスに居る（盗�
   });
 });
 
-describe('scenarios: 航海者「4つの島」(公式S2)', () => {
+describe('scenarios: 航海者「4つの島」(公式S2・公式アプリ4人盤 photo/IMG_6406 実読)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_fourislands');
-  it('37ヘックス footprint で、海に隔てた4島に分かれる', () => {
-    expect(Object.keys(s.tiles)).toHaveLength(37);
+  it('51ヘックス footprint で、海に隔てた大きさの異なる4島(8/7/4/4)に分かれる', () => {
+    expect(Object.keys(s.tiles)).toHaveLength(51);
     const repOf = computeIslandReps(s.tiles);
-    const islands = [...new Set(Object.values(repOf))];
-    expect(islands).toHaveLength(4);
-    // 各島がプレイ可能なサイズ（4タイル以上）
-    for (const r of islands) {
-      expect(Object.values(repOf).filter(x => x === r).length).toBeGreaterThanOrEqual(4);
+    const sizes = [...new Set(Object.values(repOf))]
+      .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
+    expect(sizes).toEqual([8, 7, 4, 4]);
+  });
+  it('砂漠なし・金なし・陸23（全マスに数字）。全体構成は丘4/山4/畑5/森5/牧草5', () => {
+    expect(count(s.tiles, 'desert')).toBe(0);
+    expect(count(s.tiles, 'gold')).toBe(0);
+    expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(23);
+    expect(Object.values(s.tiles).filter(t => t.number != null)).toHaveLength(23);
+    expect(count(s.tiles, 'hill')).toBe(4);
+    expect(count(s.tiles, 'mountain')).toBe(4);
+    expect(count(s.tiles, 'field')).toBe(5);
+    expect(count(s.tiles, 'forest')).toBe(5);
+    expect(count(s.tiles, 'pasture')).toBe(5);
+  });
+  it('[島ごと固定構成] 各島の資源の組み合わせは毎ゲーム固定（配置のみランダム）', () => {
+    // 各島の資源多重集合を「種別:枚数」を並べた署名にして、4島の署名集合が実読どおりか検証。
+    const sig = (c: Record<string, number>) =>
+      Object.entries(c).sort().map(([k, v]) => `${k}${v}`).join('/');
+    const expected = new Set([
+      sig({ hill: 1, mountain: 1, field: 2 }),                          // 島A(4)
+      sig({ forest: 4, pasture: 2, mountain: 1, field: 1 }),            // 島B(8)
+      sig({ mountain: 2, field: 2, pasture: 1, hill: 1, forest: 1 }),   // 島D(7)
+      sig({ hill: 2, pasture: 2 }),                                     // 島C(4)
+    ]);
+    for (const seed of [1, 2, 7, 13]) {
+      const st = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(seed), 'seafarers_fourislands');
+      const repOf = computeIslandReps(st.tiles);
+      const byIsland: Record<string, Record<string, number>> = {};
+      for (const t of Object.values(st.tiles)) {
+        if (t.type === 'sea') continue;
+        const rep = repOf[t.id]!;
+        (byIsland[rep] ??= {})[t.type] = (byIsland[rep]![t.type] ?? 0) + 1;
+      }
+      const got = new Set(Object.values(byIsland).map(sig));
+      expect(got).toEqual(expected);
     }
   });
   it('公式S2: 勝利点13・新島ボーナス+2・どの島にも初期配置可(setupAnywhere)', () => {
@@ -342,10 +429,51 @@ describe('scenarios: 航海者「4つの島」(公式S2)', () => {
     expect(s.newIslandBonusVp).toBe(2);
     expect(s.setupAnywhere).toBe(true);
   });
-  it('盤全体で全5資源が存在する（各自どこかの島から始められる）', () => {
-    const types = new Set(Object.values(s.tiles).map(t => t.type));
-    for (const t of ['forest', 'hill', 'pasture', 'field', 'mountain'] as const) {
-      expect(types.has(t)).toBe(true);
+  it('[公式準拠] 砂漠なし＝盗賊は初期盤外（7まで）・海賊は最遠の海から開始', () => {
+    expect(Object.values(s.tiles).some(t => t.hasRobber)).toBe(false);
+    expect(s.piratePosition).toBeDefined();
+    expect(s.tiles[s.piratePosition!]!.type).toBe('sea');
+  });
+});
+
+describe('scenarios: 航海者「オセアニア」(公式アプリ4人盤 photo/IMG_6409 実読)', () => {
+  const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_oceania');
+  it('51ヘックス・始発の2島(10/7)＋霧の海域。砂漠なし＝盗賊は盤外・海賊は海', () => {
+    expect(Object.keys(s.tiles)).toHaveLength(51);
+    const repOf = computeIslandReps(s.tiles); // 霧は海扱い＝島に数えない
+    const sizes = [...new Set(Object.values(repOf))]
+      .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
+    expect(sizes).toEqual([10, 7]);
+    expect(Object.values(s.tiles).some(t => t.type === 'desert')).toBe(false);
+    expect(Object.values(s.tiles).some(t => t.hasRobber)).toBe(false);
+    expect(s.tiles[s.piratePosition!]!.type).toBe('sea');
+  });
+  it('霧があり、霧の中に金鉱の島が2つ隠れている（公開まで見えない）', () => {
+    expect(Object.values(s.tiles).some(t => t.fog != null)).toBe(true);
+    expect(Object.values(s.tiles).filter(t => t.fog?.type === 'gold').length).toBe(2);
+    expect(Object.values(s.tiles).some(t => t.type === 'gold')).toBe(false);
+  });
+  it('公式: 勝利点12・島ボーナス無し(報酬は資源)・どの始発島にも初期配置可', () => {
+    expect(s.victoryTarget).toBe(12);
+    expect(s.newIslandBonusVp).toBe(0);
+    expect(s.setupAnywhere).toBe(true);
+  });
+  it('[島ごと固定構成] 2始発島の資源の組み合わせは毎ゲーム固定', () => {
+    const sig = (c: Record<string, number>) =>
+      Object.entries(c).sort().map(([k, v]) => `${k}${v}`).join('/');
+    const expected = new Set([
+      sig({ forest: 2, field: 2, pasture: 3, mountain: 2, hill: 1 }), // 北東(10)
+      sig({ forest: 2, mountain: 1, hill: 2, field: 1, pasture: 1 }), // 南西(7)
+    ]);
+    for (const seed of [1, 3, 9]) {
+      const st = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(seed), 'seafarers_oceania');
+      const repOf = computeIslandReps(st.tiles);
+      const byIsland: Record<string, Record<string, number>> = {};
+      for (const t of Object.values(st.tiles)) {
+        if (t.type === 'sea' || repOf[t.id] == null) continue;
+        (byIsland[repOf[t.id]!] ??= {})[t.type] = (byIsland[repOf[t.id]!]![t.type] ?? 0) + 1;
+      }
+      expect(new Set(Object.values(byIsland).map(sig))).toEqual(expected);
     }
   });
 });

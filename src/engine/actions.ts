@@ -356,6 +356,11 @@ export function canBuildCity(state: GameState, playerId: PlayerId, vertexId: Ver
   const player = state.players[playerId];
   if (!player) return false;
   if (player.remainingCities <= 0) return false;
+  // 大カタン: 都市建設の上限（既定なし）。すでに上限なら昇格不可。
+  if (state.maxCities != null) {
+    const cities = Object.values(state.vertices).filter(v => v.building?.type === 'city' && v.building.playerId === playerId).length;
+    if (cities >= state.maxCities) return false;
+  }
   if (!hasEnoughResources(player.hand, BUILD_COSTS.city)) return false;
 
   const vertex = state.vertices[vertexId];
