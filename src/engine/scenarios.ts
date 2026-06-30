@@ -685,7 +685,15 @@ function randomizeFogMap(fogMap: FogMap, rng: () => number): FogMap {
   const nums = shuffleWithRng(numbers, rng);
   const out: FogMap = {};
   for (const c of seaCells) out[c] = { type: 'sea', number: null };
-  landCells.forEach((c, i) => { out[c] = { type: types[i]!, number: nums[i]! }; });
+  // 数字は「海でも砂漠でもない陸セル（=資源地）」にだけ順番に配る。地形と数字を別シャッフル
+  // した結果、砂漠を含む霧（オアシス）で個数がズレ、資源地が number=undefined＝永久に産出しない
+  // バグを防ぐ（砂漠は number:null を維持し、幽霊数字も付けない）。
+  let ni = 0;
+  landCells.forEach((c, i) => {
+    const type = types[i]!;
+    const number = type === 'desert' ? null : (nums[ni++] ?? null);
+    out[c] = { type, number };
+  });
   return out;
 }
 
