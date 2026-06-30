@@ -104,6 +104,25 @@ export function buildDevDeck(rng: () => number = Math.random): DevCard[] {
  * 騎士と商人: 蛮族解決(applyEventDie)後の「生産 or 7の捨て札/盗賊」への遷移。
  * ROLL_DICE 本体と、都市格下げ(CITY_DOWNGRADE)解決後の再開の両方から呼ぶ（重複排除＋一貫性）。
  */
+/**
+ * 航海者・金タイル産出: その数字で金タイルから産出を受けるプレイヤーへ任意資源の選択(GOLD)を
+ * 要求する。全体の選択枚数がバンク総在庫を超えないよう playerOrder 順に頭打ちして手詰まりを防ぐ。
+ * 金産出が無ければ TRADE_BUILD のまま返す。基本ゲーム・騎士と商人の双方の生産後に通すことで、
+ * C&K×航海者コンボ（金タイル入りの盤）でも金が産出するようにする。
+ */
+function applyGoldChoicePhase(next: GameState, total: number): GameState {
+  const rawPicks = computeGoldPicks(next, total);
+  let bankLeft = RESOURCE_TYPES.reduce((s, r) => s + next.bank[r], 0);
+  const goldPicks: Record<string, number> = {};
+  for (const pid of next.playerOrder) {
+    const capped = Math.min(rawPicks[pid] ?? 0, bankLeft);
+    if (capped > 0) { goldPicks[pid] = capped; bankLeft -= capped; }
+  }
+  return Object.keys(goldPicks).length > 0
+    ? { ...next, turnPhase: 'GOLD', pendingGoldChoice: goldPicks }
+    : { ...next, turnPhase: 'TRADE_BUILD' };
+}
+
 function resolveCkRollOutcome(next: GameState, total: number): GameState {
   if (total === 7) {
     const needsDiscard = next.playerOrder.some(p => discardCount(next, p) > 0); // 資源＋商品で判定
@@ -112,7 +131,10 @@ function resolveCkRollOutcome(next: GameState, total: number): GameState {
     const afterDiscard = robberActive ? 'ROBBER' : 'TRADE_BUILD';
     return { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : afterDiscard };
   }
-  return distributeCkProduction({ ...next, turnPhase: 'TRADE_BUILD' }, total);
+  // C&K×航海者: 資源＋商品の生産後に金タイル産出（任意資源の選択）も流す。isCk の早期 return で
+  // 金処理(GOLD)へ到達しなかったため、コンボ盤の金タイルが死にメカになっていたバグを修正。
+  const produced = distributeCkProduction({ ...next, turnPhase: 'TRADE_BUILD' }, total);
+  return applyGoldChoicePhase(produced, total);
 }
 
 /**
@@ -185,19 +207,8 @@ export function applyAction(
         // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
         next = produceCloth(next, total);
         // 航海者: 金タイル産出があれば、任意資源の選択待ち(GOLD)へ。無ければ通常どおり TRADE_BUILD。
-        // 複数人が同時に owed になりうるため、選択枚数は「逐次的に減るバンク総在庫」で頭打ちにする。
-        // 全体総和が在庫を超えないよう playerOrder 順に bankLeft から差し引くことで、どの順に
-        // CHOOSE_GOLD を解決しても最後の人まで必ず owed 枚を取れる（在庫切れの手詰まり=ソフトロック回避）。
-        const rawPicks = computeGoldPicks(next, total);
-        let bankLeft = RESOURCE_TYPES.reduce((s, r) => s + next.bank[r], 0);
-        const goldPicks: Record<string, number> = {};
-        for (const pid of next.playerOrder) {
-          const capped = Math.min(rawPicks[pid] ?? 0, bankLeft);
-          if (capped > 0) { goldPicks[pid] = capped; bankLeft -= capped; }
-        }
-        next = Object.keys(goldPicks).length > 0
-          ? { ...next, turnPhase: 'GOLD', pendingGoldChoice: goldPicks }
-          : { ...next, turnPhase: 'TRADE_BUILD' };
+        // 選択枚数のバンク頭打ち（ソフトロック回避）は applyGoldChoicePhase に集約（CK経路と共通）。
+        next = applyGoldChoicePhase(next, total);
       }
 
       next = checkClothEnd(next); // S6: 織物生産後、5村供給切れなら終了（無い盤では no-op）
