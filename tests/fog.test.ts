@@ -67,6 +67,32 @@ describe('S3 霧の島: 霧ヘックスは海として扱われ、探索で公�
     expect(total(next.players.player1!.hand)).toBe(total(s.players.player1!.hand));
   });
 
+  // バグ回帰: randomizeFogMap は金の赤数字・赤6/8隣接を無検査だった（霧の金が約44%で赤数字）。
+  //   randomizeLandMapCore と同じ制約をリトライで満たすよう修正した。
+  it('霧の金タイルに赤数字(6/8)は付かず、赤6/8は霧セル内で隣接しない（多シード）', () => {
+    const NB: ReadonlyArray<readonly [number, number]> = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+    const isRed = (n: number | null | undefined): boolean => n === 6 || n === 8;
+    for (const id of ['seafarers_fogislands', 'seafarers_oceania', 'seafarers_treasure', 'ck_seafarers_oceania'] as const) {
+      for (let seed = 1; seed <= 25; seed++) {
+        const g = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(seed), id);
+        const byCoord: Record<string, { type: string; number: number | null }> = {};
+        for (const t of Object.values(g.tiles)) {
+          if (!t.fog) continue;
+          byCoord[`${t.coord.q},${t.coord.r}`] = { type: t.fog.type, number: t.fog.number };
+        }
+        for (const [key, cell] of Object.entries(byCoord)) {
+          if (cell.type === 'gold') expect(isRed(cell.number), `${id} seed ${seed}: 金に赤数字`).toBe(false);
+          if (!isRed(cell.number)) continue;
+          const [q, r] = key.split(',').map(Number) as [number, number];
+          for (const [dq, dr] of NB) {
+            const nb = byCoord[`${q + dq},${r + dr}`];
+            expect(isRed(nb?.number), `${id} seed ${seed}: 赤6/8が隣接`).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
   it('BUILD_SHIP で隣接する霧ヘックスが公開される（探索のエンドツーエンド）', () => {
     const g = fog();
     const fogLand = Object.values(g.tiles).find(t => t.fog && t.fog.type !== 'sea')!;

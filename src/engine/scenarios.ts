@@ -670,6 +670,8 @@ function buildThroughDesert(landMap: LandMap, bonusRegionTiles: string[]): (geo:
 }
 
 // 霧マップ（fogMap）の中身を毎ゲームランダム化（どのセルが陸/海か・地形・数字をシャッフル。枚数不変）。
+// randomizeLandMapCore と同じ制約をリトライで満たす: (a) 赤6/8 を辺で隣接させない（霧セル内で判定）、
+// (b) 金タイルに赤数字を置かない。霧の金が約44%で赤数字になる無検査バグへの対処。
 function randomizeFogMap(fogMap: FogMap, rng: () => number): FogMap {
   const cells = Object.keys(fogMap);
   const landTypes = cells.filter(c => fogMap[c]!.type !== 'sea').map(c => fogMap[c]!.type);
@@ -678,23 +680,42 @@ function randomizeFogMap(fogMap: FogMap, rng: () => number): FogMap {
     .map(c => fogMap[c]!.number)
     .filter((n): n is number => n != null);
   const seaCount = cells.length - landTypes.length;
-  const shuffled = shuffleWithRng(cells, rng);
-  const seaCells = new Set(shuffled.slice(0, seaCount));
-  const landCells = shuffled.slice(seaCount);
-  const types = shuffleWithRng(landTypes, rng);
-  const nums = shuffleWithRng(numbers, rng);
-  const out: FogMap = {};
-  for (const c of seaCells) out[c] = { type: 'sea', number: null };
-  // 数字は「海でも砂漠でもない陸セル（=資源地）」にだけ順番に配る。地形と数字を別シャッフル
-  // した結果、砂漠を含む霧（オアシス）で個数がズレ、資源地が number=undefined＝永久に産出しない
-  // バグを防ぐ（砂漠は number:null を維持し、幽霊数字も付けない）。
-  let ni = 0;
-  landCells.forEach((c, i) => {
-    const type = types[i]!;
-    const number = type === 'desert' ? null : (nums[ni++] ?? null);
-    out[c] = { type, number };
-  });
-  return out;
+
+  let last: FogMap | null = null;
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const shuffled = shuffleWithRng(cells, rng);
+    const seaCells = new Set(shuffled.slice(0, seaCount));
+    const landCells = shuffled.slice(seaCount);
+    const types = shuffleWithRng(landTypes, rng);
+    const nums = shuffleWithRng(numbers, rng);
+    const out: FogMap = {};
+    for (const c of seaCells) out[c] = { type: 'sea', number: null };
+    // 数字は「海でも砂漠でもない陸セル（=資源地）」にだけ順番に配る。地形と数字を別シャッフル
+    // した結果、砂漠を含む霧（オアシス）で個数がズレ、資源地が number=undefined＝永久に産出しない
+    // バグを防ぐ（砂漠は number:null を維持し、幽霊数字も付けない）。
+    let ni = 0;
+    landCells.forEach((c, i) => {
+      const type = types[i]!;
+      const number = type === 'desert' ? null : (nums[ni++] ?? null);
+      out[c] = { type, number };
+    });
+    last = out;
+    // 制約(b) 金タイルに赤数字(6/8)を置かない。
+    if (landCells.some(c => out[c]!.type === 'gold' && isRedNum(out[c]!.number))) continue;
+    // 制約(a) 赤6/8 が辺で隣接しない（霧セル同士で判定。海/砂漠は数字なしで非対象）。
+    let ok = true;
+    for (const c of cells) {
+      if (!isRedNum(out[c]?.number)) continue;
+      const [q, r] = c.split(',').map(Number) as [number, number];
+      for (const [dq, dr] of NW_NB) {
+        if (isRedNum(out[`${q + dq},${r + dr}`]?.number)) { ok = false; break; }
+      }
+      if (!ok) break;
+    }
+    if (!ok) continue;
+    return out;
+  }
+  return last!; // フォールバック（400回で制約を満たせなかった最後の配置）
 }
 
 const seafarersThroughDesert: Scenario = {
