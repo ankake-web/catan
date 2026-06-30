@@ -49,8 +49,12 @@ function wantsRoad(state: GameState, mode: BuildMode): boolean {
   return state.phase === 'MAIN' && state.turnPhase === 'TRADE_BUILD'
     && (mode === 'road' || state.roadBuildingRoadsRemaining > 0);
 }
-// 航海者: 船の配置を受け付けるか（MAIN の船モード、または街道建設カード使用中＝道2/船2/道1+船1）。
+// 航海者: 船の配置を受け付けるか。
+//   - 初期配置(SETUP)の2個目: 海岸の開拓地なら道の代わりに船を置ける（公式航海者ルール）。
+//   - MAIN の船モード、または街道建設カード使用中（道2/船2/道1+船1）。
 function wantsShip(state: GameState, mode: BuildMode): boolean {
+  const isSetup = state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD';
+  if (isSetup) return state.setupSubPhase === 'PLACE_ROAD';
   return state.phase === 'MAIN' && state.turnPhase === 'TRADE_BUILD'
     && (mode === 'ship' || state.roadBuildingRoadsRemaining > 0);
 }
@@ -324,6 +328,16 @@ export function nearestChaseRobberVertexId(
 }
 
 /** 点(x,y)に最も近い合法な船の辺IDを maxDist 内で返す（航海者）。なければ null。 */
+// 辺(線分)とタップ点の距離²。道/船の候補が重なる場面で近い方を選ぶのに使う。
+function edgeDist2(state: GameState, edgeId: string, x: number, y: number): number {
+  const e = state.edges[edgeId];
+  if (!e) return Infinity;
+  const a = state.vertices[e.vertexIds[0]];
+  const b = state.vertices[e.vertexIds[1]];
+  if (!a || !b) return Infinity;
+  return distToSegmentSq(x, y, a.pixel.x, a.pixel.y, b.pixel.x, b.pixel.y);
+}
+
 export function nearestValidShipEdgeId(
   state: GameState, pid: PlayerId, mode: BuildMode, x: number, y: number, maxDist = EDGE_TAP_RADIUS,
 ): string | null {
@@ -630,8 +644,18 @@ export function attachBoardEvents(
       const vid = nearestValidVertexId(state, pid, mode, pt.x, pt.y);
       if (vid) { placeVertex(vid, state, pid, mode, setUIPhase, dispatch); return; }
       const eid = nearestValidEdgeId(state, pid, mode, pt.x, pt.y);
-      if (eid) { placeEdge(eid, state, pid, mode, setUIPhase, dispatch); return; }
       const sid = nearestValidShipEdgeId(state, pid, mode, pt.x, pt.y);
+      // 道と船の両方が候補になる場面（航海者の初期配置＝海岸の開拓地／街道建設カード）では、
+      // タップ位置に近い方を選ぶ（道を先に決め打ちすると沿岸で船を選べない）。
+      if (eid && sid) {
+        if (edgeDist2(state, sid, pt.x, pt.y) < edgeDist2(state, eid, pt.x, pt.y)) {
+          placeShipEdge(sid, state, pid, setUIPhase, dispatch);
+        } else {
+          placeEdge(eid, state, pid, mode, setUIPhase, dispatch);
+        }
+        return;
+      }
+      if (eid) { placeEdge(eid, state, pid, mode, setUIPhase, dispatch); return; }
       if (sid) { placeShipEdge(sid, state, pid, setUIPhase, dispatch); return; }
     }
 

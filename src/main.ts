@@ -632,6 +632,10 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
       opts.validEdgeIds = new Set(
         Object.keys(state.edges).filter(eid => canBuildRoad(state, pid, eid)),
       );
+      // 航海者: 海岸の開拓地は道の代わりに船も置ける → 海上候補も光らせて道/船を選ばせる。
+      opts.validShipEdgeIds = new Set(
+        Object.keys(state.edges).filter(eid => canBuildShip(state, pid, eid)),
+      );
     }
     return opts;
   }
@@ -1072,7 +1076,12 @@ function computeSheetStatus(): { text: string; alert: boolean } {
   }
   if (viewer && cur === viewer) {
     if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
-      return { text: state.setupSubPhase === 'PLACE_ROAD' ? '🛤 道を配置' : '🏠 開拓地を配置', alert: false };
+      if (state.setupSubPhase === 'PLACE_ROAD') {
+        // 航海者: 海岸の開拓地なら道の代わりに船を置ける → その場合は選択を促す。
+        const canShip = Object.keys(state.edges).some(eid => canBuildShip(state, cur, eid));
+        return { text: canShip ? '🛤 道 か ⛵ 船 を配置（海岸はどちらでもOK）' : '🛤 道を配置', alert: false };
+      }
+      return { text: '🏠 開拓地を配置', alert: false };
     }
     if (state.turnPhase === 'PRE_ROLL') return { text: '🎲 ダイス', alert: false };
     if (state.turnPhase === 'ROBBER')   return { text: '🦹 盗賊を移動するタイルをタップ', alert: true };
@@ -1370,8 +1379,9 @@ function updateGameNav(): void {
     dd.appendChild(homeBtn);
   }
 
-  // 初心者モード: 「🔰 遊び方」ボタン（目的・手番の流れ・建設コストの早見表）。
-  if (beginnerMode && state.phase !== 'GAME_OVER') {
+  // 「🔰 遊び方」ボタン（目的・手番の流れ・建設コスト＋このゲーム固有ルールの早見表）。
+  // 初心者モードに限らず常時表示（シナリオ別の詳細ルールを誰でも確認できるように）。
+  if (state.phase !== 'GAME_OVER') {
     const helpBtn = document.createElement('button');
     helpBtn.className = 'btn-nav beginner-help-nav-btn';
     helpBtn.textContent = '🔰 遊び方';

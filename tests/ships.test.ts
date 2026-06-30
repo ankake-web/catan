@@ -103,6 +103,44 @@ describe('航海者: 船の建設', () => {
   });
 });
 
+describe('航海者: 初期配置（SETUP）で海岸の開拓地は道か船を選べる', () => {
+  // 1軒目を沿岸頂点に置いた直後（PLACE_ROAD）に、anchor隣接の陸辺=道・海辺=船の両方が合法になる。
+  function setupAfterCoastSettlement(): { s: GameState; vid: VertexId } {
+    const g = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
+    const vid = Object.values(g.vertices).find(v => {
+      const land = isLandVertex(v, g.tiles);
+      const hasSea = v.adjacentEdgeIds.some(eid => isSeaEdge(g.edges[eid]!, g.vertices, g.tiles));
+      const hasLand = v.adjacentEdgeIds.some(eid => isLandEdge(g.edges[eid]!, g.vertices, g.tiles));
+      return land && hasSea && hasLand && canBuildSettlement(g, 'player1', v.id);
+    })!.id as VertexId;
+    const s = applyAction(g, { type: 'BUILD_SETTLEMENT', vertexId: vid });
+    return { s, vid };
+  }
+
+  it('沿岸の開拓地の隣接辺は、陸辺=道・海辺=船 の両方が合法（setupRoadAnchor接続）', () => {
+    const { s, vid } = setupAfterCoastSettlement();
+    expect(s.setupSubPhase).toBe('PLACE_ROAD');
+    expect(s.setupRoadAnchor).toBe(vid);
+    const landEdge = s.vertices[vid]!.adjacentEdgeIds.find(eid => isLandEdge(s.edges[eid]!, s.vertices, s.tiles)) as EdgeId;
+    const seaEdge = s.vertices[vid]!.adjacentEdgeIds.find(eid => isSeaEdge(s.edges[eid]!, s.vertices, s.tiles)) as EdgeId;
+    expect(canBuildRoad(s, 'player1', landEdge)).toBe(true);
+    expect(canBuildShip(s, 'player1', seaEdge)).toBe(true);
+  });
+
+  it('初期配置の2個目に船を選ぶと船が置かれ、セットアップが次へ進む（無料）', () => {
+    const { s, vid } = setupAfterCoastSettlement();
+    const seaEdge = s.vertices[vid]!.adjacentEdgeIds.find(eid => isSeaEdge(s.edges[eid]!, s.vertices, s.tiles)) as EdgeId;
+    const next = applyAction(s, { type: 'BUILD_SHIP', edgeId: seaEdge });
+    expect(next.edges[seaEdge]!.ship?.playerId).toBe('player1');
+    expect(next.players.player1!.remainingShips).toBe((s.players.player1!.remainingShips ?? 15) - 1);
+    // 無料（手札は初期配置では消費しない）。
+    expect(next.players.player1!.hand).toEqual(s.players.player1!.hand);
+    // anchor が解除されセットアップが進行（PLACE_SETTLEMENT へ戻る or 次プレイヤー）。
+    expect(next.setupRoadAnchor ?? null).toBeNull();
+    expect(next.setupSubPhase).toBe('PLACE_SETTLEMENT');
+  });
+});
+
 describe('航海者: 基本ゲーム（classic）は船の影響を受けない', () => {
   it('classic では海辺が無く canBuildShip は常に false', () => {
     const g = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(3), 'classic');

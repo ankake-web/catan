@@ -37,6 +37,27 @@ describe('openBeginnerHelp（遊び方ヘルプ）', () => {
     expect(text).toContain('金タイル');
   });
 
+  it('このゲーム固有のルールセクションを出す（シナリオごとに分かれる）', () => {
+    openBeginnerHelp(state('seafarers_newshores'));
+    const t1 = document.querySelector('.beginner-help-overlay')!.textContent || '';
+    expect(t1).toContain('このゲーム「航海者：新たな海岸を目指して」のルール');
+    expect(t1).toContain('牧草地4/森3/畑3/山2/丘2'); // 新たな岸への固有構成
+    expect(t1).toContain('海と船（航海者の共通ルール）'); // 海ありの共通セクション
+    document.querySelector('.beginner-help-overlay')?.remove();
+
+    openBeginnerHelp(state('seafarers_treasure'));
+    const t2 = document.querySelector('.beginner-help-overlay')!.textContent || '';
+    expect(t2).toContain('このゲーム「航海者：宝島」のルール');
+    expect(t2).toContain('財宝'); // 宝島固有
+    document.querySelector('.beginner-help-overlay')?.remove();
+
+    // 海なし（classic）では海共通セクションは出ない。
+    openBeginnerHelp(state('classic'));
+    const t3 = document.querySelector('.beginner-help-overlay')!.textContent || '';
+    expect(t3).toContain('このゲーム「基本」のルール');
+    expect(t3).not.toContain('海と船（航海者の共通ルール）');
+  });
+
   it('多重に開いても overlay は1つ', () => {
     openBeginnerHelp(state('classic'));
     openBeginnerHelp(state('classic'));

@@ -19,7 +19,8 @@ const base = (): GameState =>
 // 海タイル T と、その隣接辺 E に player2 の船を置いた ROBBER 状態を返す。
 function pirateSetup(): { s: GameState; seaTile: TileId; shipEdge: EdgeId } {
   const g = base();
-  const seaTile = Object.values(g.tiles).find(t => t.type === 'sea' && (g.tileToEdges[t.id] ?? []).length > 0)!.id;
+  // 初期海賊位置（最も遠い海）とは別の海タイルを選ぶ（MOVE_PIRATE は別タイルへの移動が必須）。
+  const seaTile = Object.values(g.tiles).find(t => t.type === 'sea' && t.id !== g.piratePosition && (g.tileToEdges[t.id] ?? []).length > 0)!.id;
   const shipEdge = (g.tileToEdges[seaTile] ?? [])[0]! as EdgeId;
   const s: GameState = {
     ...g,

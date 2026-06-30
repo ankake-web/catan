@@ -47,7 +47,8 @@ export function createInitialGameState(
   const geo = buildBoardGeometry(scenario.coords());
   const { tiles, harbors, edgeTokens, villages, fortressVertices, fleetPath } = scenario.build(geo, rng);
 
-  // 航海者: 海賊コマは開始時から海ヘクスに置く（盗賊は砂漠、海賊は海＝1体ずつ・公式準拠）。
+  // 航海者: 海賊コマは開始時から海ヘクスに置く。公式準拠で「盤の隅＝できるだけ遠い海」へ初期配置し、
+  //   開始直後は誰の船にも近づかないようにする（盗賊は砂漠の盤、砂漠なし盤では7まで盤外）。
   //   ※S7 海賊の島々（独自の海賊艦隊）と S8 七不思議（海賊不使用）では通常の海賊コマは置かない。
   const usesPirate = Object.values(tiles).some(t => t.type === 'sea')
     && !scenario.rules?.pirateIslands && !scenario.rules?.wonders;
@@ -57,7 +58,7 @@ export function createInitialGameState(
         .sort((a, b) => {
           const da = a.coord.q * a.coord.q + a.coord.r * a.coord.r;
           const db = b.coord.q * b.coord.q + b.coord.r * b.coord.r;
-          return da !== db ? da - db : (a.id < b.id ? -1 : 1); // 最も中央寄りの海ヘクス（決定論）
+          return da !== db ? db - da : (a.id < b.id ? -1 : 1); // 最も外周（中央から遠い）海ヘクス（決定論）
         })[0]?.id
     : undefined;
 
@@ -128,6 +129,7 @@ export function createInitialGameState(
     longestRoadHolder: null,
     largestArmyHolder: null,
     ...(scenario.victoryTarget != null ? { victoryTarget: scenario.victoryTarget } : {}),
+    scenarioId,
     // 航海者: シナリオ固有ルールを配線（未指定フィールドは GameState 既定にフォールバック）。
     ...(scenario.rules?.newIslandBonusVp != null ? { newIslandBonusVp: scenario.rules.newIslandBonusVp } : {}),
     ...(scenario.rules?.startingSettlements != null ? { startingSettlements: scenario.rules.startingSettlements } : {}),

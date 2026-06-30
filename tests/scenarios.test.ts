@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createInitialGameState } from '../src/engine/createState';
 import type { PlayerSpec } from '../src/engine/createState';
-import { getScenario, listScenarios } from '../src/engine/scenarios';
+import { getScenario, listScenarios, getScenarioRules } from '../src/engine/scenarios';
 import { computeIslandReps } from '../src/engine/islands';
 import { getAllTileCoords } from '../src/engine/board';
 import { createRng } from '../src/engine/setup';
@@ -26,6 +26,18 @@ describe('scenarios: registry', () => {
     // @ts-expect-error 故意に未知ID
     expect(getScenario('nope').id).toBe('classic');
   });
+  it('全シナリオに「このゲーム固有ルール」テキストがある／state に scenarioId が入る', () => {
+    for (const { id } of listScenarios()) {
+      const rules = getScenarioRules(id);
+      expect(Array.isArray(rules)).toBe(true);
+      expect(rules.length).toBeGreaterThan(0);
+    }
+    // 未知IDは基本ルールへフォールバック。
+    expect(getScenarioRules('nope')).toEqual(getScenarioRules('classic'));
+    // createInitialGameState が scenarioId を state に乗せる（遊び方の固有ルール表示に使う）。
+    const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
+    expect(s.scenarioId).toBe('seafarers_newshores');
+  });
 });
 
 describe('scenarios: classic は従来どおり（非破壊）', () => {
@@ -49,19 +61,41 @@ describe('scenarios: classic は従来どおり（非破壊）', () => {
 describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
 
-  it('公式アプリ4人盤(51ヘックス)の陸構成（丘4/森4/牧草5/畑4/山4/金2/砂漠0＝陸23）に一致・数字23', () => {
+  it('公式アプリ4人盤(51ヘックス)の陸構成（丘4/森4/牧草4/畑4/山4/金2/砂漠0＝陸22）に一致・数字22', () => {
     expect(Object.keys(s.tiles)).toHaveLength(51);
-    expect(count(s.tiles, 'sea')).toBe(28);
+    expect(count(s.tiles, 'sea')).toBe(29);
     expect(count(s.tiles, 'gold')).toBe(2);
     expect(count(s.tiles, 'desert')).toBe(0);   // 公式S1は砂漠なし
     expect(count(s.tiles, 'hill')).toBe(4);
     expect(count(s.tiles, 'forest')).toBe(4);
-    expect(count(s.tiles, 'pasture')).toBe(5);
+    expect(count(s.tiles, 'pasture')).toBe(4);
     expect(count(s.tiles, 'field')).toBe(4);
     expect(count(s.tiles, 'mountain')).toBe(4);
-    // 陸23（金2含む）・数字トークン23（砂漠が無く全陸に数字）
-    expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(23);
-    expect(Object.values(s.tiles).filter(t => t.number != null)).toHaveLength(23);
+    // 陸22（金2含む）・数字トークン22（砂漠が無く全陸に数字）
+    expect(Object.values(s.tiles).filter(t => t.type !== 'sea')).toHaveLength(22);
+    expect(Object.values(s.tiles).filter(t => t.number != null)).toHaveLength(22);
+  });
+
+  it('[島ごと固定構成] 本島(14)=牧草4/森3/畑3/山2/丘2、小島(8)=金2/丘2/森1/山2/畑1（配置のみ毎ゲームランダム）', () => {
+    for (const seed of [1, 2, 7, 13]) {
+      const st = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(seed), 'seafarers_newshores');
+      const repOf = computeIslandReps(st.tiles);
+      const sizeOf: Record<string, number> = {};
+      for (const r of Object.values(repOf)) sizeOf[r] = (sizeOf[r] ?? 0) + 1;
+      const mainRep = Object.entries(sizeOf).sort((a, b) => b[1] - a[1])[0]![0];
+      const tally = (pred: (id: string) => boolean) => {
+        const c: Record<string, number> = {};
+        for (const t of Object.values(st.tiles)) {
+          if (t.type === 'sea' || !pred(t.id)) continue;
+          c[t.type] = (c[t.type] ?? 0) + 1;
+        }
+        return c;
+      };
+      const main = tally(id => repOf[id] === mainRep);
+      const small = tally(id => repOf[id] != null && repOf[id] !== mainRep);
+      expect(main).toEqual({ pasture: 4, forest: 3, field: 3, mountain: 2, hill: 2 });
+      expect(small).toEqual({ gold: 2, hill: 2, forest: 1, mountain: 2, field: 1 });
+    }
   });
 
   it('公式S1: 勝利点は14・新島初入植ボーナスは+2', () => {
@@ -69,11 +103,11 @@ describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', (
     expect(s.newIslandBonusVp ?? 2).toBe(2);
   });
 
-  it('中央本島15＋四方の小島4つ(各2)に分かれる（公式アプリ4人盤のトポロジ）', () => {
+  it('中央本島14＋四方の小島4つ(各2)に分かれる（公式アプリ4人盤のトポロジ）', () => {
     const repOf = computeIslandReps(s.tiles);
     const sizes = [...new Set(Object.values(repOf))]
       .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
-    expect(sizes).toEqual([15, 2, 2, 2, 2]);
+    expect(sizes).toEqual([14, 2, 2, 2, 2]);
   });
 
   it('金は離れ小島（本島以外の小島）にのみ出る（本島には置かない＝毎ゲームランダム配置）', () => {
@@ -99,16 +133,17 @@ describe('scenarios: 航海者「新たな海岸を目指して」(公式S1)', (
     }
   });
 
-  it('盗賊は本島(最大の島)の資源タイルから開始（公式S1は砂漠なし）', () => {
-    const robber = Object.values(s.tiles).find(t => t.hasRobber)!;
-    expect(robber.type).not.toBe('sea');
-    expect(robber.type).not.toBe('desert');         // 公式S1は砂漠なし
-    // 盗賊は最大連結成分（本島）の上に置かれる（小島ではない）。
-    const repOf = computeIslandReps(s.tiles);
-    const sizeOf: Record<string, number> = {};
-    for (const r of Object.values(repOf)) sizeOf[r] = (sizeOf[r] ?? 0) + 1;
-    const mainRep = Object.entries(sizeOf).sort((a, b) => b[1] - a[1])[0]![0];
-    expect(repOf[robber.id]).toBe(mainRep);
+  it('[公式準拠] 砂漠なし盤は盗賊を初期に置かない（7が出るまで盤外）。海賊は最も遠い海から開始', () => {
+    // 盗賊は盤上に存在しない（どのタイルにも hasRobber が無い）。
+    expect(Object.values(s.tiles).some(t => t.hasRobber)).toBe(false);
+    // 海賊は海タイルに居る。
+    expect(s.piratePosition).toBeDefined();
+    expect(s.tiles[s.piratePosition!]!.type).toBe('sea');
+    // 海賊の初期位置は「最も中央から遠い海ヘクス」（決定論）。
+    const seas = Object.values(s.tiles).filter(t => t.type === 'sea');
+    const dist = (t: typeof seas[number]) => t.coord.q * t.coord.q + t.coord.r * t.coord.r;
+    const maxDist = Math.max(...seas.map(dist));
+    expect(dist(s.tiles[s.piratePosition!]!)).toBe(maxDist);
   });
 
   it('盤面が viewBox に収まるよう、基本盤より頂点/辺が多い（大きい盤）', () => {
@@ -257,11 +292,17 @@ describe('scenarios: 航海者「新世界」(公式New World・制約付きラ�
 });
 
 describe('航海者: 海賊コマは開始時から海ヘクスに居る（盗賊＋海賊が1体ずつ）', () => {
-  it('新たな海岸: 開始時に piratePosition が海ヘクス、盗賊は砂漠', () => {
+  it('新たな海岸(砂漠なし): piratePosition が海ヘクス、盗賊は7まで盤外', () => {
     const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_newshores');
     expect(s.piratePosition).toBeTruthy();
     expect(s.tiles[s.piratePosition!]!.type).toBe('sea');
-    expect(Object.values(s.tiles).some(t => t.hasRobber)).toBe(true); // 盗賊も盤上
+    expect(Object.values(s.tiles).some(t => t.hasRobber)).toBe(false); // 砂漠なし＝盗賊は初期は盤外
+  });
+  it('干ばつ(砂漠あり): 開始時に盗賊は砂漠タイルに居る', () => {
+    const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_drought');
+    const robber = Object.values(s.tiles).find(t => t.hasRobber);
+    expect(robber).toBeTruthy();
+    expect(robber!.type).toBe('desert');
   });
   it('基本ゲームには海賊コマはいない（海が無い）', () => {
     const c = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'classic');

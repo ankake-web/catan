@@ -388,6 +388,10 @@ export interface GameState {
   // 勝利に必要な勝利点。シナリオ別（基本=10／航海者の大きい盤=13）。未設定は VP_TABLE.target。
   victoryTarget?: number;
 
+  // 現在プレイ中のシナリオID（遊び方オーバーレイの「このゲーム固有ルール」表示等に使う）。
+  // 値は ScenarioId（engine/scenarios.ts）。循環import回避のため型は string。
+  scenarioId?: string;
+
   // 航海者拡張: 「新しい島への最初の入植」ボーナス。島の代表タイルID → その島で自分の初入植
   // ボーナスを獲得済みのプレイヤー一覧。各プレイヤーが「自分が初めてその島へ建てた」とき +newIslandBonusVp
   // を得る（公式: 他人が先に建てていても各自獲得可。よって1島に複数人が載りうる）。
