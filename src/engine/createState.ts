@@ -45,13 +45,14 @@ export function createInitialGameState(
   // シナリオ駆動の盤面生成。既定 'classic' は従来と同一（非破壊）。
   const scenario = getScenario(scenarioId);
   const geo = buildBoardGeometry(scenario.coords());
-  const { tiles, harbors, edgeTokens, villages, fortressVertices, fleetPath } = scenario.build(geo, rng);
+  const { tiles, harbors, edgeTokens, villages, fortressVertices, fleetPath, bonusRegionTiles } = scenario.build(geo, rng);
 
   // 航海者: 海賊コマは開始時から海ヘクスに置く。公式準拠で「盤の隅＝できるだけ遠い海」へ初期配置し、
   //   開始直後は誰の船にも近づかないようにする（盗賊は砂漠の盤、砂漠なし盤では7まで盤外）。
   //   ※S7 海賊の島々（独自の海賊艦隊）と S8 七不思議（海賊不使用）では通常の海賊コマは置かない。
   const usesPirate = Object.values(tiles).some(t => t.type === 'sea')
-    && !scenario.rules?.pirateIslands && !scenario.rules?.wonders;
+    && !scenario.rules?.pirateIslands && !scenario.rules?.wonders
+    && !scenario.rules?.noShips; // オアシス（基本ゲーム・船なし）は海賊コマを置かない
   const piratePosition = usesPirate
     ? Object.values(tiles)
         .filter(t => t.type === 'sea')
@@ -74,8 +75,8 @@ export function createInitialGameState(
       type: spec.type,
       hand: makeHand(),
       devCards: [],
-      remainingRoads: 15,
-      remainingShips: 15,
+      remainingRoads: scenario.rules?.startingRoads ?? 15,
+      remainingShips: scenario.rules?.noShips ? 0 : 15,
       remainingSettlements: 5,
       remainingCities: 4,
       knightsPlayed: 0,
@@ -139,6 +140,10 @@ export function createInitialGameState(
     ...(scenario.rules?.setupAnywhere != null ? { setupAnywhere: scenario.rules.setupAnywhere } : {}),
     ...(scenario.rules?.numberHexOnly != null ? { numberHexOnly: scenario.rules.numberHexOnly } : {}),
     ...(scenario.rules?.noIslandSettlement != null ? { noIslandSettlement: scenario.rules.noIslandSettlement } : {}),
+    ...(scenario.rules?.maxCities != null ? { maxCities: scenario.rules.maxCities } : {}),
+    ...(scenario.rules?.missingNumberTokens ? { numberTokenSupply: scenario.rules.numberTokenSupply ?? 5 } : {}),
+    ...(scenario.rules?.regionBonusVp != null ? { regionBonusVp: scenario.rules.regionBonusVp } : {}),
+    ...(bonusRegionTiles != null ? { bonusRegionTiles, regionBonus: [] } : {}),
     ...(edgeTokens != null ? { edgeTokens } : {}),
     ...(villages != null ? { villages, villageConn: {}, cloth: {} } : {}),
     ...(scenario.rules?.wonders ? { wonderOwner: {}, wonderLevel: {} } : {}),

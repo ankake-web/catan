@@ -12,6 +12,36 @@
 import type { GameState, PlayerId, TileId } from '../types';
 import { TILE_RESOURCE_MAP } from '../constants';
 
+// タイルの軸座標の隣接オフセット（盤の NW_NB と同一）。
+const TILE_NB: ReadonlyArray<readonly [number, number]> = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+const isRed = (n: number | null | undefined): boolean => n === 6 || n === 8;
+
+// 陸タイル（海/砂漠以外＝産出地形）を辺隣接で連結成分に分け、最大成分（本島）のタイルIDを返す。
+function mainIslandTileIds(state: GameState): Set<TileId> {
+  const land = Object.values(state.tiles).filter(t => t.type !== 'sea');
+  const set = new Set(land.map(t => t.id));
+  const keyOf = (q: number, r: number) => `${q},${r}`;
+  const byKey = new Map<string, TileId>();
+  for (const t of land) byKey.set(keyOf(t.coord.q, t.coord.r), t.id);
+  const seen = new Set<TileId>();
+  let best: TileId[] = [];
+  for (const t of land) {
+    if (seen.has(t.id)) continue;
+    const stack = [t.id]; seen.add(t.id); const comp: TileId[] = [];
+    while (stack.length) {
+      const cur = stack.pop()!;
+      comp.push(cur);
+      const c = state.tiles[cur]!.coord;
+      for (const [dq, dr] of TILE_NB) {
+        const nid = byKey.get(keyOf(c.q + dq, c.r + dr));
+        if (nid && set.has(nid) && !seen.has(nid)) { seen.add(nid); stack.push(nid); }
+      }
+    }
+    if (comp.length > best.length) best = comp;
+  }
+  return new Set(best);
+}
+
 /**
  * 指定タイル群のうち霧のものを公開する。陸が出たら active プレイヤーへ資源1枚をバンクから付与。
  * 公開が無ければ state をそのまま返す（参照不変・no-op）。
@@ -52,4 +82,80 @@ export function revealFogAround(
 /** 盤に霧ヘックスが1つでもあるか（探索シナリオ判定・呼び出し側の早期 return 用）。 */
 export function hasFog(state: GameState): boolean {
   return Object.values(state.tiles).some(t => t.fog != null);
+}
+
+// この小島タイルの同島（陸）隣接に赤数字(6/8)が既にあるか（条件1: 6/8は小島で隣接させない）。
+function hasAdjacentRed(tiles: GameState['tiles'], tileId: TileId): boolean {
+  const t = tiles[tileId]; if (!t) return false;
+  const byKey = new Map<string, GameState['tiles'][string]>();
+  for (const x of Object.values(tiles)) if (x.type !== 'sea') byKey.set(`${x.coord.q},${x.coord.r}`, x);
+  for (const [dq, dr] of TILE_NB) {
+    const n = byKey.get(`${t.coord.q + dq},${t.coord.r + dr}`);
+    if (n && isRed(n.number)) return true;
+  }
+  return false;
+}
+
+// 供給枯渇時に本島から抜く数字タイルを1つ選ぶ。条件（公式）を順守:
+//   1) 6/8は小島で隣接させない（その小島に赤隣接があるなら赤は避ける）
+//   3) 本島の建物の産出を奪わない（建物に隣接するタイルは避ける）
+// すべて満たせない場合は順に破る（=スコアの低い順で最善を選ぶ）。
+function pickMainNumberToPull(
+  state: GameState, tiles: GameState['tiles'], mainIds: Set<TileId>, islandTileId: TileId,
+): { id: TileId; number: number } | null {
+  const cands = [...mainIds]
+    .map(id => tiles[id]!)
+    .filter(t => t.number != null && t.type !== 'desert');
+  if (!cands.length) return null;
+  const islandHasRed = hasAdjacentRed(tiles, islandTileId);
+  const hasBuilding = (id: TileId) => (state.tileToVertices[id] ?? []).some(v => state.vertices[v]?.building != null);
+  const score = (t: typeof cands[number]) =>
+    (isRed(t.number) && islandHasRed ? 100 : 0) + (hasBuilding(t.id) ? 10 : 0);
+  cands.sort((a, b) => score(a) - score(b) || (a.id < b.id ? -1 : 1));
+  const chosen = cands[0]!;
+  return { id: chosen.id, number: chosen.number! };
+}
+
+/**
+ * 航海者「大カタン」: 抜けている数値トークンの出現。指定タイル群のうち pendingNumber を持つ
+ * （まだ数字が出ていない小島の）タイルを公開し、number を確定させる。道/船/開拓地でタイルの端へ
+ * 到達したときに呼ぶ。該当が無ければ state をそのまま返す（参照不変・no-op）。
+ *
+ * 供給(numberTokenSupply)がある盤（大カタン）では公式どおり:
+ *   - 供給が残っていれば供給から1枚（=仕込んだ pendingNumber）を配り、供給を1減らす。
+ *   - 供給が尽きたら、本島の数字タイルから1枚「抜いて」その小島へ移す（本島タイルは産出停止）。
+ */
+export function revealPendingNumbers(state: GameState, tileIds: readonly TileId[]): GameState {
+  const targets = tileIds.filter(tid => state.tiles[tid]?.pendingNumber != null);
+  if (targets.length === 0) return state;
+
+  const tiles = { ...state.tiles };
+  let supply = state.numberTokenSupply; // undefined=供給機構なし
+  let mainIds: Set<TileId> | null = null;
+
+  for (const tid of targets) {
+    const tile = tiles[tid]!;
+    const { pendingNumber, ...rest } = tile;
+    if (supply == null || supply > 0) {
+      // 供給から（または通常）pendingNumber をそのまま出す。
+      tiles[tid] = { ...rest, number: pendingNumber! };
+      if (supply != null) supply -= 1;
+    } else {
+      // 供給枯渇: 本島から数字を抜いてこの小島へ移す。
+      if (!mainIds) mainIds = mainIslandTileIds(state);
+      const pulled = pickMainNumberToPull(state, tiles, mainIds, tid);
+      if (pulled) {
+        tiles[tid] = { ...rest, number: pulled.number };
+        tiles[pulled.id] = { ...tiles[pulled.id]!, number: null, numberRemoved: true };
+      } else {
+        tiles[tid] = { ...rest, number: pendingNumber! }; // 抜ける本島タイルが無い場合の保険
+      }
+    }
+  }
+  return { ...state, tiles, ...(supply != null ? { numberTokenSupply: supply } : {}) };
+}
+
+/** 盤に「抜けている数値トークン（未出現の小島）」が1つでもあるか。 */
+export function hasPendingNumbers(state: GameState): boolean {
+  return Object.values(state.tiles).some(t => t.pendingNumber != null);
 }

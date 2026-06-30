@@ -397,6 +397,18 @@ html.reduce-motion .hex-tile.producing { animation: none; filter: brightness(1.5
   stroke: #8b6914;
   stroke-width: 1.5;
 }
+/* 大カタン: 抜けている数値トークン（未出現の小島）。灰色＋破線で「?」＝まだ産出しない印。 */
+.token-circle.token-pending {
+  fill: #d6d2c4;
+  stroke: #6f6a5a;
+  stroke-dasharray: 3 2;
+  opacity: 0.9;
+}
+/* 大カタン: 数字を抜かれて産出停止した本島タイルの印。 */
+.removed-mark {
+  fill: rgba(120, 30, 30, 0.65); font-weight: bold; pointer-events: none;
+  paint-order: stroke; stroke: rgba(255,255,255,0.7); stroke-width: 2px; stroke-linejoin: round;
+}
 .token-number {
   font-size: 15px;
   font-weight: bold;

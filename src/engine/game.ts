@@ -28,7 +28,7 @@ import { executeBankTrade, canBankTrade, offerTrade, respondTrade, confirmTrade,
 import { updateLongestRoad, updateLargestArmy, checkVictory, calcVP, victoryTarget } from './scoring';
 import { newIslandBonusRep, islandRepOf } from './islands';
 import { edgeTileIds } from './board';
-import { revealFogAround } from './explore';
+import { revealFogAround, revealPendingNumbers } from './explore';
 import { collectEdgeToken, placeHeldHarborAt } from './seaTokens';
 import { connectVillagesAround, produceCloth, checkClothEnd } from './cloth';
 import { canBuildWonder, buildWonder } from './wonders';
@@ -416,6 +416,10 @@ export function applyAction(
       let next = buildRoad(state, pid, edgeId);
       // S3 霧の島: 道の隣接ヘックスを探索公開（霧の無い盤では no-op）。
       next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
+      // 大カタン: 道で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
+      next = revealPendingNumbers(next, edgeTileIds(next.edges[edgeId]!, next.vertices));
+      // オアシス: 道で財宝の辺に到達したら獲得（資源＋発展カード等）。財宝の無い盤では no-op。
+      next = collectEdgeToken(next, edgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
 
@@ -447,6 +451,8 @@ export function applyAction(
       next = { ...next, shipsBuiltThisTurn: [...(next.shipsBuiltThisTurn ?? []), edgeId] };
       // S3 霧の島: 船の隣接ヘックスを探索公開（霧→陸なら資源1枚）。霧の無い盤では no-op。
       next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
+      // 大カタン: 船で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
+      next = revealPendingNumbers(next, edgeTileIds(next.edges[edgeId]!, next.vertices));
       // S5 忘れられた部族: この辺に海辺トークンがあれば獲得（VP/開発カード/港）。無い盤では no-op。
       next = collectEdgeToken(next, edgeId, pid);
       // S6 カタンの織物: この辺が村に隣接していれば航路接続（接続成立で即織物1枚）。無い盤では no-op。
@@ -480,6 +486,8 @@ export function applyAction(
       let next = moveShip(state, pid, fromEdgeId, toEdgeId);
       // S3 霧の島: 移動先の隣接ヘックスを探索公開（霧の無い盤では no-op）。
       next = revealFogAround(next, edgeTileIds(next.edges[toEdgeId]!, next.vertices), pid);
+      // 大カタン: 船の移動先で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
+      next = revealPendingNumbers(next, edgeTileIds(next.edges[toEdgeId]!, next.vertices));
       // S5 忘れられた部族: 移動先の辺に海辺トークンがあれば獲得。無い盤では no-op。
       next = collectEdgeToken(next, toEdgeId, pid);
       // S6 カタンの織物: 移動先が村に隣接していれば航路接続（無い盤では no-op）。
@@ -503,6 +511,8 @@ export function applyAction(
       let next = buildSettlement(state, pid, vertexId);
       // S3 霧の島: 開拓地の隣接ヘックスを探索公開（霧の無い盤では no-op）。
       next = revealFogAround(next, next.vertices[vertexId]!.adjacentTileIds, pid);
+      // 大カタン: 開拓地が小島タイルに隣接したら数値トークン出現（無い盤では no-op）。
+      next = revealPendingNumbers(next, next.vertices[vertexId]!.adjacentTileIds);
       // S5 忘れられた部族: 港トークンを保留していれば、この沿岸開拓地に設置（無ければ no-op）。
       next = placeHeldHarborAt(next, pid, vertexId);
 
@@ -542,6 +552,14 @@ export function applyAction(
           // 公式: 各プレイヤーが「自分の初入植」で +VP（他人が先でも可）。同一プレイヤーの重複のみ排除。
           if (!owners.includes(pid)) {
             next = { ...next, islandBonus: { ...(next.islandBonus ?? {}), [rep]: [...owners, pid] } };
+          }
+        }
+        // 砂漠を越えて: 「北西地方」（地域ボーナス対象タイル）へ初入植したら +regionBonusVp（各自1回）。
+        if (next.bonusRegionTiles && (next.regionBonusVp ?? 0) > 0) {
+          const claimed = next.regionBonus ?? [];
+          const touchesRegion = next.vertices[vertexId]!.adjacentTileIds.some(t => next.bonusRegionTiles!.includes(t));
+          if (touchesRegion && !claimed.includes(pid)) {
+            next = { ...next, regionBonus: [...claimed, pid] };
           }
         }
       } else {

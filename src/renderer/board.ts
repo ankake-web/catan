@@ -253,6 +253,30 @@ function renderTile(
     g.appendChild(tag);
   }
 
+  // 大カタン: 供給枯渇後、小島へ数字を移すため本島から「抜かれた」タイルは産出しない印（×）を表示。
+  if (tile.number == null && tile.numberRemoved && !tile.fog) {
+    const mark = svgEl('text');
+    mark.classList.add('removed-mark');
+    setAttrs(mark, { x: cx, y: cy - 2, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': String(size * 0.5) });
+    mark.textContent = '✕';
+    g.appendChild(mark);
+  }
+
+  // 大カタン「抜けている数値トークン」: まだ数字が出ていない小島タイルは「?」を表示
+  //（産出しない＝到達するまで保留）。pendingNumber を持ち number 未確定のタイルが対象。
+  if (tile.number == null && tile.pendingNumber != null && !tile.fog) {
+    const circle = svgEl('circle');
+    circle.classList.add('token-circle');
+    circle.classList.add('token-pending');
+    setAttrs(circle, { cx, cy: cy - 2, r: String(isTouchDevice() ? 21 : 18) });
+    g.appendChild(circle);
+    const q = svgEl('text');
+    q.classList.add('token-number');
+    setAttrs(q, { x: cx, y: cy - 2 });
+    q.textContent = '?';
+    g.appendChild(q);
+  }
+
   // 数字トークン（砂漠以外）。タッチ端末では少し大きく見やすくする。
   if (tile.number != null) {
     const isRed = tile.number === 6 || tile.number === 8;
