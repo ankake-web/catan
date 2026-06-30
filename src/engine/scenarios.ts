@@ -32,6 +32,9 @@ export type ScenarioId =
   | 'seafarers_goldenisles'    // 非公式
   | 'seafarers_chainisles'     // 非公式
   | 'seafarers_greatercatan'   // 公式アプリ「大カタン」（中央本島＋数字なし小島・抜けている数値トークン・都市8制限）
+  | 'ck_seafarers_newshores'   // 公式アプリ「都市と騎士—新たな岸へ」（航海者盤＋C&K・17点）
+  | 'ck_seafarers_oceania'     // 公式アプリ「都市と騎士—オセアニア」（霧の2島＋C&K・15点）
+  | 'ck_seafarers_greatercatan'// 公式アプリ「都市と騎士—大カタン」（数値トークン欠＋C&K・20点）
   | 'cities_knights';
 
 export interface ScenarioBoard {
@@ -1125,6 +1128,47 @@ const citiesKnights: Scenario = {
   expansion: 'cities_knights',
 };
 
+// ============================================================
+// C&K × 航海者 コンボ（公式アプリ）。航海者の盤＋「都市と騎士」拡張＋高めのVP。
+// 盤は対応する航海者シナリオを再利用し、expansion を有効化して勝利点を引き上げる。
+// ============================================================
+const ckSeafarersNewShores: Scenario = {
+  id: 'ck_seafarers_newshores',
+  name: '都市と騎士：新たな海岸を目指して',
+  description: '新たな岸への航海に「都市と騎士」拡張を追加。新島への初入植ごとに+2点（17点で勝利）。',
+  category: 'cities_knights',
+  expansion: 'cities_knights',
+  coords: HUGE_COORDS,
+  build: buildFromLandMap(NEW_SHORES_LAND),
+  victoryTarget: 17,
+  recommendedPlayers: '4人',
+  rules: { newIslandBonusVp: 2 },
+};
+const ckSeafarersOceania: Scenario = {
+  id: 'ck_seafarers_oceania',
+  name: '都市と騎士：オセアニア',
+  description: '霧の海の2始発島に「都市と騎士」拡張を追加。霧を晴らして島を発見（資源1枚）。15点で勝利。',
+  category: 'cities_knights',
+  expansion: 'cities_knights',
+  coords: HUGE_COORDS,
+  build: buildFromLandFogMap(OCEANIA_HOME_LAND, OCEANIA_FOG),
+  victoryTarget: 15,
+  recommendedPlayers: '4人',
+  rules: { newIslandBonusVp: 0, setupAnywhere: true },
+};
+const ckSeafarersGreaterCatan: Scenario = {
+  id: 'ck_seafarers_greatercatan',
+  name: '都市と騎士：大カタン',
+  description: '大カタン（抜けている数値トークン・都市8制限）に「都市と騎士」拡張を追加。20点で勝利。',
+  category: 'cities_knights',
+  expansion: 'cities_knights',
+  coords: HUGE_COORDS,
+  build: buildGreaterCatan(GREATER_CATAN_LAND),
+  victoryTarget: 20,
+  recommendedPlayers: '4人',
+  rules: { newIslandBonusVp: 0, maxCities: 8, missingNumberTokens: true },
+};
+
 const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
   // 公式航海者シナリオ
@@ -1145,6 +1189,10 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   seafarers_goldenisles: seafarersGoldenIsles,
   seafarers_chainisles: seafarersChainIsles,
   seafarers_greatercatan: seafarersGreaterCatan,
+  // C&K × 航海者 コンボ
+  ck_seafarers_newshores: ckSeafarersNewShores,
+  ck_seafarers_oceania: ckSeafarersOceania,
+  ck_seafarers_greatercatan: ckSeafarersGreaterCatan,
   cities_knights: citiesKnights,
 };
 
@@ -1244,6 +1292,21 @@ const SCENARIO_RULES: Record<ScenarioId, string[]> = {
     '都市は森=紙・牧草=布・山=金貨の商品を産む。商品で都市改善（交易/政治/科学）をレベルアップ。',
     'レベル4で都市が「メトロポリス」になり +4点。蛮族が攻めてきたら、起動した騎士の合計で守る。',
   ],
+  ck_seafarers_newshores: [
+    '17点で勝ち。「新たな海岸を目指して」の航海に「都市と騎士」拡張を足した複合シナリオ。',
+    '中央の本島から船で四方の小島へ。新しい島への初入植ごとに +2点（島ボーナス）。',
+    '都市と騎士の要素（商品・都市改善・騎士・蛮族の襲来）もすべて適用される。',
+  ],
+  ck_seafarers_oceania: [
+    '15点で勝ち。「オセアニア」の霧の探索に「都市と騎士」拡張を足した複合シナリオ。',
+    '2つの始発島から、霧を晴らして島を発見（資源1枚）。金鉱の島も眠る。',
+    '都市と騎士の要素（商品・都市改善・騎士・蛮族の襲来）もすべて適用される。',
+  ],
+  ck_seafarers_greatercatan: [
+    '20点で勝ち。「大カタン」に「都市と騎士」拡張を足した最大級の複合シナリオ。',
+    '小島は到達するまで数字が出ず産出しない（抜けている数値トークン）。都市は8つまで。',
+    '都市と騎士の要素（商品・都市改善・騎士・蛮族の襲来）もすべて適用される。',
+  ],
 };
 
 /** このゲーム固有の詳細ルール（遊び方表示用）。未知IDは基本のルールにフォールバック。 */
@@ -1284,6 +1347,10 @@ const VISIBLE_SCENARIO_IDS: ReadonlySet<ScenarioId> = new Set<ScenarioId>([
   'seafarers_oceania',
   'seafarers_throughdesert',
   'seafarers_greatercatan',
+  // 都市と騎士 × 航海者 コンボ
+  'ck_seafarers_newshores',
+  'ck_seafarers_oceania',
+  'ck_seafarers_greatercatan',
 ]);
 /** 盤面選択UIに表示するシナリオ一覧（listScenarios のうち VISIBLE のみ）。 */
 export function listVisibleScenarios(): ReadonlyArray<ScenarioInfo> {

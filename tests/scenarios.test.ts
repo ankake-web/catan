@@ -26,7 +26,7 @@ describe('scenarios: registry', () => {
     // @ts-expect-error 故意に未知ID
     expect(getScenario('nope').id).toBe('classic');
   });
-  it('表示シナリオは基本/都市と騎士＋画像準拠で再構築した航海者7つ（他は実装は残すが非表示）', () => {
+  it('表示シナリオは基本/都市と騎士＋航海者7つ＋C&K複合3つ（他は実装は残すが非表示）', () => {
     const visible = listVisibleScenarios().map(s => s.id).sort();
     expect(visible).toEqual(
       [
@@ -34,6 +34,7 @@ describe('scenarios: registry', () => {
         'seafarers_newshores', 'seafarers_drought', 'seafarers_treasure',
         'seafarers_fourislands', 'seafarers_fogislands', 'seafarers_oceania',
         'seafarers_throughdesert', 'seafarers_greatercatan',
+        'ck_seafarers_newshores', 'ck_seafarers_oceania', 'ck_seafarers_greatercatan',
       ].sort(),
     );
     // 非表示シナリオも実装（getScenario）とフル一覧（listScenarios）には残る。
@@ -316,6 +317,29 @@ describe('scenarios: 航海者「新世界」(公式New World・制約付きラ�
     // 異なるシードでタイル配置が変わる（＝ランダム生成）。
     const sig = (s: typeof a) => Object.entries(s.tiles).map(([id, t]) => `${id}:${t.type}:${t.number}`).join('|');
     expect(sig(a)).not.toBe(sig(b));
+  });
+});
+
+describe('scenarios: 都市と騎士 × 航海者 コンボ（公式アプリ）', () => {
+  it('新たな岸へCK=17点/オセアニアCK=15点/大カタンCK=20点・いずれも expansion=cities_knights', () => {
+    const cases: Array<[string, number]> = [
+      ['ck_seafarers_newshores', 17], ['ck_seafarers_oceania', 15], ['ck_seafarers_greatercatan', 20],
+    ];
+    for (const [id, vp] of cases) {
+      const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), id);
+      expect(s.victoryTarget).toBe(vp);
+      expect(s.expansion).toBe('cities_knights');
+      // 航海者の盤（海タイルがある＝船で渡る）であること。
+      expect(Object.values(s.tiles).some(t => t.type === 'sea')).toBe(true);
+    }
+  });
+  it('大カタンCK は抜けている数値トークン＋都市制限8、オセアニアCK は霧あり', () => {
+    const g = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'ck_seafarers_greatercatan');
+    expect(g.maxCities).toBe(8);
+    expect(Object.values(g.tiles).some(t => t.pendingNumber != null)).toBe(true);
+    const o = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'ck_seafarers_oceania');
+    expect(Object.values(o.tiles).some(t => t.fog != null)).toBe(true);
+    expect(o.setupAnywhere).toBe(true);
   });
 });
 
