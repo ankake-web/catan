@@ -93,33 +93,35 @@ const FOUR_ISLANDS_COORDS = BIG_COORDS; // S2 は 37ヘックス（4島）
 
 // ---- 航海者「新たな海岸を目指して」（公式S1・51ヘックス＝公式アプリ4人盤に準拠） ----
 // 公式アプリ(photo/IMG_6399)の「中央に本島＋四方に離れた小島」を51マス盤で再現。
-//   中央本島15＋四隅の小島4つ(各2タイル)。金は小島にランダム配置（randomizeLandMap が
-//   最大連結成分=本島以外＝離れ小島へ金を置く）。中身（資源/数字/港/金位置）は毎ゲームランダム。
-//   下記は構成（枚数）の“正”＝森4/畑4/牧草5/丘4/山4/金2＝陸23・砂漠なし。
+//   中央本島14＋四隅の小島4つ(各2タイル)＝陸22。公式アプリは「島ごとの資源の組み合わせは毎回固定・
+//   配置だけランダム」なので、randomizeLandMap は本島の資源集合・小島の資源集合を“島内だけで”
+//   シャッフルする（本島↔小島は混ざらない）。金は小島側にあるため必ず小島へ出る。
+//   公式構成（photo/IMG_6399 実読）＝
+//     本島(14): 牧草地4・森3・畑3・山2・丘2
+//     小島(8) : 金2・丘2・森1・山2・畑1
 const NEW_SHORES_LAND: Record<string, { type: TileType; number: number | null; robber?: boolean }> = {
-  // 中央本島（15・全5資源・砂漠なし＝盗賊は本島の非赤タイルへ）
-  '-2,0':  { type: 'forest',   number: 8 },
-  '-2,1':  { type: 'field',    number: 5 },
-  '-1,-1': { type: 'pasture',  number: 10 },
-  '-1,0':  { type: 'hill',     number: 4 },
+  // 中央本島（14・牧草地4/森3/畑3/山2/丘2。砂漠なし＝盗賊は小島のどこかへ）
+  '-2,1':  { type: 'pasture',  number: 5 },
+  '-1,-1': { type: 'forest',   number: 10 },
+  '-1,0':  { type: 'field',    number: 4 },
   '-1,1':  { type: 'mountain', number: 9 },
-  '-1,2':  { type: 'field',    number: 6 },
-  '0,-1':  { type: 'pasture',  number: 3 },
-  '0,0':   { type: 'forest',   number: 11 },
+  '-1,2':  { type: 'pasture',  number: 6 },
+  '0,-1':  { type: 'forest',   number: 3 },
+  '0,0':   { type: 'field',    number: 11 },
   '0,1':   { type: 'hill',     number: 4 },
-  '1,-2':  { type: 'field',    number: 8 },
-  '1,-1':  { type: 'pasture',  number: 5 },
-  '1,0':   { type: 'forest',   number: 9 },
+  '1,-2':  { type: 'pasture',  number: 8 },
+  '1,-1':  { type: 'forest',   number: 5 },
+  '1,0':   { type: 'field',    number: 9 },
   '1,1':   { type: 'mountain', number: 2 },
   '2,-1':  { type: 'pasture',  number: 10 },
   '2,0':   { type: 'hill',     number: 3 },
-  // 離れ小島（四隅・各2タイル）。金2はここにランダム配置される。
+  // 離れ小島（四隅・各2タイル）。金2/丘2/森1/山2/畑1。金は非赤数字の小島セルに置く。
   '-4,0':  { type: 'gold',     number: 5 },   // 北西
-  '-4,1':  { type: 'mountain', number: 6 },
-  '-4,3':  { type: 'field',    number: 11 },  // 南西
-  '-3,3':  { type: 'forest',   number: 4 },
+  '-4,1':  { type: 'hill',     number: 6 },
+  '-4,3':  { type: 'forest',   number: 11 },  // 南西
+  '-3,3':  { type: 'mountain', number: 4 },
   '3,-3':  { type: 'hill',     number: 12 },  // 北東
-  '4,-3':  { type: 'pasture',  number: 9 },
+  '4,-3':  { type: 'field',    number: 9 },
   '4,-1':  { type: 'mountain', number: 10 },  // 南東
   '4,0':   { type: 'gold',     number: 4 },
 };
@@ -179,11 +181,12 @@ function buildTilesFromLandMap(geo: BoardGeometry, landMap: LandMap): Record<Til
   return tiles;
 }
 
-// 公式構成（資源/数字の枚数）を維持して中身を毎ゲームランダム化し、港もランダム配置して盤を組む共通ビルダ。
-// opts.desertsOnMain: 砂漠を本島へ固定（干ばつ＝本島は痩せ地）。
-function buildFromLandMap(landMap: LandMap, opts: { desertsOnMain?: boolean } = {}): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+// 公式構成（島ごとの資源の組み合わせ＝多重集合）を維持して配置だけ毎ゲームランダム化し、
+// 港もランダム配置して盤を組む共通ビルダ。砂漠（干ばつ＝本島側に定義）や金（小島側に定義）は
+// randomizeLandMap の「島内シャッフル」によって元の島に残るので、特別なオプションは不要。
+function buildFromLandMap(landMap: LandMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
   return (geo, rng) => {
-    const tiles = buildTilesFromLandMap(geo, randomizeLandMap(landMap, rng, opts));
+    const tiles = buildTilesFromLandMap(geo, randomizeLandMap(landMap, rng));
     return { tiles, harbors: randomHarbors(geo, tiles, rng) };
   };
 }
@@ -229,10 +232,11 @@ const seafarersNewShores: Scenario = {
 
 // ---- 公式アプリ「干ばつ」（51ヘックス・公式アプリ4人盤に準拠／photo/IMG_6400） ----
 // 本島(中央15)は砂漠が広がる痩せ地（砂漠3・山多め・麦少なめ）。周囲の小島(四隅・各2)が豊か。
-//   砂漠は本島へ固定（desertsOnMain）、金は小島へランダム。小島ごとに初入植+2点。14点で勝利。
-//   下記は構成（枚数）の“正”＝陸23（砂漠3/山4/丘2/森3/畑4/牧草5/金2）。
+//   砂漠は本島側に定義、金は小島側に定義 → randomizeLandMap の島内シャッフルで砂漠は必ず本島・
+//   金は必ず小島に残る。盗賊は砂漠の1枚。小島ごとに初入植+2点。14点で勝利。
+//   下記は構成（枚数）の“正”＝陸23（本島15: 砂漠3/山4/森3/牧草2/丘2/畑1、小島8: 金2/畑3/牧草3）。
 const DROUGHT_LAND: LandMap = {
-  // 中央本島（15・砂漠3を含む痩せ地。砂漠は randomizeLandMap が本島へ固定し、その1枚に盗賊）
+  // 中央本島（15・砂漠3を含む痩せ地。砂漠は本島内でシャッフルされ、その1枚に盗賊）
   '-2,0':  { type: 'desert',   number: null, robber: true },
   '-2,1':  { type: 'mountain', number: 8 },
   '-1,-1': { type: 'mountain', number: 5 },
@@ -264,7 +268,7 @@ const seafarersDrought: Scenario = {
   description: '砂漠が広がる本島は痩せ地。豊かな周囲の小島へ船で渡り、入植した小島ごとに+2点（14点で勝利）。',
   category: 'seafarers',
   coords: HUGE_COORDS, // 51ヘックス（公式アプリ4人盤＝中央本島＋四方の小島）
-  build: buildFromLandMap(DROUGHT_LAND, { desertsOnMain: true }),
+  build: buildFromLandMap(DROUGHT_LAND),
   victoryTarget: 14,
   rules: { newIslandBonusVp: 2 },
 };
@@ -480,47 +484,33 @@ function landComponents(cells: readonly string[]): string[][] {
   return comps;
 }
 
-function randomizeLandMap(landMap: LandMap, rng: () => number, opts: { desertsOnMain?: boolean } = {}): LandMap {
+// 島ごとに「資源の組み合わせ（多重集合）」を固定したまま配置だけ毎ゲームシャッフルする。
+//   公式アプリ準拠: 本島／小島それぞれの資源セットは毎回同じで、配置（とどの島のどこに金/砂漠が
+//   出るか）だけがランダム。本島の資源は本島内だけ・小島の資源は小島内だけでシャッフルするため、
+//   金（小島側に定義）は必ず小島へ、砂漠（干ばつ＝本島側に定義）は必ず本島に残る。
+//   数字は全島共通プールから配る（数字バランスは盤全体で取る）。
+function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
   const cells = Object.keys(landMap);
-  const typePool: TileType[] = cells.map(c => landMap[c]!.type);
-  const numberPool: number[] = cells
-    .filter(c => landMap[c]!.type !== 'desert')
-    .map(c => landMap[c]!.number)
-    .filter((n): n is number => n != null);
-  const goldCount = typePool.filter(t => t === 'gold').length;
-  const nonGoldTypes = typePool.filter(t => t !== 'gold');
   // 本島=最大連結成分、離れ小島=その他のセル。
   const comps = landComponents(cells).sort((a, b) => b.length - a.length);
   const main = comps[0] ?? cells;
   const mainSet = new Set(main);
   const outlying = cells.filter(c => !mainSet.has(c));
-  // 干ばつ等: 砂漠を本島に固定（本島=痩せ地、小島=豊か というテーマを保つ）。
-  const desertCount = nonGoldTypes.filter(t => t === 'desert').length;
-  const desertsOnMain = !!opts.desertsOnMain && desertCount > 0;
-  const freeTypes = desertsOnMain ? nonGoldTypes.filter(t => t !== 'desert') : nonGoldTypes;
+  // 島ごとの資源多重集合（“正”の構成）。
+  const mainTypes: TileType[] = main.map(c => landMap[c]!.type);
+  const outlyingTypes: TileType[] = outlying.map(c => landMap[c]!.type);
+  // 数字プール（非砂漠セルの数字を全島共通で配る）。
+  const numberPool: number[] = cells
+    .filter(c => landMap[c]!.type !== 'desert')
+    .map(c => landMap[c]!.number)
+    .filter((n): n is number => n != null);
 
   for (let attempt = 0; attempt < 400; attempt++) {
-    // 1) 金を離れ小島のランダムなセルへ（不足時のみ任意セルで補う）。
-    const goldCells = shuffleWithRng(outlying, rng).slice(0, goldCount);
-    if (goldCells.length < goldCount) {
-      const more = shuffleWithRng(cells.filter(c => !goldCells.includes(c)), rng)
-        .slice(0, goldCount - goldCells.length);
-      goldCells.push(...more);
-    }
-    const goldSet = new Set(goldCells);
-    // 1b) 干ばつ: 砂漠を本島のランダムなセルへ（金と重ならないよう）。
-    const desertCells = desertsOnMain
-      ? shuffleWithRng(main.filter(c => !goldSet.has(c)), rng).slice(0, desertCount)
-      : [];
-    const fixedSet = new Set([...goldCells, ...desertCells]);
-    // 2) 残りセルへ（金・固定砂漠を除く）種別をシャッフル配置。
-    const rest = cells.filter(c => !fixedSet.has(c));
-    const shuffledTypes = shuffleWithRng(freeTypes, rng);
+    // 1) 種別を「島内だけ」でシャッフル（本島↔小島は混ざらない＝組み合わせ固定）。
     const tType: Record<string, TileType> = {};
-    for (const c of goldCells) tType[c] = 'gold';
-    for (const c of desertCells) tType[c] = 'desert';
-    rest.forEach((c, i) => { tType[c] = shuffledTypes[i]!; });
-    // 3) 数字を非砂漠セルへシャッフル配置。
+    shuffleWithRng(mainTypes, rng).forEach((t, i) => { tType[main[i]!] = t; });
+    shuffleWithRng(outlyingTypes, rng).forEach((t, i) => { tType[outlying[i]!] = t; });
+    // 2) 数字を非砂漠セルへシャッフル配置。
     const numbered = cells.filter(c => tType[c] !== 'desert');
     const nums = shuffleWithRng(numberPool, rng);
     const tNum: Record<string, number> = {};
@@ -538,16 +528,14 @@ function randomizeLandMap(landMap: LandMap, rng: () => number, opts: { desertsOn
       if (!ok) break;
     }
     if (!ok) continue;
-    // 盗賊: 砂漠（あれば最初の1枚）。無ければ本島の非赤タイル。
-    let robberCell = cells.find(c => tType[c] === 'desert');
-    if (!robberCell) {
-      robberCell = shuffleWithRng(main, rng).find(c => !isRedNum(tNum[c])) ?? main[0];
-    }
+    // 盗賊: 砂漠があればその1枚に置く。砂漠なしマップは盗賊を初期は盤外に置く（公式準拠＝
+    //   最初の7が出るまで盗賊は登場せず、7で「盗賊か海賊」を選び盗賊なら任意タイルへ初登場）。
+    const robberCell = cells.find(c => tType[c] === 'desert');
     const map: LandMap = {};
     for (const c of cells) {
       map[c] = tType[c] === 'desert'
         ? { type: 'desert', number: null, robber: c === robberCell }
-        : { type: tType[c]!, number: tNum[c]!, robber: c === robberCell };
+        : { type: tType[c]!, number: tNum[c]!, robber: false };
     }
     return map;
   }
@@ -956,6 +944,94 @@ export function getScenario(id: ScenarioId = 'classic'): Scenario {
   return SCENARIOS[id] ?? classic;
 }
 
+// このゲーム固有の詳細ルール（遊び方オーバーレイで「いま遊んでいる盤」専用に表示する）。
+// 共通ルール（手番・コスト・交易・船の基本）は別セクションに任せ、ここは“そのシナリオ特有”に絞る。
+const SCENARIO_RULES: Record<ScenarioId, string[]> = {
+  classic: [
+    '標準の19タイル・海なし。先に10点で勝ち。',
+    '盗賊は中央の砂漠から開始。7か騎士で動かし、止めたマスは資源が出ない。',
+  ],
+  seafarers_newshores: [
+    '14点で勝ち。中央の本島から船で四方の小島へ渡って広げる。',
+    '新しい島に自分が初めて開拓地を建てるたびに +2点（島ボーナス）。',
+    '島ごとの資源の組み合わせは毎回固定：本島=牧草地4/森3/畑3/山2/丘2、小島=金2/丘2/森1/山2/畑1（配置だけ毎回ランダム）。',
+    '金タイル（滝の絵）は数字が出ると好きな資源を選べる。必ず小島側に出る。',
+  ],
+  seafarers_drought: [
+    '14点で勝ち。本島は砂漠だらけの痩せ地。豊かな四方の小島へ船で渡るのが鍵。',
+    '新しい小島へ初入植するたびに +2点（島ボーナス）。',
+    '本島に砂漠が3つ。盗賊は砂漠から開始。金2と豊かな資源は小島側にある。',
+    '島ごとの資源の組み合わせは毎回固定（配置だけランダム）。',
+  ],
+  seafarers_treasure: [
+    '13点で勝ち。中央の本島を「霧」が取り囲む。',
+    '船・道・開拓地を霧に近づけると晴れて、島（=初入植+2点）か海が現れる。',
+    '海辺の財宝トークン（宝箱）に船で到達すると、資源2枚 か 発展カード1枚がもらえる。',
+    '霧で隠れているので、何が出るかは近づくまで分からない。',
+  ],
+  seafarers_fourislands: [
+    '13点で勝ち。海で隔てた4つの島。どの島から始めてもよい。',
+    '自分の出発島以外の島へ初入植するたびに +2点（島ボーナス）。',
+  ],
+  seafarers_fogislands: [
+    '12点で勝ち。霧に包まれた海域を探索する盤。',
+    '船・道・開拓地を霧へ伸ばすと晴れて、陸（資源1枚がもらえる）や海が現れる。',
+    '探索の報酬は資源。この盤では島ボーナスVPは無い。',
+  ],
+  seafarers_throughdesert: [
+    '14点で勝ち。本島から広い大洋を渡って、砂漠を含む新天地へ。',
+    '新天地への初入植ごとに +2点（島ボーナス）。',
+  ],
+  seafarers_forgottentribe: [
+    '13点で勝ち。海に「勝利点・発展カード・港」のトークンが眠っている。',
+    '船をトークンのある辺へ伸ばす（到達する）と回収。VPは即+1点、港は沿岸の開拓地に設置される。',
+    '金タイルが2枚。開拓地は数字ヘックスに隣接する角にしか建てられない。',
+  ],
+  seafarers_cloth: [
+    '14点で勝ち。小島の村へ航路（船）をつなぐと織物がもらえる（2枚で1点）。',
+    '小島には入植できない。最長交易路ボーナスは無い。',
+    '初期配置は開拓地3軒。海賊は最初に村へ航路をつなぐまで動かない。',
+  ],
+  seafarers_pirateislands: [
+    '10点以上で勝ち。本島から船で自分の色の海賊要塞へ向かう。',
+    '要塞に隣接して3回攻撃すると奪取できる。海賊艦隊が海を移動して略奪してくる。',
+    '騎士は「軍船化」に使い、船を強化して海賊艦隊と戦う。',
+  ],
+  seafarers_wonders: [
+    '不思議を完成させる、または10点＋最高レベルで勝ち。',
+    '要件（都市数やVP）を満たして不思議をクレームし、4レベルまで建設して競う。',
+    '新島ボーナスは+1点。この盤では海賊コマは使わない。',
+  ],
+  seafarers_newworld: [
+    '12点で勝ち。毎回ランダムに作られる自由構築の盤。',
+    'どの島にも入植でき、自分の出発島以外への初入植ごとに +1点。',
+  ],
+  seafarers_archipelago: [
+    '【非公式】13点で勝ち。本島＋新島2つ。島ボーナスと金の争奪が核。',
+    '新しい島への初入植ごとに +2点（島ボーナス）。',
+  ],
+  seafarers_goldenisles: [
+    '【非公式】13点で勝ち。金タイルが3つ。好きな資源を産む金を巡るゴールドラッシュ。',
+  ],
+  seafarers_chainisles: [
+    '【非公式】13点で勝ち。小島が点在。島ボーナスを稼ぐアイランドホッピング。',
+    '新しい島への初入植ごとに +2点（島ボーナス）。',
+  ],
+  seafarers_greatercatan: [
+    '【非公式】12点で勝ち。海を減らした大きな一枚大陸。船は控えめの拡大版。',
+  ],
+  cities_knights: [
+    '13点で勝ち。商品・都市の発展・騎士・蛮族の襲来が加わる最も奥深い拡張。',
+    '都市は森=紙・牧草=布・山=金貨の商品を産む。商品で都市改善（交易/政治/科学）をレベルアップ。',
+    'レベル4で都市が「メトロポリス」になり +4点。蛮族が攻めてきたら、起動した騎士の合計で守る。',
+  ],
+};
+
+/** このゲーム固有の詳細ルール（遊び方表示用）。未知IDは基本のルールにフォールバック。 */
+export function getScenarioRules(id: string): string[] {
+  return SCENARIO_RULES[id as ScenarioId] ?? SCENARIO_RULES.classic;
+}
+
 export interface ScenarioInfo {
   id: ScenarioId;
   name: string;
@@ -974,4 +1050,17 @@ export function listScenarios(): ReadonlyArray<ScenarioInfo> {
       recommendedPlayers: s.recommendedPlayers ?? DEFAULT_RECOMMENDED_PLAYERS,
     };
   });
+}
+
+// 選択UIに出すシナリオ（ユーザー選定）。他のシナリオは実装・テストは残すが、盤面選択カードには出さない。
+const VISIBLE_SCENARIO_IDS: ReadonlySet<ScenarioId> = new Set<ScenarioId>([
+  'classic',
+  'cities_knights',
+  'seafarers_newshores',
+  'seafarers_drought',
+  'seafarers_treasure',
+]);
+/** 盤面選択UIに表示するシナリオ一覧（listScenarios のうち VISIBLE のみ）。 */
+export function listVisibleScenarios(): ReadonlyArray<ScenarioInfo> {
+  return listScenarios().filter(s => VISIBLE_SCENARIO_IDS.has(s.id));
 }

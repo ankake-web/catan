@@ -3,9 +3,9 @@
 // ============================================================
 //
 // 各シナリオを「ミニ盤面プレビュー＋名前＋勝利点」のカードで見せるピッカー。
-// 盤面の形（島の数・海・金）が一目で分かる。listScenarios() 由来なので追加シナリオは自動で並ぶ。
+// 盤面の形（島の数・海・金）が一目で分かる。listVisibleScenarios() 由来（表示対象のみ）。
 
-import { listScenarios, getScenario, DEFAULT_RECOMMENDED_PLAYERS, type ScenarioId } from '../engine/scenarios';
+import { listVisibleScenarios, getScenario, DEFAULT_RECOMMENDED_PLAYERS, type ScenarioId } from '../engine/scenarios';
 import { buildBoardGeometry, axialToPixel } from '../engine/board';
 import { createRng } from '../engine/setup';
 
@@ -79,7 +79,7 @@ export interface ScenarioSelectOptions {
 
 /** シナリオ選択ウィジェット（カードグリッド＋選択中の説明）。要素を返す。 */
 export function buildScenarioSelect(opts: ScenarioSelectOptions): HTMLElement {
-  const scenarios = listScenarios();
+  const scenarios = listVisibleScenarios();
   const wrap = document.createElement('div');
   wrap.className = 'scenario-picker' + (opts.disabled ? ' disabled' : '');
   wrap.dataset.scenario = opts.current;

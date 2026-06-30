@@ -6,6 +6,7 @@
 // 図鑑(showAssetGallery)と同じ overlay/modal CSS を流用する。
 
 import type { GameState } from '../types';
+import { getScenario, getScenarioRules } from '../engine/scenarios';
 
 function hasSea(state: GameState): boolean {
   return Object.values(state.tiles).some(t => t.type === 'sea');
@@ -50,6 +51,12 @@ export function openBeginnerHelp(state: GameState): void {
     '開拓地=1点 / 都市=2点 / 最長交易路=2点 / 最大騎士力=2点 / 勝利点カード=1点。',
   ]);
 
+  // このゲーム（いま遊んでいるシナリオ）固有のルールを先頭に出す。
+  if (state.scenarioId) {
+    const scen = getScenario(state.scenarioId as Parameters<typeof getScenario>[0]);
+    section(`📜 このゲーム「${scen.name}」のルール`, getScenarioRules(state.scenarioId));
+  }
+
   section('🔁 手番の流れ', [
     '① サイコロを振る → 出た数字に接する自分の建物が資源をもらう（都市は2倍）。',
     '　7が出たら、手札8枚以上の人は半分を捨てる＋盗賊を動かして1枚奪う。',
@@ -65,6 +72,18 @@ export function openBeginnerHelp(state: GameState): void {
     '発展カード：羊1＋麦1＋鉱石1（騎士・勝利点など）',
     ...(sea ? ['船：木1＋羊1（海ぞいに伸ばして新しい島へ）'] : []),
   ]);
+
+  // 航海者（海のある盤）共通ルール。シナリオ固有の上に、海まわりの共通操作をまとめて出す。
+  if (sea) {
+    section('⛵ 海と船（航海者の共通ルール）', [
+      '船は「自分の船」か「自分の建物」からしか伸ばせない。陸の道と海の船は、開拓地・都市の上でだけ切り替わる。',
+      '行き止まりの船は「⛵船を移動」で1ターンに1隻だけ別の海辺へ動かせる。',
+      '7が出たら「盗賊（陸タイルをタップ）」か「海賊（海タイルをタップ）」を選べる。海賊は隣の船の持ち主から1枚奪い、その海での船建設を封じる。',
+      '砂漠の無い盤では、盗賊は最初は盤の外。最初に7が出て盗賊を選ぶと、そこで初めて盤に登場する（海賊は最初から盤の隅の海に居る）。',
+      '初期配置の2個目のコマは、海岸の開拓地なら「道」でも「船」でも置ける（光った辺をタップ）。',
+      '金タイル：数字が出ると、木・レンガ・羊・麦・鉱石から好きな資源を選んでもらえる（開拓地1・都市2）。',
+    ]);
+  }
 
   section('💡 勝つコツ', [
     '数字6・8（●が多い）に接する角は資源が出やすい。最初の開拓地はここを狙う。',

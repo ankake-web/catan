@@ -6,7 +6,7 @@ import type { GameState, Action, PlayerId, ResourceType, Player, ResourceHand } 
 import { RESOURCE_TYPES, BUILD_COSTS, CK_COSTS, VP_TABLE } from '../constants';
 import { calcVP, calcPublicVP, victoryTarget } from '../engine/scoring';
 import { LONGEST_ROAD_MIN, LARGEST_ARMY_MIN } from '../constants';
-import { hasEnoughResources, playerHasMovableShip } from '../engine/actions';
+import { hasEnoughResources, playerHasMovableShip, canBuildShip } from '../engine/actions';
 import { canAttackFortress, canPlayWarship } from '../engine/pirateIslands';
 import { bestWonderAction } from '../engine/wonders';
 import { canBankTrade, getEffectiveTradeRate, isCommodity } from '../engine/trade';
@@ -255,9 +255,11 @@ function phaseText(state: GameState): string {
   if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
     const half = state.phase === 'SETUP_FORWARD' ? '前半' : '後半';
     if (isCpuTurn) return `セットアップ${half}：配置中…`;
-    return state.setupSubPhase === 'PLACE_SETTLEMENT'
-      ? `セットアップ${half}：開拓地を置く`
-      : `セットアップ${half}：道を置く`;
+    if (state.setupSubPhase === 'PLACE_SETTLEMENT') return `セットアップ${half}：開拓地を置く`;
+    // 航海者: 海岸の開拓地なら道の代わりに船も置ける → どちらでも選べることを明示。
+    const canShip = !!currentPid
+      && Object.keys(state.edges).some(eid => canBuildShip(state, currentPid as PlayerId, eid));
+    return canShip ? `セットアップ${half}：道 か 船 を置く（海岸はどちらでもOK）` : `セットアップ${half}：道を置く`;
   }
 
   switch (state.turnPhase) {
@@ -1294,7 +1296,8 @@ function showShipRulesHelp(state: GameState, pid: PlayerId): void {
   ul.className = 'help-list';
   for (const r of [
     '船は「木材＋羊毛」。海に面した辺に置けます。',
-    '船は自分の船か建物から、道は自分の道か建物からのみ伸ばせます（道と船は直接つながらず、建物でのみ切り替わります）。',
+    '船は「自分の船」か「自分の建物（開拓地・都市）」からしか伸ばせません。',
+    '陸の道と海の船は直接はつながりません。道⇔船の切り替えは、開拓地・都市の上でだけできます。',
     '動かせるのは「行き止まり（片端が他とつながっていない）の船」だけ。',
     '船の移動は1ターンに1隻まで。',
     '新しい島に開拓地を建てると、そこから先へさらに船を伸ばせます。',
