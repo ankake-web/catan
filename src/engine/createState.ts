@@ -51,7 +51,8 @@ export function createInitialGameState(
   //   開始直後は誰の船にも近づかないようにする（盗賊は砂漠の盤、砂漠なし盤では7まで盤外）。
   //   ※S7 海賊の島々（独自の海賊艦隊）と S8 七不思議（海賊不使用）では通常の海賊コマは置かない。
   const usesPirate = Object.values(tiles).some(t => t.type === 'sea')
-    && !scenario.rules?.pirateIslands && !scenario.rules?.wonders;
+    && !scenario.rules?.pirateIslands && !scenario.rules?.wonders
+    && !scenario.rules?.noShips; // オアシス（基本ゲーム・船なし）は海賊コマを置かない
   const piratePosition = usesPirate
     ? Object.values(tiles)
         .filter(t => t.type === 'sea')
@@ -74,8 +75,8 @@ export function createInitialGameState(
       type: spec.type,
       hand: makeHand(),
       devCards: [],
-      remainingRoads: 15,
-      remainingShips: 15,
+      remainingRoads: scenario.rules?.startingRoads ?? 15,
+      remainingShips: scenario.rules?.noShips ? 0 : 15,
       remainingSettlements: 5,
       remainingCities: 4,
       knightsPlayed: 0,

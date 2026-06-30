@@ -418,6 +418,8 @@ export function applyAction(
       next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
       // 大カタン: 道で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
       next = revealPendingNumbers(next, edgeTileIds(next.edges[edgeId]!, next.vertices));
+      // オアシス: 道で財宝の辺に到達したら獲得（資源＋発展カード等）。財宝の無い盤では no-op。
+      next = collectEdgeToken(next, edgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
 

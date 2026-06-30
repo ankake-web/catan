@@ -315,6 +315,10 @@ export interface ScenarioRules {
   numberTokenSupply?: number;
   /** 特定の「地域」に初めて開拓地を建てたプレイヤーへの特別VP（既定0）。砂漠を越えて＝北西地方に2。 */
   regionBonusVp?: number;
+  /** 各プレイヤーの初期の道コマ数（既定15）。オアシス＝30（道で砂漠/霧を探索するため多め）。 */
+  startingRoads?: number;
+  /** 船を使わない基本ゲーム（既定false）。オアシス＝true（霧/砂漠は道だけで探索する）。 */
+  noShips?: boolean;
 }
 
 // 航海者 S5「忘れられた部族」/「宝島」: 海の辺に事前配置されるトークンの種別。

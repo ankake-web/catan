@@ -35,6 +35,7 @@ export type ScenarioId =
   | 'ck_seafarers_newshores'   // 公式アプリ「都市と騎士—新たな岸へ」（航海者盤＋C&K・17点）
   | 'ck_seafarers_oceania'     // 公式アプリ「都市と騎士—オセアニア」（霧の2島＋C&K・15点）
   | 'ck_seafarers_greatercatan'// 公式アプリ「都市と騎士—大カタン」（数値トークン欠＋C&K・20点）
+  | 'oasis'                    // 公式アプリ「オアシス」（基本ゲーム＋道で砂漠/霧を探索＋財宝・10点）
   | 'cities_knights';
 
 export interface ScenarioBoard {
@@ -1169,6 +1170,83 @@ const ckSeafarersGreaterCatan: Scenario = {
   rules: { newIslandBonusVp: 0, maxCities: 8, missingNumberTokens: true },
 };
 
+// ============================================================
+// 公式アプリ「オアシス」(photo/オアシス IMG_6410 実読): 「カタンの開拓者たち」基本ゲーム＋
+//   砂漠/オアシスを“道”で探索する新メカ。船は使わず、各自30本の道で霧(=砂漠/資源)を切り開く。
+//   霧の横に道を置くと晴れて砂漠か資源地が現れ、資源地なら資源1枚。財宝の辺に道を置くと獲得。10点。
+// ============================================================
+// 出発の陸（中央13・全5資源＋砂漠1=盗賊初期。ここで初期配置する）。
+const OASIS_LAND: LandMap = {
+  '0,0':   { type: 'desert',   number: null, robber: true },
+  '1,0':   { type: 'forest',   number: 8 },
+  '1,-1':  { type: 'field',    number: 5 },
+  '0,-1':  { type: 'pasture',  number: 9 },
+  '-1,0':  { type: 'mountain', number: 4 },
+  '-1,1':  { type: 'hill',     number: 6 },
+  '0,1':   { type: 'forest',   number: 11 },
+  '2,-1':  { type: 'field',    number: 3 },
+  '1,-2':  { type: 'pasture',  number: 10 },
+  '0,-2':  { type: 'mountain', number: 5 },
+  '-1,-1': { type: 'hill',     number: 9 },
+  '-2,0':  { type: 'field',    number: 11 },
+  '-2,1':  { type: 'mountain', number: 8 },
+};
+// 霧（砂漠/オアシス・12セル）。道で隣に到達すると晴れる。砂漠は産出なし、資源地（=オアシス）は
+//   発見時に資源1枚。海(sea)は入れない＝必ず砂漠か資源が出る（公式「砂漠か資源のある土地が現れる」）。
+const OASIS_FOG: FogMap = {
+  '2,0':  { type: 'desert',   number: null },
+  '1,1':  { type: 'pasture',  number: 4 },
+  '0,2':  { type: 'desert',   number: null },
+  '-1,2': { type: 'forest',   number: 9 },
+  '-2,2': { type: 'desert',   number: null },
+  '2,-2': { type: 'hill',     number: 10 },
+  '0,-3': { type: 'desert',   number: null },
+  '1,-3': { type: 'field',    number: 6 },
+  '-3,2': { type: 'mountain', number: 3 },
+  '-3,1': { type: 'desert',   number: null },
+  '3,-2': { type: 'field',    number: 5 },
+  '3,-3': { type: 'desert',   number: null },
+};
+// オアシスの盤を組む: 出発の陸＋霧＋財宝の辺。財宝は「霧（砂漠/オアシス）に面する辺」へ決定論配置
+//   （道で到達して取れる位置）。船は使わないので harbors は無し。
+function buildOasis(landMap: LandMap, fogMap: FogMap, treasureCount: number): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
+  return (geo, rng) => {
+    const home = randomizeLandMap(landMap, rng);
+    const fog = randomizeFogMap(fogMap, rng);
+    const tiles: Record<TileId, Tile> = {};
+    for (const id of Object.keys(geo.tileToVertices)) {
+      const coord = parseTileId(id);
+      const land = home[id];
+      const f = fog[id];
+      if (land) tiles[id] = { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber };
+      else if (f) tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false, fog: { type: f.type, number: f.number } };
+      else tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false };
+    }
+    // 財宝: 霧（砂漠/オアシス）に面する辺へ等間隔配置。道で到達して獲得する。
+    const fogEdges = Object.values(geo.edges).filter(e => {
+      const tids = edgeTileIds(e, geo.vertices);
+      return tids.some(t => tiles[t]?.fog != null);
+    }).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const edgeTokens: Record<string, EdgeTokenKind> = {};
+    const step = Math.max(1, Math.floor(fogEdges.length / treasureCount));
+    for (let i = 0; i < treasureCount && i * step < fogEdges.length; i++) {
+      edgeTokens[fogEdges[i * step]!.id] = 'treasure';
+    }
+    return { tiles, harbors: [], edgeTokens };
+  };
+}
+const seafarersOasis: Scenario = {
+  id: 'oasis',
+  name: 'オアシス',
+  description: '基本ゲーム＋砂漠探索。各自30本の道で霧を切り開き、砂漠の奥のオアシス（資源地）や財宝を見つける（10点）。',
+  category: 'basic',
+  coords: BIG_COORDS, // 37ヘックス（出発の陸＋霧の砂漠）
+  build: buildOasis(OASIS_LAND, OASIS_FOG, 6),
+  victoryTarget: 10,
+  recommendedPlayers: '4人',
+  rules: { startingRoads: 30, noShips: true, newIslandBonusVp: 0 },
+};
+
 const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
   // 公式航海者シナリオ
@@ -1193,6 +1271,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   ck_seafarers_newshores: ckSeafarersNewShores,
   ck_seafarers_oceania: ckSeafarersOceania,
   ck_seafarers_greatercatan: ckSeafarersGreaterCatan,
+  oasis: seafarersOasis,
   cities_knights: citiesKnights,
 };
 
@@ -1307,6 +1386,12 @@ const SCENARIO_RULES: Record<ScenarioId, string[]> = {
     '小島は到達するまで数字が出ず産出しない（抜けている数値トークン）。都市は8つまで。',
     '都市と騎士の要素（商品・都市改善・騎士・蛮族の襲来）もすべて適用される。',
   ],
+  oasis: [
+    '10点で勝ち。基本ゲームのルールで、目の前の広大な砂漠を探索する盤（船は使わない）。',
+    '各プレイヤーに道が30本。砂漠（霧）の横に道を置くと晴れて、砂漠か資源地（オアシス）が現れる。',
+    'オアシス（資源地）を発見すると資源1枚。砂漠の奥に道を伸ばして探索を進める。',
+    '財宝が砂漠やオアシスに眠る。財宝の辺に道を置くと、資源や発展カードがもらえる。',
+  ],
 };
 
 /** このゲーム固有の詳細ルール（遊び方表示用）。未知IDは基本のルールにフォールバック。 */
@@ -1351,6 +1436,8 @@ const VISIBLE_SCENARIO_IDS: ReadonlySet<ScenarioId> = new Set<ScenarioId>([
   'ck_seafarers_newshores',
   'ck_seafarers_oceania',
   'ck_seafarers_greatercatan',
+  // 基本ゲーム＋砂漠探索
+  'oasis',
 ]);
 /** 盤面選択UIに表示するシナリオ一覧（listScenarios のうち VISIBLE のみ）。 */
 export function listVisibleScenarios(): ReadonlyArray<ScenarioInfo> {

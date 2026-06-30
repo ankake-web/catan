@@ -26,7 +26,7 @@ describe('scenarios: registry', () => {
     // @ts-expect-error 故意に未知ID
     expect(getScenario('nope').id).toBe('classic');
   });
-  it('表示シナリオは基本/都市と騎士＋航海者7つ＋C&K複合3つ（他は実装は残すが非表示）', () => {
+  it('表示シナリオは基本/都市と騎士＋航海者7つ＋C&K複合3つ＋オアシス（他は実装は残すが非表示）', () => {
     const visible = listVisibleScenarios().map(s => s.id).sort();
     expect(visible).toEqual(
       [
@@ -35,6 +35,7 @@ describe('scenarios: registry', () => {
         'seafarers_fourislands', 'seafarers_fogislands', 'seafarers_oceania',
         'seafarers_throughdesert', 'seafarers_greatercatan',
         'ck_seafarers_newshores', 'ck_seafarers_oceania', 'ck_seafarers_greatercatan',
+        'oasis',
       ].sort(),
     );
     // 非表示シナリオも実装（getScenario）とフル一覧（listScenarios）には残る。
