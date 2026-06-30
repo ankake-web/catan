@@ -8,8 +8,10 @@
 import type { GameState } from '../types';
 import { getScenario, getScenarioRules } from '../engine/scenarios';
 
-function hasSea(state: GameState): boolean {
-  return Object.values(state.tiles).some(t => t.type === 'sea');
+// 「船を使う盤か」。海タイルがあっても船を使わない盤（オアシス: noShips）では船UIを出さない。
+//   オアシスは霧/周縁が sea なので、単純な海タイル判定だと船コスト・海と船・🚢船ボタンが誤表示される。
+function usesShips(state: GameState): boolean {
+  return !state.noShips && Object.values(state.tiles).some(t => t.type === 'sea');
 }
 
 /** 「はじめての遊び方」オーバーレイを開く（多重表示は前のを消す）。 */
@@ -28,7 +30,7 @@ export function openBeginnerHelp(state: GameState): void {
   const body = document.createElement('div');
   body.className = 'gallery-body beginner-help-body';
 
-  const sea = hasSea(state);
+  const sea = usesShips(state);
   const goal = state.victoryTarget ?? 10;
 
   const section = (title: string, lines: string[]): void => {

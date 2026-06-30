@@ -37,6 +37,18 @@ describe('openBeginnerHelp（遊び方ヘルプ）', () => {
     expect(text).toContain('金タイル');
   });
 
+  // バグ回帰: 船UI判定が「海タイルの有無」依存だったため、霧/周縁が sea のオアシス（noShips・
+  //   船0）でも船コスト・海と船セクションが誤表示されていた。判定を !noShips に変えた。
+  it('オアシス（船なし）では海と船セクション・船コストを出さない', () => {
+    const s = state('oasis');
+    expect(s.noShips).toBe(true); // 両UIが依拠する判定シグナル
+    openBeginnerHelp(s);
+    const text = document.querySelector('.beginner-help-overlay')!.textContent || '';
+    expect(text).toContain('このゲーム「オアシス」のルール'); // 固有ルールは出る
+    expect(text).not.toContain('海と船（航海者の共通ルール）');  // ← バグ時は出てしまう
+    expect(text).not.toContain('船：木1＋羊1');                 // 船コスト行も出さない
+  });
+
   it('このゲーム固有のルールセクションを出す（シナリオごとに分かれる）', () => {
     openBeginnerHelp(state('seafarers_newshores'));
     const t1 = document.querySelector('.beginner-help-overlay')!.textContent || '';

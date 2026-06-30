@@ -1908,8 +1908,9 @@ function buildActionButtons(
   const canSettl = player.remainingSettlements > 0 && hasEnoughResources(player.hand, BUILD_COSTS.settlement);
   const canCity  = player.remainingCities > 0 && hasEnoughResources(player.hand, BUILD_COSTS.city);
   const canDev   = state.devDeck.length > 0 && hasEnoughResources(player.hand, BUILD_COSTS.dev_card);
-  // 航海者: 盤面に海タイルがあるときだけ船ボタンを出す（基本盤では非表示）。
-  const hasSea   = Object.values(state.tiles).some(t => t.type === 'sea');
+  // 航海者: 盤面に海タイルがあり、かつ船を使う盤のときだけ船ボタンを出す（基本盤・オアシスでは非表示）。
+  //   オアシスは霧/周縁が sea だが noShips（船0）なので、海タイル判定だけだと船UIが誤表示される。
+  const hasSea   = !state.noShips && Object.values(state.tiles).some(t => t.type === 'sea');
   const canShip  = (player.remainingShips ?? 0) > 0 && hasEnoughResources(player.hand, BUILD_COSTS.ship);
 
   // 建設モード選択中のヒント文（「選択中：光っている場所をタップ」）は操作パネルの

@@ -428,6 +428,7 @@ export interface GameState {
   setupAnywhere?: boolean;        // 初期配置をどの島にも置けるか（既定false。S2/New World=true）
   numberHexOnly?: boolean;        // 開拓地・盗賊を数字ヘックスのみに制限（既定false。S5=true）
   noIslandSettlement?: boolean;   // 小島（本島以外）に開拓地を建てられない（既定false。S6=true）
+  noShips?: boolean;              // 船を一切使わない盤か（既定false。オアシス=true。海タイルはあるが船UIを出さない）
   maxCities?: number;             // 1プレイヤーの都市建設上限（既定なし。大カタン=8）
   // 大カタン「抜けている数値トークン」: 残りの供給枚数。0になると以後は本島の数字を抜いて小島へ配る。
   numberTokenSupply?: number;
