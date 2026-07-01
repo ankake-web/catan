@@ -101,9 +101,16 @@ export function collectEdgeToken(state: GameState, edgeId: EdgeId, playerId: Pla
       const RES = ['wood', 'brick', 'wool', 'grain', 'ore'] as const;
       const a = RES[hash % 5]!, b = RES[(hash + 2) % 5]!;
       const player = next.players[playerId]!;
+      const hand = { ...player.hand };
+      const bank = { ...next.bank };
+      // 財宝の資源はバンクから供給する（在庫がある分だけ）。バンク非減算だと総在庫が膨張する。
+      for (const r of [a, b]) {
+        if (bank[r] > 0) { hand[r] += 1; bank[r] -= 1; }
+      }
       next = {
         ...next,
-        players: { ...next.players, [playerId]: { ...player, hand: { ...player.hand, [a]: player.hand[a] + 1, [b]: player.hand[b] + 1 } } },
+        bank,
+        players: { ...next.players, [playerId]: { ...player, hand } },
       };
     }
   } else { // harbor

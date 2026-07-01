@@ -138,6 +138,22 @@ describe('S5 忘れられた部族: 海辺トークン', () => {
     expect((gainedRes === 2 && gainedDev === 0) || (gainedRes === 0 && gainedDev === 1)).toBe(true);
   });
 
+  // バグ回帰: 財宝の資源2枚がバンク非減算で総在庫が膨張していた。バンクから供給することを検証。
+  it('[宝島] 財宝の資源はバンクから供給される（総在庫が膨張しない）', () => {
+    const g = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_treasure');
+    const e = Object.keys(g.edgeTokens ?? {}).find(k => g.edgeTokens![k] === 'treasure')!;
+    const s: GameState = { ...g, devDeck: [] }; // 発展カード無し＝必ず資源2枚の枝を通す
+    const bankSum = (st: GameState): number =>
+      (['wood', 'brick', 'wool', 'grain', 'ore'] as const).reduce((sum, r) => sum + st.bank[r], 0);
+    const handSum = (st: GameState): number =>
+      (['wood', 'brick', 'wool', 'grain', 'ore'] as const).reduce((sum, r) => sum + st.players.player1!.hand[r], 0);
+    const bankBefore = bankSum(s), handBefore = handSum(s);
+    const next = collectEdgeToken(s, e, 'player1');
+    const gained = handSum(next) - handBefore;
+    expect(gained).toBe(2);                          // 資源2枚を獲得
+    expect(bankSum(next)).toBe(bankBefore - gained); // ← バグ時はバンク不変で膨張し落ちる
+  });
+
   // バグ回帰: BUILD_SHIP の collectEdgeToken に setup 除外ガードが無く、無償の初期船を財宝の
   //   辺に置くと只取りできた。SETUP 中は獲得しないこと（トークンが盤に残る）を検証。
   it('[宝島] セットアップの無償の船では財宝を獲得しない（盤に残る）', () => {
