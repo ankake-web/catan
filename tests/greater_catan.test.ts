@@ -4,7 +4,7 @@ import { createInitialGameState } from '../src/engine/createState';
 import type { PlayerSpec } from '../src/engine/createState';
 import { createRng } from '../src/engine/setup';
 import { revealPendingNumbers, hasPendingNumbers } from '../src/engine/explore';
-import { canBuildCity } from '../src/engine/actions';
+import { canBuildCity, canBuildSettlement } from '../src/engine/actions';
 import { calcVP } from '../src/engine/scoring';
 import { applyAction } from '../src/engine/game';
 import { edgeTileIds, isSeaEdge } from '../src/engine/board';
@@ -73,6 +73,35 @@ describe('大カタン: 抜けている数値トークン', () => {
     expect(base.tiles[removed[0]!.id]!.number).toBe(next.tiles[island.id]!.number);
   });
 
+  // テストの穴埋め: 複数タイルの同時公開と、供給境界（残り＜同時公開数）またぎが未検証だった。
+  it('複数の小島タイルを同時公開すると全て数字が出て供給がその分だけ減る', () => {
+    const s = greater(); // 供給5
+    const pend = Object.values(s.tiles).filter(t => t.pendingNumber != null).slice(0, 3);
+    const next = revealPendingNumbers(s, pend.map(t => t.id));
+    for (const t of pend) {
+      expect(next.tiles[t.id]!.number).toBe(t.pendingNumber);
+      expect(next.tiles[t.id]!.pendingNumber).toBeUndefined();
+    }
+    expect(next.numberTokenSupply).toBe(2); // 5 - 3
+    expect(Object.values(next.tiles).some(t => t.numberRemoved)).toBe(false); // 供給内なので本島は抜かれない
+  });
+
+  it('供給境界をまたぐ同時公開: 供給内は供給から・超過分だけ本島から抜いて配る', () => {
+    const base = greater();
+    const s: GameState = { ...base, numberTokenSupply: 1 }; // 残り1枚だけ
+    const pend = Object.values(s.tiles).filter(t => t.pendingNumber != null).slice(0, 2);
+    const next = revealPendingNumbers(s, pend.map(t => t.id));
+    for (const t of pend) { // 2島とも数字が出る
+      expect(next.tiles[t.id]!.number).not.toBeNull();
+      expect(next.tiles[t.id]!.pendingNumber).toBeUndefined();
+    }
+    expect(next.numberTokenSupply).toBe(0);
+    // 供給を超えた1枚分だけ本島タイルが抜かれる（ちょうど1枚）。
+    const removed = Object.values(next.tiles).filter(t => t.numberRemoved);
+    expect(removed.length).toBe(1);
+    expect(removed[0]!.number).toBeNull();
+  });
+
   it('船で小島タイルの端に到達すると、その小島の数字が出現する（エンドツーエンド）', () => {
     const g = greater();
     // 小島タイルに面する空きの海辺 E を選び、その片端に player1 の建物を置いて接続を満たす。
@@ -93,6 +122,19 @@ describe('大カタン: 抜けている数値トークン', () => {
 });
 
 describe('大カタン: 都市制限8', () => {
+  it('createInitialGameState: 大カタンは都市8コマを用意する（既定4・回帰）', () => {
+    // バグ: remainingCities を全シナリオ4にハードコードしていたため、maxCities=8 でも
+    //   コマ(remainingCities)が先に0になり5個目以降を建てられず「都市8まで」が死にルールだった。
+    for (const id of ['seafarers_greatercatan', 'ck_seafarers_greatercatan'] as const) {
+      const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), id);
+      expect(s.maxCities).toBe(8);
+      for (const pid of s.playerOrder) expect(s.players[pid]!.remainingCities).toBe(8);
+    }
+    // 上限を上げないシナリオは既定どおり4コマ。
+    const classic = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'classic');
+    for (const pid of classic.playerOrder) expect(classic.players[pid]!.remainingCities).toBe(4);
+  });
+
   it('都市が8つ未満なら昇格でき、8つに達したら不可', () => {
     const g = greater();
     // player1 の開拓地を1つ用意し、都市資源を持たせる。
@@ -101,9 +143,11 @@ describe('大カタン: 都市制限8', () => {
     const base: GameState = {
       ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null, currentPlayerIndex: 0,
       vertices: { ...g.vertices, [settV]: { ...g.vertices[settV]!, building: { type: 'settlement', playerId: 'player1' } } },
-      players: { ...g.players, player1: { ...g.players.player1!, hand: makeHand({ grain: 2, ore: 3 }), remainingCities: 8 } },
+      // remainingCities は上書きしない＝createInitialGameState が大カタンで8コマを用意することに依存。
+      players: { ...g.players, player1: { ...g.players.player1!, hand: makeHand({ grain: 2, ore: 3 }) } },
     };
     expect(base.maxCities).toBe(8);
+    expect(base.players.player1!.remainingCities).toBe(8);
     expect(canBuildCity(base, 'player1', settV)).toBe(true);
     // すでに8都市保有なら、たとえコマが残っていても昇格不可。
     const verts = { ...base.vertices };
@@ -138,12 +182,39 @@ describe('砂漠を越えて: 北西地方の地域ボーナス(+2VP)', () => {
     expect(calcVP(next, 'player1')).toBe(vpBefore + 1 + 2);
   });
 
-  it('地域ボーナスは各プレイヤー1回まで（2軒目の北西入植では増えない）', () => {
+  // バグ回帰: 地域ボーナス付与が MAIN 限定だったため、北西地方（砂漠帯で本島と陸続き）に
+  //   SETUP で初期配置した人はボーナスを取り逃していた。付与を phase 非依存にした。
+  it('SETUP で北西地方に初期配置しても地域ボーナス(+2VP)が付く（回帰）', () => {
     const g = throughDesert();
-    const s: GameState = { ...g, regionBonus: ['player1'], regionBonusVp: 2 };
-    // すでに獲得済みなら VP に2回は乗らない。
-    const base = calcVP(s, 'player1');
-    const s2: GameState = { ...s, regionBonus: ['player1'] };
-    expect(calcVP(s2, 'player1')).toBe(base);
+    const regionTile = g.bonusRegionTiles![0]!;
+    const base: GameState = {
+      ...g, phase: 'SETUP_FORWARD', setupSubPhase: 'PLACE_SETTLEMENT', currentPlayerIndex: 0,
+    };
+    // 北西地方タイルに隣接し、初期配置できる頂点を選ぶ。
+    const v = Object.keys(base.vertices).find(vid =>
+      base.vertices[vid]!.adjacentTileIds.includes(regionTile) && canBuildSettlement(base, 'player1', vid))!;
+    expect(v).toBeTruthy();
+    const vpBefore = calcVP(base, 'player1');
+    const next = applyAction(base, { type: 'BUILD_SETTLEMENT', vertexId: v });
+    expect(next.regionBonus).toContain('player1');       // ← バグ時は SETUP で付与されず落ちる
+    expect(calcVP(next, 'player1')).toBe(vpBefore + 1 + 2); // 開拓地1点 + 地域ボーナス2点
+  });
+
+  it('地域ボーナスは各プレイヤー1回まで（2軒目の北西入植では重複加点しない）', () => {
+    // 旧テストは同一 state を2つ作って比較するトートロジーだった。実際に「獲得済みの状態で
+    // もう1軒 北西に置く」経路を通し、regionBonus が重複せず VP も再加算されないことを検証。
+    const g = throughDesert();
+    const regionTile = g.bonusRegionTiles![0]!;
+    const base: GameState = {
+      ...g, phase: 'SETUP_FORWARD', setupSubPhase: 'PLACE_SETTLEMENT', currentPlayerIndex: 0,
+      regionBonus: ['player1'], // すでに1回獲得済み
+    };
+    const v = Object.keys(base.vertices).find(vid =>
+      base.vertices[vid]!.adjacentTileIds.includes(regionTile) && canBuildSettlement(base, 'player1', vid))!;
+    expect(v).toBeTruthy();
+    const vpBefore = calcVP(base, 'player1');
+    const next = applyAction(base, { type: 'BUILD_SETTLEMENT', vertexId: v });
+    expect(next.regionBonus).toEqual(['player1']);      // 重複追加されない（各自1回）
+    expect(calcVP(next, 'player1')).toBe(vpBefore + 1);  // 開拓地1点のみ（+2は再加算されない）
   });
 });

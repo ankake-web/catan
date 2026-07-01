@@ -104,6 +104,25 @@ export function buildDevDeck(rng: () => number = Math.random): DevCard[] {
  * 騎士と商人: 蛮族解決(applyEventDie)後の「生産 or 7の捨て札/盗賊」への遷移。
  * ROLL_DICE 本体と、都市格下げ(CITY_DOWNGRADE)解決後の再開の両方から呼ぶ（重複排除＋一貫性）。
  */
+/**
+ * 航海者・金タイル産出: その数字で金タイルから産出を受けるプレイヤーへ任意資源の選択(GOLD)を
+ * 要求する。全体の選択枚数がバンク総在庫を超えないよう playerOrder 順に頭打ちして手詰まりを防ぐ。
+ * 金産出が無ければ TRADE_BUILD のまま返す。基本ゲーム・騎士と商人の双方の生産後に通すことで、
+ * C&K×航海者コンボ（金タイル入りの盤）でも金が産出するようにする。
+ */
+function applyGoldChoicePhase(next: GameState, total: number): GameState {
+  const rawPicks = computeGoldPicks(next, total);
+  let bankLeft = RESOURCE_TYPES.reduce((s, r) => s + next.bank[r], 0);
+  const goldPicks: Record<string, number> = {};
+  for (const pid of next.playerOrder) {
+    const capped = Math.min(rawPicks[pid] ?? 0, bankLeft);
+    if (capped > 0) { goldPicks[pid] = capped; bankLeft -= capped; }
+  }
+  return Object.keys(goldPicks).length > 0
+    ? { ...next, turnPhase: 'GOLD', pendingGoldChoice: goldPicks }
+    : { ...next, turnPhase: 'TRADE_BUILD' };
+}
+
 function resolveCkRollOutcome(next: GameState, total: number): GameState {
   if (total === 7) {
     const needsDiscard = next.playerOrder.some(p => discardCount(next, p) > 0); // 資源＋商品で判定
@@ -112,7 +131,10 @@ function resolveCkRollOutcome(next: GameState, total: number): GameState {
     const afterDiscard = robberActive ? 'ROBBER' : 'TRADE_BUILD';
     return { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : afterDiscard };
   }
-  return distributeCkProduction({ ...next, turnPhase: 'TRADE_BUILD' }, total);
+  // C&K×航海者: 資源＋商品の生産後に金タイル産出（任意資源の選択）も流す。isCk の早期 return で
+  // 金処理(GOLD)へ到達しなかったため、コンボ盤の金タイルが死にメカになっていたバグを修正。
+  const produced = distributeCkProduction({ ...next, turnPhase: 'TRADE_BUILD' }, total);
+  return applyGoldChoicePhase(produced, total);
 }
 
 /**
@@ -185,19 +207,8 @@ export function applyAction(
         // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
         next = produceCloth(next, total);
         // 航海者: 金タイル産出があれば、任意資源の選択待ち(GOLD)へ。無ければ通常どおり TRADE_BUILD。
-        // 複数人が同時に owed になりうるため、選択枚数は「逐次的に減るバンク総在庫」で頭打ちにする。
-        // 全体総和が在庫を超えないよう playerOrder 順に bankLeft から差し引くことで、どの順に
-        // CHOOSE_GOLD を解決しても最後の人まで必ず owed 枚を取れる（在庫切れの手詰まり=ソフトロック回避）。
-        const rawPicks = computeGoldPicks(next, total);
-        let bankLeft = RESOURCE_TYPES.reduce((s, r) => s + next.bank[r], 0);
-        const goldPicks: Record<string, number> = {};
-        for (const pid of next.playerOrder) {
-          const capped = Math.min(rawPicks[pid] ?? 0, bankLeft);
-          if (capped > 0) { goldPicks[pid] = capped; bankLeft -= capped; }
-        }
-        next = Object.keys(goldPicks).length > 0
-          ? { ...next, turnPhase: 'GOLD', pendingGoldChoice: goldPicks }
-          : { ...next, turnPhase: 'TRADE_BUILD' };
+        // 選択枚数のバンク頭打ち（ソフトロック回避）は applyGoldChoicePhase に集約（CK経路と共通）。
+        next = applyGoldChoicePhase(next, total);
       }
 
       next = checkClothEnd(next); // S6: 織物生産後、5村供給切れなら終了（無い盤では no-op）
@@ -419,7 +430,8 @@ export function applyAction(
       // 大カタン: 道で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
       next = revealPendingNumbers(next, edgeTileIds(next.edges[edgeId]!, next.vertices));
       // オアシス: 道で財宝の辺に到達したら獲得（資源＋発展カード等）。財宝の無い盤では no-op。
-      next = collectEdgeToken(next, edgeId, pid);
+      // セットアップの無償の初期道で財宝/開発カードを只取りできないよう、SETUP 中は獲得しない。
+      if (!_isSetup) next = collectEdgeToken(next, edgeId, pid);
       next = updateLongestRoad(next);
       next = checkVictory(next, pid);
 
@@ -454,7 +466,8 @@ export function applyAction(
       // 大カタン: 船で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
       next = revealPendingNumbers(next, edgeTileIds(next.edges[edgeId]!, next.vertices));
       // S5 忘れられた部族: この辺に海辺トークンがあれば獲得（VP/開発カード/港）。無い盤では no-op。
-      next = collectEdgeToken(next, edgeId, pid);
+      // セットアップの無償の初期船で財宝/トークンを只取りできないよう、SETUP 中は獲得しない。
+      if (!_isSetupSh) next = collectEdgeToken(next, edgeId, pid);
       // S6 カタンの織物: この辺が村に隣接していれば航路接続（接続成立で即織物1枚）。無い盤では no-op。
       next = connectVillagesAround(next, edgeId, pid);
       next = updateLongestRoad(next);
@@ -554,14 +567,6 @@ export function applyAction(
             next = { ...next, islandBonus: { ...(next.islandBonus ?? {}), [rep]: [...owners, pid] } };
           }
         }
-        // 砂漠を越えて: 「北西地方」（地域ボーナス対象タイル）へ初入植したら +regionBonusVp（各自1回）。
-        if (next.bonusRegionTiles && (next.regionBonusVp ?? 0) > 0) {
-          const claimed = next.regionBonus ?? [];
-          const touchesRegion = next.vertices[vertexId]!.adjacentTileIds.some(t => next.bonusRegionTiles!.includes(t));
-          if (touchesRegion && !claimed.includes(pid)) {
-            next = { ...next, regionBonus: [...claimed, pid] };
-          }
-        }
       } else {
         // 初期配置: 置いた島を「自分のホーム島」として記録（S2/New World のプレイヤー別未探検判定に使う）。
         const homeRep = islandRepOf(next, vertexId);
@@ -570,6 +575,17 @@ export function applyAction(
           if (!cur.includes(homeRep)) {
             next = { ...next, playerHomeIslands: { ...(next.playerHomeIslands ?? {}), [pid]: [...cur, homeRep] } };
           }
+        }
+      }
+
+      // 砂漠を越えて: 「北西地方」（地域ボーナス対象タイル）へ初入植したら +regionBonusVp（各自1回）。
+      // 北西地方は砂漠帯で本島と陸続き＝SETUP でも初期配置しうるため、付与は phase 非依存にする
+      //（MAIN 限定だと SETUP で北西に初期配置した人がボーナスを取り逃す）。checkVictory より前に付与。
+      if (next.bonusRegionTiles && (next.regionBonusVp ?? 0) > 0) {
+        const claimed = next.regionBonus ?? [];
+        const touchesRegion = next.vertices[vertexId]!.adjacentTileIds.some(t => next.bonusRegionTiles!.includes(t));
+        if (touchesRegion && !claimed.includes(pid)) {
+          next = { ...next, regionBonus: [...claimed, pid] };
         }
       }
 

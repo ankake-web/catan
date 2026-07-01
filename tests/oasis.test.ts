@@ -4,9 +4,10 @@ import { createInitialGameState } from '../src/engine/createState';
 import type { PlayerSpec } from '../src/engine/createState';
 import { createRng } from '../src/engine/setup';
 import { applyAction } from '../src/engine/game';
+import { distributeResources } from '../src/engine/dice';
 import { canBuildShip } from '../src/engine/actions';
 import { edgeTileIds, isLandEdge } from '../src/engine/board';
-import { makeHand, RESOURCE_TYPES } from '../src/constants';
+import { makeHand, RESOURCE_TYPES, TILE_RESOURCE_MAP } from '../src/constants';
 import type { GameState, ResourceHand } from '../src/types';
 
 const SPECS: PlayerSpec[] = [
@@ -102,5 +103,78 @@ describe('オアシス: 道で探索（霧→砂漠/オアシス）と財宝', (
     const gainedRes = total(next.players.player1!.hand) - (handBefore - 2);
     const gainedDev = next.players.player1!.devCards.length - devBefore;
     expect(gainedRes > 0 || gainedDev > 0).toBe(true);
+  });
+
+  // バグ回帰: BUILD_ROAD/BUILD_SHIP の collectEdgeToken に setup 除外ガードが無く、無償の
+  //   初期道/船を財宝の辺に置くと財宝/開発カードを只取りできた（オアシス/宝島で再現）。
+  it('セットアップの無償の道では財宝を獲得しない（盤に残る）', () => {
+    const g = oasis();
+    const tEdgeId = Object.keys(g.edgeTokens ?? {}).find(eid => {
+      const e = g.edges[eid]!;
+      return g.edgeTokens![eid] === 'treasure' && isLandEdge(e, g.vertices, g.tiles) && e.road == null;
+    })!;
+    const E = g.edges[tEdgeId]!;
+    const v = E.vertexIds[0]!; // この頂点を直前に置いた開拓地＝道の anchor とする
+    // SETUP_FORWARD・道の配置サブフェーズ（道は無償・anchor接続のみ）。
+    const s: GameState = {
+      ...g, phase: 'SETUP_FORWARD', setupSubPhase: 'PLACE_ROAD', setupRoadAnchor: v, currentPlayerIndex: 0,
+      vertices: { ...g.vertices, [v]: { ...g.vertices[v]!, building: { type: 'settlement', playerId: 'player1' } } },
+      players: { ...g.players, player1: { ...g.players.player1!, hand: makeHand() } },
+    };
+    const devBefore = s.players.player1!.devCards.length;
+    const next = applyAction(s, { type: 'BUILD_ROAD', edgeId: tEdgeId });
+    expect(next.edges[tEdgeId]!.road?.playerId).toBe('player1'); // 道は置けている
+    expect(next.edgeTokens?.[tEdgeId]).toBe('treasure');          // ← 財宝は只取りされず盤に残る
+    expect(next.players.player1!.devCards.length).toBe(devBefore); // 開発カードも得ていない
+  });
+});
+
+// バグ回帰: randomizeFogMap が地形と数字を別シャッフルしていたため、砂漠を含む霧（オアシス）では
+//   資源地の約半数が number=undefined になり「発見時の+1は出るが以後ダイスで永久に産出しない」死に地
+//   になっていた（砂漠には幽霊数字が付いた）。霧の構造と、晴れた資源地が実際にダイスで産出することを検証。
+describe('オアシス: 晴れた資源地はダイスで産出する（回帰）', () => {
+  it('どのシードでも、霧の資源地には必ず数字が付き／砂漠には数字が付かない', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const g = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(seed), 'oasis');
+      for (const t of Object.values(g.tiles)) {
+        const f = t.fog;
+        if (!f) continue;
+        if (f.type === 'desert') {
+          expect(f.number, `seed ${seed}: 砂漠に幽霊数字`).toBeNull();
+        } else {
+          // 資源地（産出する地形）は必ず数字を持つ＝発見後にダイス産出できる。
+          expect(typeof f.number, `seed ${seed}: 資源地 ${f.type} に数字なし`).toBe('number');
+        }
+      }
+    }
+  });
+
+  it('道で資源地を発見した後、その数字が出ると開拓地に資源が入る（エンドツーエンド）', () => {
+    const g = oasis();
+    // 霧が「資源地（砂漠以外）」を隠し、出発の陸に面する未使用の陸辺（フロンティア）を選ぶ。
+    const E = Object.values(g.edges).find(e => {
+      const tids = edgeTileIds(e, g.vertices);
+      const fogLand = tids.find(t => g.tiles[t]?.fog && g.tiles[t]!.fog!.type !== 'desert');
+      return fogLand != null && isLandEdge(e, g.vertices, g.tiles) && e.road == null;
+    })!;
+    expect(E).toBeTruthy();
+    const fogTid = edgeTileIds(E, g.vertices).find(t => g.tiles[t]?.fog && g.tiles[t]!.fog!.type !== 'desert')!;
+    const v = E.vertexIds[0]!; // フロンティア辺の端点＝晴れる資源地の角でもある
+    const base: GameState = {
+      ...g, phase: 'MAIN', turnPhase: 'TRADE_BUILD', setupSubPhase: null, currentPlayerIndex: 0, diceRolledThisTurn: true,
+      vertices: { ...g.vertices, [v]: { ...g.vertices[v]!, building: { type: 'settlement', playerId: 'player1' } } },
+      players: { ...g.players, player1: { ...g.players.player1!, hand: makeHand({ wood: 1, brick: 1 }) } },
+    };
+    const revealed = applyAction(base, { type: 'BUILD_ROAD', edgeId: E.id });
+    const tile = revealed.tiles[fogTid]!;
+    expect(tile.fog).toBeUndefined();                 // 霧が晴れた
+    expect(tile.type).not.toBe('sea');
+    expect(tile.type).not.toBe('desert');             // 資源地を選んでいる
+    expect(typeof tile.number).toBe('number');        // ← バグなら undefined でここで落ちる
+    const res = TILE_RESOURCE_MAP[tile.type]!;        // 資源地の産出資源
+    // 発見直後の手札を基準に、その数字が出たら開拓地（=この資源地の角）に資源が入る。
+    const beforeRes = revealed.players.player1!.hand[res];
+    const after = distributeResources(revealed, tile.number!);
+    expect(after.players.player1!.hand[res]).toBeGreaterThan(beforeRes);
   });
 });

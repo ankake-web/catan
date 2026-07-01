@@ -17,12 +17,15 @@ const TILE_NB: ReadonlyArray<readonly [number, number]> = [[1, 0], [1, -1], [0, 
 const isRed = (n: number | null | undefined): boolean => n === 6 || n === 8;
 
 // 陸タイル（海/砂漠以外＝産出地形）を辺隣接で連結成分に分け、最大成分（本島）のタイルIDを返す。
-function mainIslandTileIds(state: GameState): Set<TileId> {
+// 同サイズの最大成分が複数ある場合は「最小タイルIDが小さい成分」を選ぶ（タイル順序に依存しない
+// 決定論的タイブレーク。無いと本島の選択が tiles の列挙順で変わる潜在バグになる）。
+export function mainIslandTileIds(state: GameState): Set<TileId> {
   const land = Object.values(state.tiles).filter(t => t.type !== 'sea');
   const set = new Set(land.map(t => t.id));
   const keyOf = (q: number, r: number) => `${q},${r}`;
   const byKey = new Map<string, TileId>();
   for (const t of land) byKey.set(keyOf(t.coord.q, t.coord.r), t.id);
+  const minId = (ids: TileId[]): TileId => ids.reduce((m, id) => (id < m ? id : m));
   const seen = new Set<TileId>();
   let best: TileId[] = [];
   for (const t of land) {
@@ -37,7 +40,10 @@ function mainIslandTileIds(state: GameState): Set<TileId> {
         if (nid && set.has(nid) && !seen.has(nid)) { seen.add(nid); stack.push(nid); }
       }
     }
-    if (comp.length > best.length) best = comp;
+    if (comp.length > best.length
+      || (comp.length === best.length && best.length > 0 && minId(comp) < minId(best))) {
+      best = comp;
+    }
   }
   return new Set(best);
 }

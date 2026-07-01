@@ -98,6 +98,8 @@ git show <commit>
 | 日付 | catan 範囲 | 内容 | 状態 |
 |---|---|---|---|
 | 2026-06-25 | `d156695..e4ac157` | 演出同期・最長街道・湊表示・石垣の盤面選択・天守の城壁維持/可視化・図鑑/得点チップ・CPU速度「最速」・湊点線・通知コマンドWin化・アニメ表記簡素化 | ✅ 100万石へ反映・検証済（typecheck / test 736/736 / build すべてpass） |
+| 2026-07-01 | `e4ac157..main`（PR#7/#8/#9・航海者リビルド） | 航海者版フルリビルド（公式8シナリオ＋New World・37ヘックス）と**汎用エンジン新メカ**: 抜けている数値トークン（`Tile.pendingNumber`/`numberRemoved`/`numberTokenSupply`/`revealPendingNumbers`）・都市上限（`ScenarioRules.maxCities`）・地域ボーナス（`bonusRegionTiles`/`regionBonusVp`/`regionBonus`）・オアシスの道探索（`revealFogAround` を BUILD_ROAD へ・`startingRoads`/`noShips`）・霧探索（`explore.ts`）・海辺/財宝トークン（`seaTokens.ts`・`edgeTokens`/`treasure`）。表示文字列非依存の汎用ロジック。 | ⏳ **100万石へ未反映**（次回 §3a で `e4ac157..main` を精査） |
+| 2026-07-01 | PR#10 `fix/seafarers-pr9-bugs`（未マージ時点で記載） | PR#9 の敵対レビュー確定バグ修正（全て汎用ロジック・表示文字列非依存）: 霧の資源地産出（`randomizeFogMap` を数字＝非砂漠陸のみ配布）・CK金タイル産出（`applyGoldChoicePhase` 共通化）・`remainingCities=maxCities`・霧の数字制約（金赤数字/赤6-8隣接リトライ）・setup 中の財宝只取りガード・`noShips` を GameState へ配線し船UI抑止・地域ボーナス付与を phase 非依存・財宝資源のバンク減算・`mainIslandTileIds` タイブレーク・`randomizeLandMap` フォールバック best-effort 化。 | ⏳ **100万石へ未反映**（main マージ後に `..main` で一括精査） |
 
 取り込んだコミット内訳:
 - `ee5fa15` アニメON/OFF設定化 → 100万石は独自実装 `e12541e` が同一内容のため**既に反映済**。
