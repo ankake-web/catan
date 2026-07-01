@@ -561,6 +561,7 @@ function randomizeLandMapCore(landMap: LandMap, rng: () => number, groups: strin
     .map(c => landMap[c]!.number)
     .filter((n): n is number => n != null);
 
+  let lastMap: LandMap | null = null;
   for (let attempt = 0; attempt < 400; attempt++) {
     // 1) 種別をグループ内だけでシャッフル（グループ間は混ざらない＝組み合わせ固定）。
     const tType: Record<string, TileType> = {};
@@ -573,6 +574,16 @@ function randomizeLandMapCore(landMap: LandMap, rng: () => number, groups: strin
     const nums = shuffleWithRng(numberPool, rng);
     const tNum: Record<string, number> = {};
     numbered.forEach((c, i) => { tNum[c] = nums[i]!; });
+    // 盗賊: 砂漠があればその1枚に置く。砂漠なしマップは盗賊を初期は盤外に置く（公式準拠＝
+    //   最初の7が出るまで盗賊は登場せず、7で「盗賊か海賊」を選び盗賊なら任意タイルへ初登場）。
+    const robberCell = cells.find(c => tType[c] === 'desert');
+    const map: LandMap = {};
+    for (const c of cells) {
+      map[c] = tType[c] === 'desert'
+        ? { type: 'desert', number: null, robber: c === robberCell }
+        : { type: tType[c]!, number: tNum[c]!, robber: false };
+    }
+    lastMap = map; // 制約を満たせなかった場合のフォールバック用に保持（best-effort）。
     // 制約(b) 金に赤数字を置かない。
     if (numbered.some(c => tType[c] === 'gold' && isRedNum(tNum[c]))) continue;
     // 制約(a) 赤6/8が辺で隣接しない（陸同士のみ＝別島は海で隔つため非隣接）。
@@ -586,18 +597,11 @@ function randomizeLandMapCore(landMap: LandMap, rng: () => number, groups: strin
       if (!ok) break;
     }
     if (!ok) continue;
-    // 盗賊: 砂漠があればその1枚に置く。砂漠なしマップは盗賊を初期は盤外に置く（公式準拠＝
-    //   最初の7が出るまで盗賊は登場せず、7で「盗賊か海賊」を選び盗賊なら任意タイルへ初登場）。
-    const robberCell = cells.find(c => tType[c] === 'desert');
-    const map: LandMap = {};
-    for (const c of cells) {
-      map[c] = tType[c] === 'desert'
-        ? { type: 'desert', number: null, robber: c === robberCell }
-        : { type: tType[c]!, number: tNum[c]!, robber: false };
-    }
     return map;
   }
-  return landMap; // フォールバック（元マップ・制約充足済みの“正”）
+  // フォールバック: 400回で制約を満たせなかった最後のシャッフル盤を返す（元の静的マップは赤6/8
+  //   隣接を含みうるため返さない。実運用の全シナリオは制約充足可能でここには到達しない）。
+  return lastMap ?? landMap;
 }
 
 // グループ分け＝「本島(最大連結成分)」と「離れ小島(残り全部を1プール)」。小島同士は資源を
@@ -609,7 +613,7 @@ function mainOutlyingGroups(cells: string[]): string[][] {
   const outlying = cells.filter(c => !mainSet.has(c));
   return outlying.length ? [main, outlying] : [main];
 }
-function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
+export function randomizeLandMap(landMap: LandMap, rng: () => number): LandMap {
   return randomizeLandMapCore(landMap, rng, mainOutlyingGroups(Object.keys(landMap)));
 }
 // グループ分け＝「各連結成分（=各島）を独立に」。島ごとに資源の組み合わせを固定したい盤用
