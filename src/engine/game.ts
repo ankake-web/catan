@@ -567,14 +567,6 @@ export function applyAction(
             next = { ...next, islandBonus: { ...(next.islandBonus ?? {}), [rep]: [...owners, pid] } };
           }
         }
-        // 砂漠を越えて: 「北西地方」（地域ボーナス対象タイル）へ初入植したら +regionBonusVp（各自1回）。
-        if (next.bonusRegionTiles && (next.regionBonusVp ?? 0) > 0) {
-          const claimed = next.regionBonus ?? [];
-          const touchesRegion = next.vertices[vertexId]!.adjacentTileIds.some(t => next.bonusRegionTiles!.includes(t));
-          if (touchesRegion && !claimed.includes(pid)) {
-            next = { ...next, regionBonus: [...claimed, pid] };
-          }
-        }
       } else {
         // 初期配置: 置いた島を「自分のホーム島」として記録（S2/New World のプレイヤー別未探検判定に使う）。
         const homeRep = islandRepOf(next, vertexId);
@@ -583,6 +575,17 @@ export function applyAction(
           if (!cur.includes(homeRep)) {
             next = { ...next, playerHomeIslands: { ...(next.playerHomeIslands ?? {}), [pid]: [...cur, homeRep] } };
           }
+        }
+      }
+
+      // 砂漠を越えて: 「北西地方」（地域ボーナス対象タイル）へ初入植したら +regionBonusVp（各自1回）。
+      // 北西地方は砂漠帯で本島と陸続き＝SETUP でも初期配置しうるため、付与は phase 非依存にする
+      //（MAIN 限定だと SETUP で北西に初期配置した人がボーナスを取り逃す）。checkVictory より前に付与。
+      if (next.bonusRegionTiles && (next.regionBonusVp ?? 0) > 0) {
+        const claimed = next.regionBonus ?? [];
+        const touchesRegion = next.vertices[vertexId]!.adjacentTileIds.some(t => next.bonusRegionTiles!.includes(t));
+        if (touchesRegion && !claimed.includes(pid)) {
+          next = { ...next, regionBonus: [...claimed, pid] };
         }
       }
 

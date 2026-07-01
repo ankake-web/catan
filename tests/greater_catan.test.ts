@@ -4,7 +4,7 @@ import { createInitialGameState } from '../src/engine/createState';
 import type { PlayerSpec } from '../src/engine/createState';
 import { createRng } from '../src/engine/setup';
 import { revealPendingNumbers, hasPendingNumbers } from '../src/engine/explore';
-import { canBuildCity } from '../src/engine/actions';
+import { canBuildCity, canBuildSettlement } from '../src/engine/actions';
 import { calcVP } from '../src/engine/scoring';
 import { applyAction } from '../src/engine/game';
 import { edgeTileIds, isSeaEdge } from '../src/engine/board';
@@ -151,6 +151,24 @@ describe('砂漠を越えて: 北西地方の地域ボーナス(+2VP)', () => {
     expect(next.regionBonus).toContain('player1');
     // 開拓地1点 + 地域ボーナス2点 = +3。
     expect(calcVP(next, 'player1')).toBe(vpBefore + 1 + 2);
+  });
+
+  // バグ回帰: 地域ボーナス付与が MAIN 限定だったため、北西地方（砂漠帯で本島と陸続き）に
+  //   SETUP で初期配置した人はボーナスを取り逃していた。付与を phase 非依存にした。
+  it('SETUP で北西地方に初期配置しても地域ボーナス(+2VP)が付く（回帰）', () => {
+    const g = throughDesert();
+    const regionTile = g.bonusRegionTiles![0]!;
+    const base: GameState = {
+      ...g, phase: 'SETUP_FORWARD', setupSubPhase: 'PLACE_SETTLEMENT', currentPlayerIndex: 0,
+    };
+    // 北西地方タイルに隣接し、初期配置できる頂点を選ぶ。
+    const v = Object.keys(base.vertices).find(vid =>
+      base.vertices[vid]!.adjacentTileIds.includes(regionTile) && canBuildSettlement(base, 'player1', vid))!;
+    expect(v).toBeTruthy();
+    const vpBefore = calcVP(base, 'player1');
+    const next = applyAction(base, { type: 'BUILD_SETTLEMENT', vertexId: v });
+    expect(next.regionBonus).toContain('player1');       // ← バグ時は SETUP で付与されず落ちる
+    expect(calcVP(next, 'player1')).toBe(vpBefore + 1 + 2); // 開拓地1点 + 地域ボーナス2点
   });
 
   it('地域ボーナスは各プレイヤー1回まで（2軒目の北西入植では増えない）', () => {
