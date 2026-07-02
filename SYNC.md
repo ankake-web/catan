@@ -97,9 +97,17 @@ git show <commit>
 
 | 日付 | catan 範囲 | 内容 | 状態 |
 |---|---|---|---|
-| 2026-06-25 | `d156695..e4ac157` | 演出同期・最長街道・湊表示・石垣の盤面選択・天守の城壁維持/可視化・図鑑/得点チップ・CPU速度「最速」・湊点線・通知コマンドWin化・アニメ表記簡素化 | ✅ 100万石へ反映・検証済（typecheck / test 736/736 / build すべてpass） |
-| 2026-07-01 | `e4ac157..main`（PR#7/#8/#9・航海者リビルド） | 航海者版フルリビルド（公式8シナリオ＋New World・37ヘックス）と**汎用エンジン新メカ**: 抜けている数値トークン（`Tile.pendingNumber`/`numberRemoved`/`numberTokenSupply`/`revealPendingNumbers`）・都市上限（`ScenarioRules.maxCities`）・地域ボーナス（`bonusRegionTiles`/`regionBonusVp`/`regionBonus`）・オアシスの道探索（`revealFogAround` を BUILD_ROAD へ・`startingRoads`/`noShips`）・霧探索（`explore.ts`）・海辺/財宝トークン（`seaTokens.ts`・`edgeTokens`/`treasure`）。表示文字列非依存の汎用ロジック。 | ⏳ **100万石へ未反映**（次回 §3a で `e4ac157..main` を精査） |
-| 2026-07-01 | PR#10 `fix/seafarers-pr9-bugs`（未マージ時点で記載） | PR#9 の敵対レビュー確定バグ修正（全て汎用ロジック・表示文字列非依存）: 霧の資源地産出（`randomizeFogMap` を数字＝非砂漠陸のみ配布）・CK金タイル産出（`applyGoldChoicePhase` 共通化）・`remainingCities=maxCities`・霧の数字制約（金赤数字/赤6-8隣接リトライ）・setup 中の財宝只取りガード・`noShips` を GameState へ配線し船UI抑止・地域ボーナス付与を phase 非依存・財宝資源のバンク減算・`mainIslandTileIds` タイブレーク・`randomizeLandMap` フォールバック best-effort 化。 | ⏳ **100万石へ未反映**（main マージ後に `..main` で一括精査） |
+| 2026-06-25 | `d156695..e4ac157` | 演出同期・最長街道・湊表示・石垣の盤面選択・天守の城壁維持/可視化・図鑑/得点チップ・CPU速度「最速」・湊点線・通知コマンドWin化・アニメ表記簡素化 | ✅ 反映・検証済（typecheck / test 736/736 / build すべてpass） |
+| 2026-07-01 | `e4ac157..main`（PR#7/#8/#9・航海者リビルド） | 航海者版フルリビルド（公式8シナリオ＋New World・37ヘックス）と**汎用エンジン新メカ**: 抜けている数値トークン（`Tile.pendingNumber`/`numberRemoved`/`numberTokenSupply`/`revealPendingNumbers`）・都市上限（`ScenarioRules.maxCities`）・地域ボーナス（`bonusRegionTiles`/`regionBonusVp`/`regionBonus`）・オアシスの道探索（`revealFogAround` を BUILD_ROAD へ・`startingRoads`/`noShips`）・霧探索（`explore.ts`）・海辺/財宝トークン（`seaTokens.ts`・`edgeTokens`/`treasure`）。表示文字列非依存の汎用ロジック。 | ⏳ **未反映**（リビルド一式とセットでのみ移植可＝下記注記） |
+| 2026-07-01/02 | PR#10 `fix/seafarers-pr9-bugs`＋PR#11 `fix/seafarers-audit-followups`（いずれも main マージ済み） | 航海者リビルドのバグ修正群（全て汎用ロジック・表示文字列非依存）。PR#10=12件: 霧の資源地産出・CK金タイル産出（`applyGoldChoicePhase` 共通化）・`remainingCities=maxCities`・霧の数字制約・setup 中の財宝只取りガード・`noShips` 配線・地域ボーナス phase 非依存・財宝資源のバンク減算・`mainIslandTileIds` タイブレーク・フォールバック防御ほか。PR#11=監査5件: 本島↔霧境界の赤6/8隣接（`randomizeHomeAndFog`）・SETUP霧公開の只取り/二重取得（`grantReward`）・海賊コマの霧タイル初期配置（`!t.fog`）・`downgradeCity` の幻の開拓地・水道橋×金の二重付与。 | ⏳ **未反映**（対象コードがフォークに無いものが大半。船まわり2件のみ下記で先行反映済み） |
+| 2026-07-02 | `e4ac157..main` の一部（船まわりバグ2件のみ先行） | **船移動の海賊封鎖ガード**（canMoveShip、canBuildShip と対称）＋**開放端判定を「自分の船のみ」に是正**（isOpenShipEnd。道↔船は建物経由でのみ連結）。フォークの現行コードに今すぐ当たるテーマ非依存バグのみ移植（コメント変更のみ・表示文字列不変）。テスト2件追加。 | ✅ 反映・検証済（typecheck / test **738**/738 / build pass）・**hyaku/main へ push＝100万石 本番デプロイ済み** |
+
+> **未反映の大半＝航海者フルリビルド（PR#7/#8/#9）＋そのバグ修正（PR#10/#11）**。フォークは航海者を
+> 旧実装のまま持ち、engine 5本（explore/cloth/wonders/pirateIslands/seaTokens）が欠落。リビルド移植は
+> XL/高リスクで、**七不思議/織物/財宝/要塞/艦隊/地域ボーナス等の戦国名の新設（`docs/reskin/GLOSSARY.md`
+> で未確定）が前提**＝製品判断が要る（2026-07-02 ユーザ判断で保留）。次に当てられる小粒候補:
+> islandBonus のプレイヤー別配列化（log/recap/ui/scoring/types 一括）／街道建設カードでの無料船／
+> 資源アニメの stagger 上限。
 
 取り込んだコミット内訳:
 - `ee5fa15` アニメON/OFF設定化 → 100万石は独自実装 `e12541e` が同一内容のため**既に反映済**。
