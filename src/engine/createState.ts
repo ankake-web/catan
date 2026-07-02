@@ -50,12 +50,15 @@ export function createInitialGameState(
   // 航海者: 海賊コマは開始時から海ヘクスに置く。公式準拠で「盤の隅＝できるだけ遠い海」へ初期配置し、
   //   開始直後は誰の船にも近づかないようにする（盗賊は砂漠の盤、砂漠なし盤では7まで盤外）。
   //   ※S7 海賊の島々（独自の海賊艦隊）と S8 七不思議（海賊不使用）では通常の海賊コマは置かない。
-  const usesPirate = Object.values(tiles).some(t => t.type === 'sea')
+  // 海賊は「本物の海」にのみ置く。霧セルは type==='sea' だが tile.fog に陸を隠しており、探索で
+  // 陸に変わる。霧セルを候補に含めると、公開後に海専用の海賊コマが陸ヘクス上に残り、かつ隅の島の
+  // 海岸辺が初手から船封鎖される（!t.fog で除外する）。
+  const usesPirate = Object.values(tiles).some(t => t.type === 'sea' && !t.fog)
     && !scenario.rules?.pirateIslands && !scenario.rules?.wonders
     && !scenario.rules?.noShips; // オアシス（基本ゲーム・船なし）は海賊コマを置かない
   const piratePosition = usesPirate
     ? Object.values(tiles)
-        .filter(t => t.type === 'sea')
+        .filter(t => t.type === 'sea' && !t.fog)
         .sort((a, b) => {
           const da = a.coord.q * a.coord.q + a.coord.r * a.coord.r;
           const db = b.coord.q * b.coord.q + b.coord.r * b.coord.r;

@@ -51,9 +51,14 @@ export function mainIslandTileIds(state: GameState): Set<TileId> {
 /**
  * 指定タイル群のうち霧のものを公開する。陸が出たら active プレイヤーへ資源1枚をバンクから付与。
  * 公開が無ければ state をそのまま返す（参照不変・no-op）。
+ *
+ * grantReward=false のときは霧を晴らすだけで資源報酬を与えない。SETUP 用: 無償の初期道/開拓地で
+ * 資源を只取りさせない（財宝ガードと同じ方針）＋最後の初期開拓地で「公開報酬＋setup 産出」を同一
+ * タイルから二重取得するのを防ぐ（BUILD_SETTLEMENT では reveal→setupGainFor の順に走るため）。
  */
 export function revealFogAround(
   state: GameState, tileIds: readonly TileId[], activePlayerId: PlayerId,
+  grantReward = true,
 ): GameState {
   let changed = false;
   let tiles = state.tiles;
@@ -66,9 +71,9 @@ export function revealFogAround(
     if (!changed) { tiles = { ...state.tiles }; changed = true; }
     const { fog, ...rest } = tile;
     tiles[tid] = { ...rest, type: fog.type, number: fog.number };
-    // 陸（海以外）なら資源1枚を即獲得（バンク在庫の範囲内）。砂漠/金/海は付与なし。
+    // 陸（海以外）なら資源1枚を即獲得（バンク在庫の範囲内）。砂漠/金/海は付与なし。SETUP は報酬なし。
     const res = TILE_RESOURCE_MAP[fog.type];
-    if (res && hand && bank[res] > 0) {
+    if (grantReward && res && hand && bank[res] > 0) {
       bank = { ...bank, [res]: bank[res] - 1 };
       hand = { ...hand, [res]: hand[res] + 1 };
     }

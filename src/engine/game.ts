@@ -425,8 +425,8 @@ export function applyAction(
       if (!canBuildRoad(state, pid, edgeId)) throw new Error('BUILD_ROAD: invalid');
 
       let next = buildRoad(state, pid, edgeId);
-      // S3 霧の島: 道の隣接ヘックスを探索公開（霧の無い盤では no-op）。
-      next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
+      // S3 霧の島: 道の隣接ヘックスを探索公開（霧の無い盤では no-op）。SETUP は無償報酬なし（只取り防止）。
+      next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid, !_isSetup);
       // 大カタン: 道で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
       next = revealPendingNumbers(next, edgeTileIds(next.edges[edgeId]!, next.vertices));
       // オアシス: 道で財宝の辺に到達したら獲得（資源＋発展カード等）。財宝の無い盤では no-op。
@@ -461,8 +461,8 @@ export function applyAction(
       let next = buildShip(state, pid, edgeId);
       // 建てたばかりの船は同じターンに移動できない（航海者の標準ルール）。建設した辺を記録。
       next = { ...next, shipsBuiltThisTurn: [...(next.shipsBuiltThisTurn ?? []), edgeId] };
-      // S3 霧の島: 船の隣接ヘックスを探索公開（霧→陸なら資源1枚）。霧の無い盤では no-op。
-      next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid);
+      // S3 霧の島: 船の隣接ヘックスを探索公開（霧→陸なら資源1枚）。霧の無い盤では no-op。SETUP は無償報酬なし。
+      next = revealFogAround(next, edgeTileIds(next.edges[edgeId]!, next.vertices), pid, !_isSetupSh);
       // 大カタン: 船で小島タイルの端に到達したら数値トークン出現（無い盤では no-op）。
       next = revealPendingNumbers(next, edgeTileIds(next.edges[edgeId]!, next.vertices));
       // S5 忘れられた部族: この辺に海辺トークンがあれば獲得（VP/開発カード/港）。無い盤では no-op。
@@ -522,8 +522,9 @@ export function applyAction(
       if (!canBuildSettlement(state, pid, vertexId)) throw new Error('BUILD_SETTLEMENT: invalid');
 
       let next = buildSettlement(state, pid, vertexId);
-      // S3 霧の島: 開拓地の隣接ヘックスを探索公開（霧の無い盤では no-op）。
-      next = revealFogAround(next, next.vertices[vertexId]!.adjacentTileIds, pid);
+      // S3 霧の島: 開拓地の隣接ヘックスを探索公開（霧の無い盤では no-op）。SETUP は無償報酬なし
+      // （只取り防止＋最後の初期開拓地で reveal報酬と setupGainFor の二重取得を防ぐ）。
+      next = revealFogAround(next, next.vertices[vertexId]!.adjacentTileIds, pid, !_isSetupS);
       // 大カタン: 開拓地が小島タイルに隣接したら数値トークン出現（無い盤では no-op）。
       next = revealPendingNumbers(next, next.vertices[vertexId]!.adjacentTileIds);
       // S5 忘れられた部族: 港トークンを保留していれば、この沿岸開拓地に設置（無ければ no-op）。

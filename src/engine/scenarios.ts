@@ -204,8 +204,7 @@ type FogMap = Record<string, { type: TileType; number: number | null }>;
 // 本島・霧の中身は毎ゲームランダム化（霧はどのセルが陸/海か・地形・数字をシャッフル。枚数は不変）。
 function buildFromLandFogMap(landMap: LandMap, fogMap: FogMap): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
   return (geo, rng) => {
-    const home = randomizeLandMap(landMap, rng);
-    const fog = randomizeFogMap(fogMap, rng);
+    const { home, fog } = randomizeHomeAndFog(landMap, fogMap, rng);
     const tiles: Record<TileId, Tile> = {};
     for (const id of Object.keys(geo.tileToVertices)) {
       const coord = parseTileId(id);
@@ -722,6 +721,34 @@ function randomizeFogMap(fogMap: FogMap, rng: () => number): FogMap {
   return last!; // フォールバック（400回で制約を満たせなかった最後の配置）
 }
 
+// 本島(home)と霧(fog)を「赤6/8が本島↔霧の境界を跨いで辺隣接しない」よう協調生成する。
+// randomizeLandMap と randomizeFogMap は各々のマップ内でしか赤隣接を判定しないため、オアシスの
+// ように本島と霧が同一 geo 上で直接辺隣接する盤では境界の赤-赤隣接が素通りしていた。ここで
+// 両マップの数字を突き合わせ、境界も含めて赤隣接が無くなるまでリトライする（best-effort）。
+// 本島と霧が海で隔たり物理隣接しない盤（霧の島/オセアニア/宝島）では初回で ok になり挙動不変。
+function hasCrossRedAdjacency(home: LandMap, fog: FogMap): boolean {
+  const num: Record<string, number | null> = {};
+  for (const c of Object.keys(home)) num[c] = home[c]!.number;
+  for (const c of Object.keys(fog)) num[c] = fog[c]!.number; // home と fog は座標が互いに素
+  for (const c of Object.keys(num)) {
+    if (!isRedNum(num[c])) continue;
+    const [q, r] = c.split(',').map(Number) as [number, number];
+    for (const [dq, dr] of NW_NB) {
+      if (isRedNum(num[`${q + dq},${r + dr}`])) return true;
+    }
+  }
+  return false;
+}
+function randomizeHomeAndFog(landMap: LandMap, fogMap: FogMap, rng: () => number): { home: LandMap; fog: FogMap } {
+  let home = randomizeLandMap(landMap, rng);
+  let fog = randomizeFogMap(fogMap, rng);
+  for (let i = 0; i < 200 && hasCrossRedAdjacency(home, fog); i++) {
+    home = randomizeLandMap(landMap, rng);
+    fog = randomizeFogMap(fogMap, rng);
+  }
+  return { home, fog };
+}
+
 const seafarersThroughDesert: Scenario = {
   id: 'seafarers_throughdesert',
   name: '航海者：砂漠を越えて',
@@ -886,8 +913,7 @@ const TREASURE_FOG: FogMap = {
 };
 function buildTreasureIslands(landMap: LandMap, fogMap: FogMap, treasureCount: number): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
   return (geo, rng) => {
-    const home = randomizeLandMap(landMap, rng);
-    const fog = randomizeFogMap(fogMap, rng);
+    const { home, fog } = randomizeHomeAndFog(landMap, fogMap, rng);
     const tiles: Record<TileId, Tile> = {};
     for (const id of Object.keys(geo.tileToVertices)) {
       const coord = parseTileId(id);
@@ -1244,8 +1270,7 @@ const OASIS_FOG: FogMap = {
 //   （道で到達して取れる位置）。船は使わないので harbors は無し。
 function buildOasis(landMap: LandMap, fogMap: FogMap, treasureCount: number): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
   return (geo, rng) => {
-    const home = randomizeLandMap(landMap, rng);
-    const fog = randomizeFogMap(fogMap, rng);
+    const { home, fog } = randomizeHomeAndFog(landMap, fogMap, rng);
     const tiles: Record<TileId, Tile> = {};
     for (const id of Object.keys(geo.tileToVertices)) {
       const coord = parseTileId(id);
