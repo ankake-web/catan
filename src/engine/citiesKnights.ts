@@ -28,6 +28,7 @@ import {
 } from '../constants';
 import { calcVP, updateLongestRoad } from './scoring';
 import { canBuildRoad } from './actions';
+import { computeGoldPicks } from './dice';
 import { moveRobber, stealResource, robbableCardCount } from './robber';
 
 // ============================================================
@@ -496,10 +497,20 @@ export function downgradeCity(state: GameState, pid: PlayerId, vid: VertexId): G
   const v = state.vertices[vid];
   if (!v || v.building?.playerId !== pid || v.building.type !== 'city' || v.building.metropolis) return state;
   const p = state.players[pid]!;
+  // 開拓地コマの在庫が無ければ、都市は「格下げ」ではなく撤去する（公式CK）。格下げにすると
+  //   remainingSettlements の -1 が max(0,…) でクランプされ、盤上開拓地が保有コマ数(5)を超える
+  //   幻のコマになって駒会計(盤上＋在庫=5)が破綻するため。撤去なら都市コマだけ返して整合する。
+  if (p.remainingSettlements <= 0) {
+    return {
+      ...state,
+      vertices: { ...state.vertices, [vid]: { ...v, building: null } },
+      players: { ...state.players, [pid]: { ...p, remainingCities: p.remainingCities + 1 } },
+    };
+  }
   return {
     ...state,
     vertices: { ...state.vertices, [vid]: { ...v, building: { type: 'settlement', playerId: pid } } },
-    players: { ...state.players, [pid]: { ...p, remainingCities: p.remainingCities + 1, remainingSettlements: Math.max(0, p.remainingSettlements - 1) } },
+    players: { ...state.players, [pid]: { ...p, remainingCities: p.remainingCities + 1, remainingSettlements: p.remainingSettlements - 1 } },
   };
 }
 
@@ -1203,6 +1214,9 @@ export function distributeCkProduction(state: GameState, diceTotal: number): Gam
   const players = { ...state.players };
   const bank = { ...state.bank };
   const commodityBank = { ...(state.commodityBank ?? COMMODITY_BANK_INITIAL) };
+  // 航海者コンボ盤: 金タイルは computeCkProduction では産出0だが、このロールで金の選択(GOLD)を
+  //   受けるプレイヤーは「産出あり」扱い＝水道橋(科学Lv3)を発火させない（金の選択枚と二重取りを防ぐ）。
+  const goldPicks = computeGoldPicks(state, diceTotal);
   for (const pid of state.playerOrder) {
     const rGain = resources[pid]; const cGain = comm[pid];
     const p = players[pid]!;
@@ -1213,7 +1227,8 @@ export function distributeCkProduction(state: GameState, diceTotal: number): Gam
     if (cGain) for (const c of COMMODITY_TYPES) { const n = cGain[c] ?? 0; if (n) { newComm[c] += n; commodityBank[c] -= n; } }
     // 水道橋(科学Lv3): このロールで資源を1つも得られなかったプレイヤーは、資源を1枚もらえる
     //   （手動選択UIを避けるため、最も少ない資源を自動選択。バンク在庫で頭打ち）。
-    if (resGained === 0 && (p.improvements?.science ?? 0) >= 3) {
+    //   金タイル産出(GOLD選択)を受ける人は「産出あり」＝水道橋の対象外（金＋水道橋の二重取り防止）。
+    if (resGained === 0 && (goldPicks[pid] ?? 0) === 0 && (p.improvements?.science ?? 0) >= 3) {
       const r = [...RESOURCE_TYPES].sort((a, b) => (hand[a] - hand[b]) || (bank[b] - bank[a]))[0]!;
       if (bank[r] > 0) { hand[r] += 1; bank[r] -= 1; resGained = 1; }
     }
