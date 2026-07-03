@@ -93,7 +93,7 @@ git show <commit>
 
 ## 5. 順方向同期ログ（catan → 100万石）
 
-**前回同期点 = catan `main` @ `e4ac157`**（次回は `e4ac157..main` を見る）
+**前回同期点 = catan `main` @ `fdb88e7`**（航海者フルリビルド一式を 2026-07-03 に全面移植済み。次回は `fdb88e7..main` を見る）
 
 | 日付 | catan 範囲 | 内容 | 状態 |
 |---|---|---|---|
@@ -101,13 +101,13 @@ git show <commit>
 | 2026-07-01 | `e4ac157..main`（PR#7/#8/#9・航海者リビルド） | 航海者版フルリビルド（公式8シナリオ＋New World・37ヘックス）と**汎用エンジン新メカ**: 抜けている数値トークン（`Tile.pendingNumber`/`numberRemoved`/`numberTokenSupply`/`revealPendingNumbers`）・都市上限（`ScenarioRules.maxCities`）・地域ボーナス（`bonusRegionTiles`/`regionBonusVp`/`regionBonus`）・オアシスの道探索（`revealFogAround` を BUILD_ROAD へ・`startingRoads`/`noShips`）・霧探索（`explore.ts`）・海辺/財宝トークン（`seaTokens.ts`・`edgeTokens`/`treasure`）。表示文字列非依存の汎用ロジック。 | ⏳ **未反映**（リビルド一式とセットでのみ移植可＝下記注記） |
 | 2026-07-01/02 | PR#10 `fix/seafarers-pr9-bugs`＋PR#11 `fix/seafarers-audit-followups`（いずれも main マージ済み） | 航海者リビルドのバグ修正群（全て汎用ロジック・表示文字列非依存）。PR#10=12件: 霧の資源地産出・CK金タイル産出（`applyGoldChoicePhase` 共通化）・`remainingCities=maxCities`・霧の数字制約・setup 中の財宝只取りガード・`noShips` 配線・地域ボーナス phase 非依存・財宝資源のバンク減算・`mainIslandTileIds` タイブレーク・フォールバック防御ほか。PR#11=監査5件: 本島↔霧境界の赤6/8隣接（`randomizeHomeAndFog`）・SETUP霧公開の只取り/二重取得（`grantReward`）・海賊コマの霧タイル初期配置（`!t.fog`）・`downgradeCity` の幻の開拓地・水道橋×金の二重付与。 | ⏳ **未反映**（対象コードがフォークに無いものが大半。船まわり2件のみ下記で先行反映済み） |
 | 2026-07-02 | `e4ac157..main` の一部（船まわりバグ2件のみ先行） | **船移動の海賊封鎖ガード**（canMoveShip、canBuildShip と対称）＋**開放端判定を「自分の船のみ」に是正**（isOpenShipEnd。道↔船は建物経由でのみ連結）。フォークの現行コードに今すぐ当たるテーマ非依存バグのみ移植（コメント変更のみ・表示文字列不変）。テスト2件追加。 | ✅ 反映・検証済（typecheck / test **738**/738 / build pass）・**hyaku/main へ push＝100万石 本番デプロイ済み** |
+| 2026-07-03 | `e4ac157..main` の一部（小粒3件・先行反映） | **①新島入植ボーナスをプレイヤー別配列化**（`islandBonus` を `Record<rep,PlayerId[]>` 化＝各プレイヤーが自分の初入植ごとに +2VP・他人が先でも可。catan `5de23f7`／game・islands・scoring・log・recap・ui・types 一括）／**②普請カード（＝街道建設カード）で船も無料配置**（道2/船2/道1+船1。catan `5de23f7`+`2e2f2aa`／actions・game・main・events。`citiesKnights` の `road_building_progress` は catan と同一で据え置き）／**③資源アニメの stagger 上限**（`MAX_STAGGER_TOTAL=2400`）**＋ウォッチドッグ固着解除**（大量産出時のCPU長時間停止を解消。catan `1bde138`／main.ts）。いずれもテーマ非依存・表示文字列不変（普請/城/砦 等のリスキン語は保持）。①②は修正前RED→修正後GREEN実証、③は catan 同様テスト無し（UI演出タイミング）。 | ✅ 反映・検証済（typecheck / test **744**/744 / build pass）・**hyaku/main へ push＝100万石 本番デプロイ済み**。fork commit `7983b5f`/`a312058`/`261fbba` |
+| 2026-07-03 | `e4ac157..main`（PR#7〜#11・航海者フルリビルド一式） | **航海者フルリビルドを全面移植（水軍テーマ）**。engine5本追加（explore=霧探索/cloth=絹/wonders=名城/pirateIslands=海賊要塞・軍船/seaTokens=海辺トークン・財宝）＋`scenarios.ts` 全面刷新（公式8+New World+干ばつ/宝島/オセアニア/大いなる国/オアシス+C&K×水軍コンボ3本・表示名を「水軍：X」「武将と商い：X」「城と武将」へreskin）＋types拡張（ScenarioRules/fog/pendingNumber/numberTokenSupply/regionBonus/edgeTokens/wonder/fortress/playerHomeIslands/EdgeTokenKind/BUILD_WONDER/ATTACK_FORTRESS等）＋配線（createState/game/actions/ai/citiesKnights/robber/scoring/log/board/ui/main）＋テスト13本追加。**戦国名**: 航海者→水軍・七不思議→七名城・織物→絹・砂漠→荒野。内部ID/enum/座標/数値/ロジックは不変・既存の戦国アート/図鑑は保持。 | ✅ 反映・検証済（typecheck / **vitest 915**/915・46ファイル / build pass ＋**実機ブラウザ全22シナリオ描画エラー0**）・**hyaku/main へ push＝100万石 本番デプロイ済み**。fork commit（squash）`cf492f5`。※コメント/テストdescriptionの一部に catan 用語が残るが dev 向け・任意reskin（GLOSSARY §6） |
 
-> **未反映の大半＝航海者フルリビルド（PR#7/#8/#9）＋そのバグ修正（PR#10/#11）**。フォークは航海者を
-> 旧実装のまま持ち、engine 5本（explore/cloth/wonders/pirateIslands/seaTokens）が欠落。リビルド移植は
-> XL/高リスクで、**七不思議/織物/財宝/要塞/艦隊/地域ボーナス等の戦国名の新設（`docs/reskin/GLOSSARY.md`
-> で未確定）が前提**＝製品判断が要る（2026-07-02 ユーザ判断で保留）。次に当てられる小粒候補:
-> islandBonus のプレイヤー別配列化（log/recap/ui/scoring/types 一括）／街道建設カードでの無料船／
-> 資源アニメの stagger 上限。
+> **2026-07-03: 航海者フルリビルド一式（PR#7〜#11）を全面移植・本番反映済み**（上表最終行）。フォークは
+> engine5本（explore/cloth/wonders/pirateIslands/seaTokens）を取得し、scenarios/types/配線/テストを catan 準拠へ。
+> 戦国名（航海者→水軍・七不思議→七名城・織物→絹）を確定。**これでフォークは catan `fdb88e7` 時点のコードに追随済み**。
+> 残タスク（任意・低優先）: コメント/テストdescription に残る catan 用語の戦国reskin（dev 向けのみ・ユーザー非表示）。
 
 取り込んだコミット内訳:
 - `ee5fa15` アニメON/OFF設定化 → 100万石は独自実装 `e12541e` が同一内容のため**既に反映済**。
