@@ -36,6 +36,7 @@ export type ScenarioId =
   | 'ck_seafarers_oceania'     // 公式アプリ「都市と騎士—オセアニア」（霧の2島＋C&K・15点）
   | 'ck_seafarers_greatercatan'// 公式アプリ「都市と騎士—大カタン」（数値トークン欠＋C&K・20点）
   | 'oasis'                    // 公式アプリ「オアシス」（基本ゲーム＋道で砂漠/霧を探索＋財宝・10点）
+  | 'tb_harbors'               // 交易と蛮族「強き港(Harbors of Catan / Strongest Ports)」変種（基本盤＋2VPタイル・11点）
   | 'cities_knights';
 
 export interface ScenarioBoard {
@@ -59,7 +60,7 @@ export interface Scenario {
   /** UI 用の1行説明。 */
   readonly description: string;
   /** UI のグルーピング用カテゴリ。 */
-  readonly category: 'basic' | 'seafarers' | 'cities_knights';
+  readonly category: 'basic' | 'seafarers' | 'cities_knights' | 'traders_barbarians';
   /** 騎士と商人拡張を有効化する（GameState.expansion に反映）。 */
   readonly expansion?: 'cities_knights';
   /** タイル座標集合（盤面幾何の生成に使う）。航海者の可変盤ではここを差し替える。 */
@@ -1311,6 +1312,22 @@ const seafarersOasis: Scenario = {
   rules: { startingRoads: 30, noShips: true, newIslandBonusVp: 0 },
 };
 
+// ---- 交易と蛮族「強き港（Harbors of Catan / Strongest Ports）」変種（第6版 CN3089 p3-4） ----
+// 基本19タイル盤（classic と同じ生成）に「Strongest Ports」ボーナスVPタイル(+2VP)を加えた変種。
+// 港上の建物のVP合計（開拓地1・都市2）が最多（最低3VP）のプレイヤーがタイルを保持し、他者が上回れば即移動。
+// タイルは2VP。勝利目標は公式どおり基本+1の11点（タイルが2点入るため実質+1の難度）。
+const tbHarbors: Scenario = {
+  id: 'tb_harbors',
+  name: '交易と蛮族：強き港',
+  description: '基本19タイル。港上の建物のVP合計が最多の人が「強き港」タイル(+2点)を得る（11点で勝利）。',
+  category: 'traders_barbarians',
+  recommendedPlayers: '4人',
+  coords: () => getAllTileCoords(),
+  build: (geo, rng) => createRandomBoard(geo, rng),
+  victoryTarget: 11,
+  rules: { strongestPorts: true },
+};
+
 const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
   // 公式航海者シナリオ
@@ -1336,6 +1353,8 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   ck_seafarers_oceania: ckSeafarersOceania,
   ck_seafarers_greatercatan: ckSeafarersGreaterCatan,
   oasis: seafarersOasis,
+  // 交易と蛮族（Traders & Barbarians）
+  tb_harbors: tbHarbors,
   cities_knights: citiesKnights,
 };
 
@@ -1456,6 +1475,11 @@ const SCENARIO_RULES: Record<ScenarioId, string[]> = {
     'オアシス（資源地）を発見すると資源1枚。砂漠の奥に道を伸ばして探索を進める。',
     '財宝が砂漠やオアシスに眠る。財宝の辺に道を置くと、資源や発展カードがもらえる。',
   ],
+  tb_harbors: [
+    '11点で勝ち。基本19タイルに「強き港（Strongest Ports）」タイルが加わる。',
+    '港（2:1/3:1）の上に建てた建物のVP合計（開拓地1・都市2）が最も多い人が「強き港」タイル（+2点）を得る。',
+    '最初に港建物の合計3点に達した人が獲得。以後は他の人がそれを上回ると即その人へ移る。',
+  ],
 };
 
 /** このゲーム固有の詳細ルール（遊び方表示用）。未知IDは基本のルールにフォールバック。 */
@@ -1467,7 +1491,7 @@ export interface ScenarioInfo {
   id: ScenarioId;
   name: string;
   description: string;
-  category: 'basic' | 'seafarers' | 'cities_knights';
+  category: 'basic' | 'seafarers' | 'cities_knights' | 'traders_barbarians';
   victoryTarget: number;
   recommendedPlayers: string;
 }
@@ -1502,6 +1526,8 @@ const VISIBLE_SCENARIO_IDS: ReadonlySet<ScenarioId> = new Set<ScenarioId>([
   'ck_seafarers_greatercatan',
   // 基本ゲーム＋砂漠探索
   'oasis',
+  // 交易と蛮族
+  'tb_harbors',
 ]);
 /** 盤面選択UIに表示するシナリオ一覧（listScenarios のうち VISIBLE のみ）。 */
 export function listVisibleScenarios(): ReadonlyArray<ScenarioInfo> {

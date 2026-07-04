@@ -25,7 +25,7 @@ import {
   downgradeCity, discardProgressCard,
 } from './citiesKnights';
 import { executeBankTrade, canBankTrade, offerTrade, respondTrade, confirmTrade, cancelTrade } from './trade';
-import { updateLongestRoad, updateLargestArmy, checkVictory, calcVP, victoryTarget } from './scoring';
+import { updateLongestRoad, updateLargestArmy, updateStrongestPorts, checkVictory, calcVP, victoryTarget } from './scoring';
 import { newIslandBonusRep, islandRepOf } from './islands';
 import { edgeTileIds } from './board';
 import { revealFogAround, revealPendingNumbers } from './explore';
@@ -593,6 +593,7 @@ export function applyAction(
       // 開拓地が相手の道路を分断した場合に最長道路ボーナスを再計算する。
       // SETUP では道が短く no-op、MAIN でのみ意味を持つ（BUILD_ROAD と同順序）。
       next = updateLongestRoad(next);
+      next = updateStrongestPorts(next); // 交易と蛮族「強き港」: 港上の建物が増えたので再計算（無効シナリオでは no-op）
       next = checkVictory(next, pid);
 
       if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
@@ -613,6 +614,7 @@ export function applyAction(
       if (!canBuildCity(state, pid, vertexId)) throw new Error('BUILD_CITY: invalid');
 
       let next = buildCity(state, pid, vertexId);
+      next = updateStrongestPorts(next); // 交易と蛮族「強き港」: 港上の開拓地→都市で港VPが増えるので再計算（無効シナリオでは no-op）
       next = checkVictory(next, pid);
       return next;
     }

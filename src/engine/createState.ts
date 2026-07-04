@@ -146,6 +146,8 @@ export function createInitialGameState(
     ...(scenario.rules?.numberHexOnly != null ? { numberHexOnly: scenario.rules.numberHexOnly } : {}),
     ...(scenario.rules?.noIslandSettlement != null ? { noIslandSettlement: scenario.rules.noIslandSettlement } : {}),
     ...(scenario.rules?.noShips != null ? { noShips: scenario.rules.noShips } : {}),
+    // 交易と蛮族「強き港」: 有効時は Strongest Ports タイル（保持者は初期 null）を配線。
+    ...(scenario.rules?.strongestPorts ? { strongestPorts: true, strongestPortsHolder: null } : {}),
     ...(scenario.rules?.maxCities != null ? { maxCities: scenario.rules.maxCities } : {}),
     ...(scenario.rules?.missingNumberTokens ? { numberTokenSupply: scenario.rules.numberTokenSupply ?? 5 } : {}),
     ...(scenario.rules?.regionBonusVp != null ? { regionBonusVp: scenario.rules.regionBonusVp } : {}),

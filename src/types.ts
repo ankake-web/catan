@@ -319,6 +319,9 @@ export interface ScenarioRules {
   startingRoads?: number;
   /** 船を使わない基本ゲーム（既定false）。オアシス＝true（霧/砂漠は道だけで探索する）。 */
   noShips?: boolean;
+  /** 交易と蛮族「強き港(Harbors of Catan / Strongest Ports)」変種を有効化（既定false）。
+   *  港上の建物のVP合計が最多のプレイヤーに Strongest Ports タイル(+2VP)を与える。勝利目標は+1（例:11）。 */
+  strongestPorts?: boolean;
 }
 
 // 航海者 S5「忘れられた部族」/「宝島」: 海の辺に事前配置されるトークンの種別。
@@ -403,6 +406,9 @@ export interface GameState {
 
   longestRoadHolder: PlayerId | null;
   largestArmyHolder: PlayerId | null;
+  // 交易と蛮族「強き港」: Strongest Ports タイル(+2VP)の現保持者。港建物VP最多（最低3VP・同点は現保持者優先）。
+  // strongestPorts が有効なシナリオのみ設定。null=未取得。
+  strongestPortsHolder?: PlayerId | null;
 
   // 勝利に必要な勝利点。シナリオ別（基本=10／航海者の大きい盤=13）。未設定は VP_TABLE.target。
   victoryTarget?: number;
@@ -429,6 +435,7 @@ export interface GameState {
   numberHexOnly?: boolean;        // 開拓地・盗賊を数字ヘックスのみに制限（既定false。S5=true）
   noIslandSettlement?: boolean;   // 小島（本島以外）に開拓地を建てられない（既定false。S6=true）
   noShips?: boolean;              // 船を一切使わない盤か（既定false。オアシス=true。海タイルはあるが船UIを出さない）
+  strongestPorts?: boolean;       // 交易と蛮族「強き港」変種が有効か（既定false）。ScenarioRules から配線。
   maxCities?: number;             // 1プレイヤーの都市建設上限（既定なし。大カタン=8）
   // 大カタン「抜けている数値トークン」: 残りの供給枚数。0になると以後は本島の数字を抜いて小島へ配る。
   numberTokenSupply?: number;

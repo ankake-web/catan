@@ -177,11 +177,14 @@ export const VP_TABLE = {
   largestArmy:  2,
   victoryPoint: 1,
   island:       2, // 航海者: 新しい島への最初の入植ボーナス
+  strongestPorts: 2, // 交易と蛮族「強き港」: Strongest Ports タイルの勝利点
   target:       10,
 } as const;
 
 export const LONGEST_ROAD_MIN = 5;
 export const LARGEST_ARMY_MIN = 3;
+// 交易と蛮族「強き港」: 港上の建物のVP合計がこの値以上で Strongest Ports タイルを獲得できる（公式: 3VP）。
+export const STRONGEST_PORTS_MIN = 3;
 
 // ---- 強盗 ----
 
