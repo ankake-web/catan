@@ -520,6 +520,8 @@ export interface ProgressChoice {
   diplomatEdgeId?: EdgeId;
   // 脱走兵(deserter): 消す相手の騎士の頂点ID（同強度の騎士を自分が得る）。
   deserterVertexId?: VertexId;
+  // 脱走兵(deserter): 獲得した騎士を置く自分の頂点ID（未指定/不正なら自動で最初の合法頂点へ）。
+  deserterPlaceVertexId?: VertexId;
   // 医術(medicine): 都市に格上げする自分の開拓地の頂点ID。
   medicineVertexId?: VertexId;
   // 商業港(commercial_harbor): 各相手に渡す自分の資源1種＋各相手から要求する商品1種を指名（全相手共通）。

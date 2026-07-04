@@ -693,12 +693,16 @@ function knightCountOf(state: GameState, pid: PlayerId): number {
 function knightPlacementVertex(state: GameState, pid: PlayerId): string | null {
   return Object.keys(state.vertices).find(vid => canPlaceKnightVertex(state, pid, vid)) ?? null;
 }
-/** deserter: 消せる相手の騎士頂点ID一覧（盤面選択の候補）。 */
+/** deserter: 消せる相手の騎士頂点ID一覧（盤面選択の候補・1手目）。 */
 export function deserterTargets(state: GameState, pid: PlayerId): string[] {
   return Object.keys(state.vertices).filter(vid => {
     const k = state.vertices[vid]?.knight;
     return !!k && k.playerId !== pid;
   });
+}
+/** deserter: 獲得した騎士を置ける自分の頂点ID一覧（盤面選択の候補・2手目）。 */
+export function deserterPlacementTargets(state: GameState, pid: PlayerId): string[] {
+  return Object.keys(state.vertices).filter(vid => canPlaceKnightVertex(state, pid, vid));
 }
 /** smith: 1段昇格できる自分の騎士頂点ID一覧（強度<3。盤面選択の候補・最大2体まで選ぶ）。 */
 export function smithKnightTargets(state: GameState, pid: PlayerId): string[] {
@@ -920,7 +924,10 @@ function playDeserter(state: GameState, pid: PlayerId, choice?: ProgressChoice):
     : strongestOpponentKnight(state, pid);
   if (!target) return state;
   let vertices = { ...state.vertices, [target.vid]: { ...state.vertices[target.vid]!, knight: null } };
-  const place = knightPlacementVertex({ ...state, vertices }, pid);
+  // 獲得騎士の配置先: 手動指定(deserterPlaceVertexId)が合法ならそこ、なければ自動（最初の合法頂点）。
+  const stAfter: GameState = { ...state, vertices };
+  const want = choice?.deserterPlaceVertexId;
+  const place = (want && canPlaceKnightVertex(stAfter, pid, want)) ? want : knightPlacementVertex(stAfter, pid);
   if (place && knightCountOf(state, pid) < PIECE_LIMITS.knights) {
     vertices = { ...vertices, [place]: { ...vertices[place]!, knight: { playerId: pid, strength: target.strength as 1 | 2 | 3, active: false } } };
   }
