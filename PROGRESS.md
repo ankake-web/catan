@@ -1,103 +1,73 @@
-# PROGRESS — カタン航海者版（最終更新: 2026-07-04）
+# PROGRESS — カタン（航海者版＋交易と蛮族 実装中）（最終更新: 2026-07-05）
 
 > Vite + TypeScript のブラウザ版カタン。リポジトリ: `ankake-web/catan`（origin）。
 > 本番: https://ankake-web.github.io/catan/ （`.github/workflows/deploy.yml` が main への push で自動デプロイ）。
-> 戦国リスキン版「**100万石**」は同一 git の別 worktree `…/game/100man-goku`（ブランチ `art-pass/100man-goku`）。
-> 100万石の本番: https://ankake-web.github.io/100man-goku/ ＝ **hyaku リモート**（`ankake-web/100man-goku`）の main へ push。
-> **作業ルール（厳守）**: 変更は必ず `tsc`/`vitest`/`build` 緑を保つ。フィーチャーブランチ＋PR で進める。
-> **main への直接 push／PR の main マージ／hyaku/main への push（いずれも本番デプロイ）は毎回ユーザの明示許可後**。
-> 回答は日本語。完了/入力待ちごとに CLAUDE.md の beep+トースト通知コマンドを実行する。
+> 戦国リスキン版「**100万石**」は同一 git の別 worktree `…/game/100man-goku`（ブランチ `art-pass/100man-goku`）。100万石本番=**hyaku リモート**の main。
+> **作業ルール（厳守）**: 変更は必ず `tsc`/`vitest`/`build` 緑を保つ。フィーチャーブランチ＋PRで進める。
+> **main への直接push／PRのmainマージ／hyaku/main への push（いずれも本番デプロイ）は毎回ユーザの明示許可後**。
+> 回答は日本語。完了/入力待ちごとに CLAUDE.md の beep+トースト通知を実行。
 
-## 0. 現在の状態（2026-07-04 セッション終了時点・両サイト本番反映済み）
-- **catan**: `main`（origin と一致）・本番200・**vitest 950緑**・typecheck/build緑。
-- **100万石(fork)**: `art-pass/100man-goku` @ `ccbd159`（＝hyaku/main）・本番200・**vitest 917緑**・typecheck/build緑。
-- **フォークは catan `fdb88e7` 相当のコードに追随済み**（航海者フルリビルド全移植を戦国テーマで完了）。
-- 検証コマンド: `npm run typecheck` / `npx vitest run` / `npm run build`。dev=`npm run dev`、LANサーバ=`npm start`。
-  フォーク側の検証も同じ（100万石 worktree で実行）。
+## 0. 現在の状態（2026-07-05）
+- **いま作業中のテーマ = 交易と蛮族（Traders & Barbarians, T&B）拡張の新規実装**。
+- **作業ブランチ `feat/traders-barbarians`（未push・未マージ＝本番未反映）**。ここに全T&B作業がある。
+  - `33d1b2f` 確定仕様書追加 ／ `4d22d47` 増分1「強き港(Strongest Ports)」実装。
+  - このブランチで **vitest 960緑・typecheck緑・build緑**。
+- **catan main**: `3ab026d`（== origin/main・vitest **950**緑）。T&B はまだ入っていない。
+- **100万石(fork)**: `art-pass/100man-goku` @ `ccbd159`（==hyaku/main・vitest 917緑）。**今回未変更**。
+- 検証コマンド: `npm run typecheck` / `npx vitest run` / `npm run build`。dev=`npm run dev`。
 
 ## 1. ゴール
-カタン**航海者版（Seafarers）を公式準拠**で完成させ本番で安定稼働させること＋その内容を**戦国リスキン版「100万石」へ順方向同期**すること。
-- 公式8シナリオ（S1〜S8）＋New World＋公式アプリ由来の追加盤（干ばつ/宝島/オセアニア/大カタン/オアシス）
-  ＋C&K×航海者コンボ3本を実装済み。**表示22シナリオ**（基本/都市と騎士/航海者〜/C&K複合3/オアシス）。
-- 正の仕様書: `docs/カタン航海者版_ルール仕様メモ.md` / `docs/航海者版_公式準拠リビルド計画.md` /
-  `docs/ClaudeCode_カタン全ルール監査プロンプト.md`。公式アプリのスクショは `photo/`（gitignore）。
-- 同期の手順・ログは **SYNC.md** が唯一の正。用語対応は 100万石側 `docs/reskin/GLOSSARY.md` が正典。
+1. （**進行中・最優先**）**交易と蛮族（T&B）を「本家ボードゲームへの完全忠実」で実装**。
+   - 最重要方針: **記憶で数値・ルールを書かない**。全数値は公式ルールブックで確認し出典を付け、確認できない物は【要確認】。
+   - **一次情報 = catan.com 公式英語ルールブック 第6版 CN3089（2025, rules v6.250701, 24p）**。ユーザ選択で**第6版がターゲット確定**（旧版とは名称・メカが異なる：キャラバン→Merchant Trains 等）。
+   - 全数値を**データ定数化**し、**仕様値をテストで固定**。既存（基本/航海者/C&K）を壊さない。
+   - **正の仕様書 = [docs/交易と蛮族_仕様書_v6.md](docs/交易と蛮族_仕様書_v6.md)**（4変種＋5シナリオ・出典ページ付き・図版確定済み）。
+2. （完了・維持）航海者版を公式準拠で完成＋100万石へ順方向同期（SYNC.md／GLOSSARY.md が正）。
 
-## 2. 完了したこと（新しい順・すべて本番反映済み）
-- **2026-07-04 セッション（大量）— すべて catan・100万石 両方に反映**:
-  - **フォークへ小粒3件＋航海者フルリビルドを全移植**（当初「保留」だったが、ユーザ「全部やって」判断で実施）:
-    小粒＝①islandBonus のプレイヤー別配列化 ②普請カード（街道建設）で船も無料配置 ③資源アニメ stagger 上限＋
-    ウォッチドッグ固着解除（fork `7983b5f`/`a312058`/`261fbba`）。大物＝engine5本
-    （explore/cloth/wonders/pirateIslands/seaTokens）＋scenarios.ts 全面刷新＋types拡張＋配線＋テスト13本を
-    **戦国テーマ**で移植（fork squash `cf492f5`）。**戦国名確定: 航海者→水軍・七不思議→七名城・織物→絹・
-    砂漠→荒野・都市と騎士→城と武将/武将と商い**。表示名「水軍：X」「武将と商い：X」。旧シナリオID整合も
-    catan 準拠で解決（greatercatan=大いなる国＝数値トークン盤に意味変更）。移植は **Workflow(13エージェント)** で
-    実施し独立検証。git merge は戦国アート/図鑑を壊すため不採用＝SYNC.md §3 のファイル別手動移植。
-    実機ブラウザで全22シナリオ描画エラー0（dev+本番）。
-  - **脱走兵（deserter）: 獲得した騎士（武将）の設置先を盤面で選べる2手制UIを追加**（従来は自動配置）。
-    `ProgressChoice.deserterPlaceVertexId` / `deserterPlacementTargets` / `playDeserter` が設置先指定を尊重。
-    `selectDeserterKnight` を `deserterRemoveVid` で1手目(消す騎士)/2手目(設置先)に分岐（moveShip/smith と同型）。
-    catan PR#16・fork `ccbd159`。**外交官(diplomat)は仕様どおり正しく変更なし**（下記 §3）。
-  - **オセアニア盤を再設計**（seafarers_oceania / ck_seafarers_oceania 両方）: 従来は霧15マスのうち8マスが
-    始発島に直接接触していた（非公式）。盤を **51→61ヘックス**（`OCEANIA_COORDS`）へ拡大し、始発島(西10/東7)と
-    霧(中央帯15)を必ず海で隔てた＝霧は始発島に非接触、船で海を渡ってのみ探索（公式準拠）。回帰テスト追加。catan PR#15。
-  - **シナリオ・プレビュー(scenarioSelect)の霧可視化**: 霧マス(type=sea+fog)が海と同色だったのを、淡色(#aebfcb)＋
-    白破線＋「?」で表示（中身は伏せたまま）。全霧シナリオに適用。
-  - docs 同期: catan PR#14（SYNC.md/PROGRESS.md にフォーク移植を記録・前回同期点を fdb88e7 へ）。
-- **〜2026-07-03**: 航海者リビルド一式（PR#7〜#11）＝公式8＋NW＋追加盤＋C&K複合＋オアシス、新メカ（抜けている数値
-  トークン/地域ボーナス/霧探索/海辺トークン/織物/不思議/海賊要塞）を catan 本番へ。敵対レビュー＋ultracode監査で
-  バグ全件修正（詳細は git log と `git log -- PROGRESS.md` の過去版、メモリ2件）。
-- **〜2026-06-29**: 公式準拠リビルド（PR#3）・S7軍船/艦隊戦・S6織物・初心者支援・シナリオ別ルール表示。
+## 2. 完了したこと（新しい順）
+- **2026-07-05 T&B セッション（本ブランチ）**:
+  - **フェーズ0（コード把握）**: シナリオはデータ駆動（`scenarios.ts` の `Scenario`＝coords()+build()+`ScenarioRules`+victoryTarget）。base/航海者は `category`＋海タイル有無で区別、C&K だけ `expansion` フラグ。特殊VPは `scoring.ts` `calcVP`/`calcPublicVP` に項追加＋`update*` 関数（最長道路/最大騎士団が雛形）。
+  - **フェーズ1（仕様抽出）**: 公式PDFを精読。テキスト抽出で拾えなかった**図版（橋コスト/盤配置/数字ディスク/湖/荷馬車ボード）を、PDFをPNGレンダリングして直接視認し確定**。主要な【要確認】をほぼ全て解決（下記§3）。docs に確定仕様書を作成。
+  - **フェーズ2（実装）増分1**: **T&B新カテゴリ `traders_barbarians`＋「強き港(Strongest Ports)」変種**を実装。港上の建物VP合計(開拓地1/都市2)最多(最低3VP)に+2VPタイル、同点は現保持者優先・strictly上回りで移動（最大騎士団と同型）。シナリオ `tb_harbors`（基本盤・11点）。テスト9件で数値固定。全960緑。
+- **〜2026-07-04（main 反映済み）**: 航海者版フルリビルド（公式8＋NW＋追加盤＋C&K複合＋オアシス・表示22シナリオ）／脱走兵の設置先選択UI／オセアニア盤再設計。100万石へ全移植。詳細は git log と過去の PROGRESS（`git log -- PROGRESS.md`）、メモリ2件。
 
 ## 3. 決定事項とその理由
-- **外交官(diplomat)は「先に騎士がいる道」も撤去できる＝公式ルール通りで正しい**（バグではない）。開いた道の定義は
-  「端点に開拓地/都市が無く続く自分の道も無い」で**騎士は含まない**（道を守るのは建物と続く道のみ）。エンジンの
-  接続判定(`isEdgeConnectedForPiece`)も騎士を無関与に扱い一貫。→ 変更しない。
-- **道が消えて取り残された騎士(武将)は盤上に残る**（撤去されない）。`playDiplomat` は道のみ撤去し騎士に触れない。
-  孤立騎士は防衛/最大騎士力/起動など機能は維持、**移動だけ**不可になる（`canMoveKnight` は進む辺に自分の道/船を
-  要求）。隣に道を建て直せば再び動ける。公式C&K準拠（騎士は配置時のみ接続が要る）。
-- **脱走兵の獲得騎士は設置先を選べる**（公式準拠。2026-07-04 実装）。設置先未指定/置き場無しは従来どおり自動配置。
-- **オセアニアは霧を始発島から海で隔てる**（ユーザ指摘＝公式準拠。2026-07-04）。盤61ヘックス・海広め・タイルは
-  小さくなるが操作性問題なし（ユーザ確認済み）。他の盤は 51/37/29 ヘックスのまま。
-- **フォーク大移植は「実施」に転換**（2026-07-04）: 旧「保留」判断（2026-07-02）はユーザ「全部やって」で撤回し完遂。
-- **cherry-pick は使わない**（リスキン文字列の巻き戻し防止）。同期は SYNC.md §3 のファイル別手動移植。
-  git merge も戦国アート/図鑑を壊すため不採用。
-- **盤 footprint は原則そのまま**（公式35厳密化は実物盤の高解像度写真待ち。`photo/` は塊のみで座標詰め不可）。
-- **公式データが無い項目は触らない**（捏造回避）: S8不思議の正式要件・S3霧の正確な数字/金の枚数。
-- **S7 は軍船・艦隊戦を実装**（軍船化対象選択UI・戦闘報酬UIは自動選択で妥当）。**SETUP は無償報酬なし**が方針。
+- **ターゲットは第6版(2025, CN3089)**（ユーザ選択）。catan.com 現行公式＝一次情報。旧版とは以下が違う（記憶で書くと事故る）：
+  - キャラバン(The Caravans) → **Merchant Trains of Catan**（荷馬車を投票配置、隊列に挟まれた建物+1VP）。
+  - Harbor Master → **Harbors of Catan / Strongest Ports**。表題シナリオもコモディティ拠点＋荷馬車配達に再設計。
+- **図版から確定した数値**（公式PDFをPNG視認・出典は仕様書§6）:
+  - 橋の建設コスト=**レンガ2＋木1**（0VP・最長交易路算入）。
+  - Fishing: **湖=2/3/11/12**・**漁場6枚=4/5/6/8/9/10**（各タイル印刷）。fish 29(1×11/2×10/3×8)＋ぼろ靴1。fish消費 2/3/4/5/7。上限7。勝利10(bootで11)。
+  - 荷馬車ボード: レベル1-5で **MP=4/5/6/7/7**・**商品価値=1/2/3/4/5**・**駆逐ダイス範囲=Lv1不可/Lv2:6/Lv3:5-6/Lv4:4-6/Lv5:3-6**・**4段強化で+1VP**・1段目コスト=木1羊毛1鉱石1。
+  - Barbarian Attack: 城=左下/砂漠=右上の**固定数字レイアウト**（仕様書§6.4）・11ディスクは1枚・蛮族は2と12のヘックスに開始。専用発展26(Capture4/Knighthood14/SwiftKnight4/Treason4)。
+  - Traders&Barbarians: 拠点3(採石場/ガラス工房/城)＋Xマーカー9＋蛮族3を図示配置・数字は2/12省き拠点スキップ。専用発展25(Knight16/RoadBuilding3/SwiftJourney3/VP3)。目標13。
+  - Merchant Trains: 水場=盤中央・数字なし。荷馬車22。目標12。
+  - 各シナリオ勝利目標: Fishing10 / Rivers10 / MerchantTrains12 / Barbarian12 / T&B13 / Harbors(基本+1=11)。
+- **Strongest Ports は「movable bonus」パターンで実装**（最長道路/最大騎士団と同型）＝`updateStrongestPorts`＋`GameState.strongestPortsHolder`＋`calcVP` に+2項。ScenarioRules `strongestPorts` フラグで有効化。
+- **実装はデータ駆動＋テストで数値固定**が原則。変種/シナリオは既存 `classic` 盤や `ScenarioRules` トグルへ薄く乗せる。
 
 ## 4. 未完了タスク（優先順位順・次セッションはここから）
-1. **（任意・低優先）フォークのコメント/テストdescription に残る catan 用語（航海者/都市/騎士等）の戦国reskin**。
-   dev 向けのみでユーザー非表示・GLOSSARY §6 上リスキンは任意。ユーザー表示文字列は既に全て戦国化済み。
-2. **（潜在・両リポジトリ共通）C&K 進歩カード `road_building_progress` の無料本数が船コマ在庫を数えない**
-   （`citiesKnights.ts` `Math.min(2, remainingRoads)`）。普請カード(PLAY_ROAD_BUILDING)は 2026-07-04 に船対応済みだが
-   進歩カード版は catan・fork とも未対応で同一。C&K×航海者で船2/道1+船1 を配れない可能性。直すなら両方に。
-3. **公式地図画像（実物盤の高解像度写真）が手に入ったら**: タイル座標・港位置/種別のピクセル単位の合わせ込み。
-4. **公式データ入手後の積み残し**: S8七不思議の正式要件／S3霧の島の正確な数字・金の枚数。
-5. **実機目視（人間）**: 新盤/新機能の実プレイ体感（オアシス/大カタン/CKコンボ/オセアニア新盤/脱走兵の2手選択の
-   通し操作）。自動検証（起動・描画・エラー0・盤クリック配線）は確認済み。**脱走兵カードを手札に持つ実戦通し操作は未実施**
-   （到達困難のため。エンジンはテスト済み・盤クリック配線は実機で回帰なし確認済み）。
+> すべて [docs/交易と蛮族_仕様書_v6.md](docs/交易と蛮族_仕様書_v6.md) をデータ化＋テスト固定していく。各増分ごとに `tsc`/`vitest`/`build` 緑・区切りコミット。
+1. **増分2：残りの変種を実装**（軽い順に低リスク）。**推奨=The Friendly Robber**（仕様書§2-1・盗賊移動の1ルール変更＝`robber.ts` の移動候補フィルタ＋盗み対象を「3VP以上」に。`friendlyRobber` フラグ＋シナリオ＋テスト）。次いで **Catan Event Cards**（§2-3・ダイス→イベントデッキ置換）、**Catan for Two**（§2-4・2人＋中立プレイヤー）。
+2. **増分3以降：5シナリオ**（Fishing→Rivers→Merchant Trains→Barbarian Attack→Traders & Barbarians）。
+   - **Fishing on Catan**（§3-1）は最初の完全シナリオだが**要設計**: 湖が**4数字**で産出＝現 `Tile.number:number|null`（単一）を拡張要／漁場は盤ヘックスでなく**フレーム上の産出源**＝新しい盤フィーチャー／fishトークン経済（秘匿・上限7・ぼろ靴・消費アクション）。
+   - Rivers=川タイル(3+4hex)＋沼＋橋(新建物)＋コイン＋最富豪/極貧。Barbarian/T&B=騎士・蛮族・専用デッキ・荷馬車で最も重い。
+3. **残存【要確認】（軽微・データ定数で1行修正可）**: 荷馬車アップグレードの**木の本数(Lv3-5)**（暫定「木2」で実装可）／Event Cards の**36枚の生産数字分布**（Event Cards実装時に §p5-6 を要読）。
+4. **完了後**: ユーザ許可を得て feature ブランチを push→PR→（許可後）main マージ→本番。その後 100万石(fork)へ SYNC.md §3 手順で戦国語化移植。
 
 ## 5. 詰まっている点・注意点・保留中の判断
-- **デプロイ権限**: main への直接 push／PR マージ／hyaku/main への push は**毎回ユーザの明示許可**。勝手にやらない。
-  自作PRの即マージは安全ガードで止まる（＝正常）。ユーザ許可を得てから `gh pr merge` する。
-- **GitHub Pages の一時障害**: catan/100man-goku とも `deploy` が「Deployment failed, try again later」で落ちることが
-  多い（2026-07-04 も両方で発生）。ビルド起因でなければ `gh run rerun <id> --failed` で回復（実績あり）。
-- **vitest が稀に ESM ローダで一時クラッシュ（exit 134）**: テスト失敗ではない。再実行すれば緑。
-- **盤のタイル種別/数字を変えると決定論スモークの seed 軌道が変わる**: 盤を触ったら全テスト＋スモーク再確認。
-  **BIG_MAIN_ISLAND は複数シナリオで共有**＝変更は全部に波及。オセアニアは専用 `OCEANIA_COORDS`(61hex) を使う。
-- **ローカル main は作業前に `git pull`**（マージコミット分 origin より遅れがち）。**フォークは `art-pass/100man-goku`**。
-- **`photo/` のフォルダ名の罠**: `photo/大カタン`＝C&K大カタン(20点)、`photo/騎士と都市　大カタン`＝航海者大カタン(18点)。
-- **フォーク移植の正典**: コード同期の手順=SYNC.md §3、用語=100万石側 `docs/reskin/GLOSSARY.md`（航海者→水軍 等）。
-  内部ID/enum/座標/数値/テストのロジックは両者同一・**表示文字列だけ**リスキン。
-- **実機スモークの罠**: ホームは既定「オンライン対戦」タブ＝先に「CPU 対戦」をクリック。SVGは Playwright の可視性判定が
-  不安定なので `svg polygon` の可視待ちでなく `[data-vertex-id]` の存在数や `$$eval` の件数で判定する。
-- 参考メモリ: `seafarers-pr9-known-bugs`（バグ対応履歴＋フォーク移植の全経緯）/ `seafarers-official-rebuild`。
+- **本ブランチは未push**。T&B作業は `feat/traders-barbarians` にしか無い。新セッションは**必ずこのブランチをチェックアウト**してから作業する。
+- **デプロイ権限**: main への push／PRマージ／hyaku/main への push は**毎回ユーザの明示許可**。自作PRの即マージは安全ガードで止まる＝正常。
+- **公式PDFと再レンダリング環境**（`scratchpad` はセッション固有で消えうる）:
+  - PDF URL: `https://www.catan.com/sites/default/files/2025-04/CN3089%20CATAN%20%E2%80%93%20T&B%20Rulebook.pdf`（ローカルにも `C:\Users\b1242\Downloads\CATAN_交易と蛮族_第6版_CN3089.pdf`）。
+  - テキスト抽出=`/mingw64/bin/pdftotext -layout`（散文は raw の方が綺麗）。**画像レンダラは未導入**→ scratchpad で `npm i pdfjs-dist@^4 @napi-rs/canvas` して `render.mjs`/`crop.mjs`（**clip の undefined を吸収するパッチ必須・スケールは≤10**。14はskia確保失敗）。ページ1/19/24はSMaskで描画失敗するが重要図版なし。
+  - **PDFのページ番号と印刷ページ番号がズレる箇所あり**（例: PDF8=印刷8だがCatan for Two、Fishingは印刷9-10=PDF9-10）。仕様書の出典は印刷ページ。
+- **`scenarios.test.ts` は「表示シナリオ集合」を厳密に固定**＝**可視シナリオを1つ追加するたびにこのテストの配列を更新**する（今回 tb_harbors で更新済み）。
+- **網羅Recordが多い**: `SCENARIOS`/`SCENARIO_RULES`（Record<ScenarioId>）、`TILE_COUNTS`/`TILE_RESOURCE_MAP`/`TILE_COMMODITY_MAP`（Record<TileType>）、`category` union（`scenarios.ts`×2＋`scenarioSelect.ts`）。id/tile/category を足すと全部直さないと tsc が通らない（＝抜け漏れ検知になる）。
+- **vitest が稀に ESM ローダで一時クラッシュ(exit 134)**: 失敗ではない。再実行で緑。
+- 参考メモリ: `seafarers-pr9-known-bugs` / `seafarers-official-rebuild`。フォーク同期は SYNC.md／100万石 `docs/reskin/GLOSSARY.md`。
 
-## 過去ログ（要約。詳細は git 履歴と各PR本文）
-- 2026-07-04: フォークへ小粒3件＋航海者フルリビルド全移植（水軍）／脱走兵の設置先選択UI／オセアニア盤再設計＋
-  プレビュー霧可視化。すべて両サイト本番反映（catan PR#14/#15/#16・fork art-pass 直コミット→hyaku/main）。
-- 2026-06-30〜07-03: 航海者リビルド（PR#7/#8/#9）→ 敵対レビュー修正（PR#10）→ ultracode 監査修正（PR#11）→
-  フォーク同期着手（船まわり2件）→ docs 整理（PR#12/#13）。
-- 2026-06-28〜29: 公式準拠リビルド（S1〜S8＋NW・37hex・PR#3）／S7軍船・艦隊戦／S6織物／初心者支援（PR#4〜）。
-- 2026-06-12〜13: 航海者拡張の初期実装・多エージェント監査・拡張プラン発展項目。
+## 過去ログ（要約）
+- 2026-07-05: T&B 仕様確定（公式PDF図版をPNG視認）＋増分1「強き港」実装（feat/traders-barbarians・未push）。
+- 2026-07-04: 航海者フルリビルドのフォーク全移植／脱走兵UI／オセアニア再設計（catan PR#14-17・fork→hyaku/main）。
+- 2026-06-28〜07-03: 公式準拠リビルド（S1〜S8＋NW）→敵対レビュー→ultracode監査→docs整理。
