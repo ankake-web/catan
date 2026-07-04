@@ -97,6 +97,9 @@ const SEAFARERS_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 
 const BIG_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(3, 3, 3);   // 37ヘックス
 const HUGE_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(4, 3, 4);  // 51ヘックス
 const FOUR_ISLANDS_COORDS = HUGE_COORDS; // S2 は 51ヘックス（公式アプリ4人盤・大きさの異なる4島）
+// オセアニア専用: 霧を始発島から必ず海で隔てるため、他盤(51)より広い 61ヘックス(半径4)を使う。
+// 盤は自動縮小して収まる（タイルは小さくなるが操作性は問題なし）。
+const OCEANIA_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(4, 4, 4); // 61ヘックス
 
 // ---- 航海者「新たな海岸を目指して」（公式S1・51ヘックス＝公式アプリ4人盤に準拠） ----
 // 公式アプリ(photo/IMG_6399)の「中央に本島＋四方に離れた小島」を51マス盤で再現。
@@ -823,56 +826,59 @@ const seafarersFogIslands: Scenario = {
   rules: { newIslandBonusVp: 0 }, // 探索の報酬は資源（島ボーナスVPは無し）
 };
 
-// ---- 公式アプリ「オセアニア(4)」(photo/IMG_6409 実読): 霧に覆われた海に2つの始発島。
-//   どの島からでも始められ(setupAnywhere)、霧を晴らして新たな島や海を発見する。発見した陸
-//   からは資源1枚を獲得（島ボーナスVPは無し）。霧の中には金鉱の島も眠る。12点。 ----
-// 始発の2島（buildFromLandFogMap の landMap）。北東10＋南西7＝陸17（実読の構成）。
-//   北東(10): 森2/畑2/牧草3/山2/丘1   南西(7): 森2/山1/丘2/畑1/牧草1
+// ---- 公式アプリ「オセアニア(4)」: 霧に覆われた海に2つの始発島。どの島からでも始められ
+//   (setupAnywhere)、霧を晴らして未知の海域を探索する。発見した陸からは資源1枚（島ボーナスVPは無し）。
+//   霧の中には金鉱の島も眠る。12点。
+//   盤=61ヘックス(OCEANIA_COORDS)。始発島(西10/東7)と霧(中央帯15)は必ず海で隔て、霧は始発島に
+//   直接接触しない＝船で海を渡ってのみ探索できる（公式のオセアニア挙動）。 ----
+// 始発の2島（buildFromLandFogMap の landMap）。西10＋東7＝陸17。randomizeLandMap が島内で毎ゲーム
+//   地形/数字をシャッフル（赤6/8非隣接）。西(10):森2/畑2/牧草3/山2/丘1  東(7):森2/山1/丘2/畑1/牧草1
 const OCEANIA_HOME_LAND: LandMap = {
-  // 北東の始発島（10）
-  '1,-3': { type: 'forest',   number: 9 },
-  '2,-3': { type: 'forest',   number: 3 },
-  '1,-2': { type: 'field',    number: 12 },
-  '2,-2': { type: 'mountain', number: 10 },
-  '3,-2': { type: 'pasture',  number: 5 },
-  '1,-1': { type: 'pasture',  number: 4 },
-  '2,-1': { type: 'hill',     number: 6 },
-  '3,-1': { type: 'field',    number: 6 },
-  '2,0':  { type: 'pasture',  number: 5 },
-  '3,0':  { type: 'mountain', number: 2 },
-  // 南西の始発島（7）
-  '-4,2': { type: 'forest',   number: 9 },
-  '-3,1': { type: 'forest',   number: 10 },
-  '-4,3': { type: 'mountain', number: 3 },
-  '-3,2': { type: 'hill',     number: 8 },
-  '-3,3': { type: 'hill',     number: 4 },
-  '-2,2': { type: 'field',    number: 8 },
-  '-2,3': { type: 'pasture',  number: 11 },
+  // 西の始発島（10）
+  '-4,0':  { type: 'forest',   number: 9 },
+  '-4,1':  { type: 'forest',   number: 3 },
+  '-4,2':  { type: 'field',    number: 12 },
+  '-3,-1': { type: 'mountain', number: 10 },
+  '-3,0':  { type: 'pasture',  number: 5 },
+  '-3,1':  { type: 'pasture',  number: 4 },
+  '-3,2':  { type: 'hill',     number: 6 },
+  '-2,-1': { type: 'field',    number: 6 },
+  '-2,0':  { type: 'pasture',  number: 5 },
+  '-2,1':  { type: 'mountain', number: 2 },
+  // 東の始発島（7）
+  '2,-1':  { type: 'forest',   number: 9 },
+  '2,0':   { type: 'forest',   number: 10 },
+  '3,-2':  { type: 'mountain', number: 3 },
+  '3,-1':  { type: 'hill',     number: 8 },
+  '3,0':   { type: 'hill',     number: 4 },
+  '4,-2':  { type: 'field',    number: 8 },
+  '4,-1':  { type: 'pasture',  number: 11 },
 };
-// 霧（15セル・陸7（うち金鉱2）/海8）。randomizeFogMap がどのセルが陸/海か・地形・数字をシャッフル。
+// 霧（中央帯15セル・陸7（うち金鉱2）/海8）。両始発島から海を越えて探索する未知の海域。
+//   randomizeFogMap がどのセルが陸/海か・地形・数字を毎ゲームシャッフル（金2は必ず霧の中に残る）。
 const OCEANIA_FOG: FogMap = {
-  '-4,0':  { type: 'sea',      number: null },
-  '-4,1':  { type: 'gold',     number: 5 },
-  '-3,-1': { type: 'sea',      number: null },
-  '-3,0':  { type: 'forest',   number: 9 },
-  '-2,-1': { type: 'sea',      number: null },
-  '-2,0':  { type: 'field',    number: 4 },
-  '-2,1':  { type: 'mountain', number: 10 },
-  '-1,0':  { type: 'sea',      number: null },
-  '-1,1':  { type: 'pasture',  number: 6 },
-  '-1,2':  { type: 'sea',      number: null },
+  '0,-4':  { type: 'sea',      number: null },
+  '0,-3':  { type: 'gold',     number: 5 },   // 金鉱の島1
+  '0,-2':  { type: 'forest',   number: 9 },
   '0,-1':  { type: 'sea',      number: null },
+  '0,0':   { type: 'field',    number: 4 },
   '0,1':   { type: 'sea',      number: null },
-  '0,2':   { type: 'hill',     number: 3 },
-  '1,1':   { type: 'sea',      number: null },
-  '1,2':   { type: 'gold',     number: 11 },
+  '0,2':   { type: 'mountain', number: 10 },
+  '0,3':   { type: 'sea',      number: null },
+  '0,4':   { type: 'gold',     number: 11 },  // 金鉱の島2
+  '1,-3':  { type: 'sea',      number: null },
+  '1,-2':  { type: 'pasture',  number: 6 },
+  '1,2':   { type: 'sea',      number: null },
+  '-1,-3': { type: 'hill',     number: 3 },
+  '-1,2':  { type: 'sea',      number: null },
+  '-1,3':  { type: 'sea',      number: null },
 };
 const seafarersOceania: Scenario = {
   id: 'seafarers_oceania',
   name: '航海者：オセアニア',
   description: '霧に覆われた海に2つの始発島。どの島からでも始め、霧を晴らして島を発見（資源1枚）。金鉱の島も眠る（12点）。',
   category: 'seafarers',
-  coords: HUGE_COORDS, // 51ヘックス（2始発島＋霧の海域）
+  coords: OCEANIA_COORDS, // 61ヘックス（2始発島＋中央の霧帯・海で確実に隔てる）
   build: buildFromLandFogMap(OCEANIA_HOME_LAND, OCEANIA_FOG),
   victoryTarget: 12,
   recommendedPlayers: '4人', // 公式アプリ「オセアニア(4)」＝4人用
@@ -1210,7 +1216,7 @@ const ckSeafarersOceania: Scenario = {
   description: '霧の海の2始発島に「都市と騎士」拡張を追加。霧を晴らして島を発見（資源1枚）。15点で勝利。',
   category: 'cities_knights',
   expansion: 'cities_knights',
-  coords: HUGE_COORDS,
+  coords: OCEANIA_COORDS, // 61ヘックス（2始発島＋中央の霧帯・海で確実に隔てる）
   build: buildFromLandFogMap(OCEANIA_HOME_LAND, OCEANIA_FOG),
   victoryTarget: 15,
   recommendedPlayers: '4人',

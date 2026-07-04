@@ -49,10 +49,11 @@ export function renderScenarioPreview(id: ScenarioId): SVGSVGElement {
   svg.setAttribute('aria-hidden', 'true');
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  const cells: { cx: number; cy: number; type: string }[] = [];
+  const cells: { cx: number; cy: number; type: string; fog: boolean }[] = [];
   for (const t of Object.values(tiles)) {
     const { x, y } = axialToPixel(t.coord, PV);
-    cells.push({ cx: x, cy: y, type: t.type });
+    // 霧（未探検マス）は type='sea' で保存されるが、fog を持つ。プレビューでは海と区別して「?」で示す。
+    cells.push({ cx: x, cy: y, type: t.type, fog: t.fog != null });
     minX = Math.min(minX, x - PV); maxX = Math.max(maxX, x + PV);
     minY = Math.min(minY, y - PV * 0.9); maxY = Math.max(maxY, y + PV * 0.9);
   }
@@ -61,6 +62,25 @@ export function renderScenarioPreview(id: ScenarioId): SVGSVGElement {
   for (const c of cells) {
     const poly = document.createElementNS(NS, 'polygon');
     poly.setAttribute('points', hexPoints(c.cx, c.cy, PV * 0.95));
+    if (c.fog) {
+      // 霧（未探検の「?」マス）: 海と紛れないよう淡い霧色＋白の破線枠＋「?」を重ねる。
+      // 中身（陸/海）は伏せたまま——プレビューでも「そこに未探検マスがある」ことだけ分かるように。
+      poly.setAttribute('fill', '#aebfcb');
+      poly.setAttribute('stroke', '#ffffff');
+      poly.setAttribute('stroke-width', '0.7');
+      poly.setAttribute('stroke-dasharray', '2 1.5');
+      svg.appendChild(poly);
+      const q = document.createElementNS(NS, 'text');
+      q.setAttribute('x', c.cx.toFixed(1));
+      q.setAttribute('y', (c.cy + PV * 0.37).toFixed(1));
+      q.setAttribute('text-anchor', 'middle');
+      q.setAttribute('font-size', (PV * 1.05).toFixed(1));
+      q.setAttribute('font-weight', 'bold');
+      q.setAttribute('fill', '#ffffff');
+      q.textContent = '?';
+      svg.appendChild(q);
+      continue;
+    }
     poly.setAttribute('fill', TYPE_COLOR[c.type] ?? '#555');
     if (c.type === 'sea') { poly.setAttribute('stroke', '#3f93ad'); poly.setAttribute('stroke-width', '0.5'); }
     else { poly.setAttribute('stroke', 'rgba(0,0,0,0.4)'); poly.setAttribute('stroke-width', '0.7'); }

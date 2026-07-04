@@ -463,8 +463,8 @@ describe('scenarios: 航海者「4つの島」(公式S2・公式アプリ4人盤
 
 describe('scenarios: 航海者「オセアニア」(公式アプリ4人盤 photo/IMG_6409 実読)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_oceania');
-  it('51ヘックス・始発の2島(10/7)＋霧の海域。砂漠なし＝盗賊は盤外・海賊は海', () => {
-    expect(Object.keys(s.tiles)).toHaveLength(51);
+  it('61ヘックス・始発の2島(10/7)＋霧の海域。砂漠なし＝盗賊は盤外・海賊は海', () => {
+    expect(Object.keys(s.tiles)).toHaveLength(61);
     const repOf = computeIslandReps(s.tiles); // 霧は海扱い＝島に数えない
     const sizes = [...new Set(Object.values(repOf))]
       .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
@@ -472,6 +472,21 @@ describe('scenarios: 航海者「オセアニア」(公式アプリ4人盤 photo
     expect(Object.values(s.tiles).some(t => t.type === 'desert')).toBe(false);
     expect(Object.values(s.tiles).some(t => t.hasRobber)).toBe(false);
     expect(s.tiles[s.piratePosition!]!.type).toBe('sea');
+  });
+  it('[海バッファ] 霧マスは始発島に直接接触せず必ず海を挟む（船で海を渡ってのみ探索）', () => {
+    const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+    for (const seed of [1, 3, 9]) {
+      const st = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(seed), 'seafarers_oceania');
+      for (const t of Object.values(st.tiles)) {
+        if (t.fog == null) continue; // 霧マス（?タイル）だけ検査
+        for (const [dq, dr] of DIRS) {
+          const nid = `${t.coord.q + dq},${t.coord.r + dr}`;
+          const nt = st.tiles[nid];
+          const nHome = !!nt && nt.type !== 'sea' && nt.fog == null;
+          expect(nHome).toBe(false); // 霧の隣が始発島の陸であってはならない
+        }
+      }
+    }
   });
   it('霧があり、霧の中に金鉱の島が2つ隠れている（公開まで見えない）', () => {
     expect(Object.values(s.tiles).some(t => t.fog != null)).toBe(true);
@@ -487,8 +502,8 @@ describe('scenarios: 航海者「オセアニア」(公式アプリ4人盤 photo
     const sig = (c: Record<string, number>) =>
       Object.entries(c).sort().map(([k, v]) => `${k}${v}`).join('/');
     const expected = new Set([
-      sig({ forest: 2, field: 2, pasture: 3, mountain: 2, hill: 1 }), // 北東(10)
-      sig({ forest: 2, mountain: 1, hill: 2, field: 1, pasture: 1 }), // 南西(7)
+      sig({ forest: 2, field: 2, pasture: 3, mountain: 2, hill: 1 }), // 西(10)
+      sig({ forest: 2, mountain: 1, hill: 2, field: 1, pasture: 1 }), // 東(7)
     ]);
     for (const seed of [1, 3, 9]) {
       const st = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(seed), 'seafarers_oceania');
