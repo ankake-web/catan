@@ -1279,6 +1279,36 @@ describe('C&K 進歩カードの手動選択（クレーン/僧正/外交官/脱
     expect(r.vertices[kv]!.knight ?? null).toBeNull();
   });
 
+  it('deserter: choice.deserterPlaceVertexId で獲得騎士の設置先を選べる（自動でなく指定位置へ）', async () => {
+    const { playProgress, deserterPlacementTargets } = await import('../src/engine/citiesKnights');
+    const { createRng } = await import('../src/engine/setup');
+    const s = ck(g => {
+      const kv = Object.keys(g.vertices).find(v => !g.vertices[v]!.building)!;    // player2 の騎士を置く頂点
+      // player1 に道を1本 → その両端が配置候補（≧2）になる
+      const eid = Object.keys(g.edges).find(e => {
+        const [a, b] = g.edges[e]!.vertexIds;
+        return a !== kv && b !== kv && !g.vertices[a]!.building && !g.vertices[b]!.building;
+      })!;
+      return {
+        ...g,
+        players: { ...g.players, player1: makePlayer('player1', { progressCards: [{ id: 'de', type: 'deserter', deck: 'politics' }] }) },
+        vertices: { ...g.vertices, [kv]: { ...g.vertices[kv]!, knight: { playerId: 'player2', strength: 2, active: false } } },
+        edges: { ...g.edges, [eid]: { ...g.edges[eid]!, road: { playerId: 'player1' } } },
+      };
+    });
+    const kv = Object.keys(s.vertices).find(v => s.vertices[v]!.knight?.playerId === 'player2')!;
+    const places = deserterPlacementTargets(s, 'player1');
+    expect(places.length).toBeGreaterThanOrEqual(2);   // 選ぶ意味がある＝候補が複数
+    const auto = places[0]!;                            // 自動配置は先頭（knightPlacementVertex）
+    const chosen = places[places.length - 1]!;          // あえて末尾を指定
+    expect(chosen).not.toBe(auto);
+    const r = playProgress(s, 'player1', 'de', createRng(1), { deserterVertexId: kv, deserterPlaceVertexId: chosen });
+    expect(r.vertices[kv]!.knight ?? null).toBeNull();               // 相手の騎士は消える
+    expect(r.vertices[chosen]!.knight?.playerId).toBe('player1');    // 指定位置に自分の騎士
+    expect(r.vertices[chosen]!.knight?.strength).toBe(2);            // 同強度
+    expect(r.vertices[auto]!.knight ?? null).toBeNull();             // 自動先(先頭)には置かれない＝選択が効いている
+  });
+
   it('diplomat: choice.diplomatEdgeId で指定した相手の端の道を撤去', async () => {
     const { playProgress } = await import('../src/engine/citiesKnights');
     const { createRng } = await import('../src/engine/setup');

@@ -24,7 +24,7 @@ import { attachNameField, savePlayerName } from './net/nameField';
 import { saveResume, loadResume, clearResume } from './net/resume';
 import type { ResumeInfo } from './net/resume';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from './engine/actions';
-import { isKnightMovable, canMoveKnight, robberAdjacentChasableVertexIds, isCk, computeCkProduction, canBuildKnight, canActivateKnight, canUpgradeKnight, plainCityVertexIds, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, medicineSettlements, metropolisCityChoices, improvementTakesMetropolis, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from './engine/citiesKnights';
+import { isKnightMovable, canMoveKnight, robberAdjacentChasableVertexIds, isCk, computeCkProduction, canBuildKnight, canActivateKnight, canUpgradeKnight, plainCityVertexIds, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, improvementTakesMetropolis, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from './engine/citiesKnights';
 import type { CkTrack, CommodityType } from './types';
 import type { RollSpec, DiceGLController } from './renderer/diceGL';
 import { renderBoard } from './renderer/board';
@@ -727,8 +727,11 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
         // 騎士と商人・外交官: 撤去できる相手の端の道を光らせる。
         opts.validEdgeIds = new Set(diplomatRemovableRoads(state, pid));
       } else if (mode === 'selectDeserterKnight') {
-        // 騎士と商人・脱走兵: 消せる相手の騎士頂点を光らせる。
-        opts.validVertexIds = new Set(deserterTargets(state, pid));
+        // 騎士と商人・脱走兵: 1手目=消せる相手の騎士 / 2手目=獲得騎士の設置先を光らせる。
+        opts.validVertexIds = new Set(
+          deserterRemoveVid == null ? deserterTargets(state, pid) : deserterPlacementTargets(state, pid),
+        );
+        if (deserterRemoveVid) opts.selectedVertexId = deserterRemoveVid; // 消す騎士を確定強調
       } else if (mode === 'selectMedicineSettlement') {
         // 騎士と商人・医術: 都市化できる自分の開拓地を光らせる。
         opts.validVertexIds = new Set(medicineSettlements(state, pid));
@@ -788,6 +791,9 @@ function setInventorFirst(tid: string | null): void { inventorFirstTile = tid; r
 // 騎士と商人・鍛冶屋(selectSmithKnight)で1体目に選んだ騎士頂点ID（未選択は null）。2体目をタップで昇格。
 let smithFirstKnight: string | null = null;
 function setSmithFirst(vid: string | null): void { smithFirstKnight = vid; redraw(); }
+// 脱走兵: 1手目に選んだ「消す相手の騎士」頂点（非null＝2手目＝獲得騎士の設置先選択中）。
+let deserterRemoveVid: string | null = null;
+function setDeserterRemove(vid: string | null): void { deserterRemoveVid = vid; redraw(); }
 // メトロポリス手動選択中に「今+1する都市改善ツリー」を控える（候補2つ以上で盤面タップさせる時）。
 let pendingMetropolisTrack: CkTrack | null = null;
 let uiPhase: UIPhase = { type: 'idle' };
@@ -1100,7 +1106,7 @@ function computeSheetStatus(): { text: string; alert: boolean } {
       if (buildMode === 'inventorSwap') return { text: inventorFirstTile ? '🔄 入れ替え先のタイルをタップ' : '🔄 入れ替える1つ目のタイルをタップ', alert: true };
       if (buildMode === 'placeBishop') return { text: '⛪ 盗賊を置くタイルをタップ', alert: true };
       if (buildMode === 'selectDiplomatRoad') return { text: '📜 撤去する道をタップ（自分の道は建て直し可）', alert: true };
-      if (buildMode === 'selectDeserterKnight') return { text: '🏃 消す相手の騎士をタップ', alert: true };
+      if (buildMode === 'selectDeserterKnight') return { text: deserterRemoveVid ? '🏃 得た騎士を置く頂点をタップ' : '🏃 消す相手の騎士をタップ', alert: true };
       if (buildMode === 'selectMedicineSettlement') return { text: '💊 都市にする開拓地をタップ', alert: true };
       if (buildMode === 'selectMetropolis') return { text: '🏛 メトロポリスにする都市をタップ', alert: true };
       if (buildMode === 'selectSmithKnight') return { text: smithFirstKnight ? '⚒ 昇格する2体目の騎士をタップ' : '⚒ 昇格する騎士をタップ（最大2体）', alert: true };
@@ -3275,8 +3281,9 @@ function dispatch(action: Action): void {
     if (pcard?.type === 'deserter' && pHuman && !action.choice?.deserterVertexId
         && state.turnPhase === 'TRADE_BUILD' && deserterTargets(state, ppid).length > 0) {
       document.querySelector('.help-overlay')?.remove();
+      deserterRemoveVid = null; // 1手目（消す騎士の選択）から開始
       setBuildMode('selectDeserterKnight');
-      showBoardNotice('🏃 消す相手の騎士をタップ（同じ強さの騎士を得る）');
+      showBoardNotice('🏃 消す相手の騎士をタップ（同じ強さの騎士を得て設置先も選べる）');
       return;
     }
     // 医術: 都市化する自分の開拓地を盤面で選ぶ（麦1＋鉱石2を払える＆開拓地があるとき）。
@@ -3488,6 +3495,7 @@ function setBuildMode(mode: BuildMode): void {
   if (mode !== 'moveKnight') moveKnightFrom = null;
   if (mode !== 'inventorSwap') inventorFirstTile = null;
   if (mode !== 'selectSmithKnight') smithFirstKnight = null;
+  if (mode !== 'selectDeserterKnight') deserterRemoveVid = null;
   redraw();
 }
 
@@ -3610,6 +3618,7 @@ function attachBoardEventsOnce(): void {
     () => inventorFirstTile, setInventorFirst,
     () => pendingMetropolisTrack,
     () => smithFirstKnight, setSmithFirst,
+    () => deserterRemoveVid, setDeserterRemove,
   );
   attachBoardGestures(svgBoard, () => boardViewport, setBoardViewport);
   installHexTooltip(svgBoard, () => state);
@@ -4054,6 +4063,7 @@ function applyNetState(action: Action | undefined, newState: GameState): void {
     pendingMetropolisTrack = null;
     inventorFirstTile = null;
     smithFirstKnight = null;
+    deserterRemoveVid = null;
   }
   // ターン終了で建設モード/船移動選択を解除（次ターンにモードが残るのを防ぐ・LAN）。
   if (action?.type === 'END_TURN' || action?.type === 'MOVE_SHIP') {

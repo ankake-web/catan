@@ -4,7 +4,7 @@
 
 import type { GameState, Action, PlayerId, CkTrack } from '../types';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from '../engine/actions';
-import { canMoveKnight, isKnightMovable, robberAdjacentChasableVertexIds, canBuildKnight, canActivateKnight, canUpgradeKnight, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, medicineSettlements, metropolisCityChoices, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from '../engine/citiesKnights';
+import { canMoveKnight, isKnightMovable, robberAdjacentChasableVertexIds, canBuildKnight, canActivateKnight, canUpgradeKnight, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from '../engine/citiesKnights';
 import { getPirateRobbablePlayerIds, robbableCardCount, pirateRobbableCount } from '../engine/robber';
 
 // 公開情報での奪取可能枚数（LANではマスクされ handCount/commodityCount に枚数が入る。
@@ -279,6 +279,11 @@ export function nearestDeserterVertexId(state: GameState, pid: PlayerId, x: numb
   const valid = new Set(deserterTargets(state, pid));
   return nearestVertexMatching(state, vid => valid.has(vid), x, y, maxDist);
 }
+/** 脱走兵(deserter): 点(x,y)に最も近い「獲得騎士を置ける自分の頂点」を返す（2手目）。なければ null。 */
+export function nearestDeserterPlaceVertexId(state: GameState, pid: PlayerId, x: number, y: number, maxDist = VERTEX_TAP_RADIUS): string | null {
+  const valid = new Set(deserterPlacementTargets(state, pid));
+  return nearestVertexMatching(state, vid => valid.has(vid), x, y, maxDist);
+}
 
 /** 医術(medicine): 点(x,y)に最も近い「都市化できる自分の開拓地頂点」を返す。なければ null。 */
 export function nearestMedicineVertexId(state: GameState, pid: PlayerId, x: number, y: number, maxDist = VERTEX_TAP_RADIUS): string | null {
@@ -394,6 +399,10 @@ export function attachBoardEvents(
   // 騎士と商人・鍛冶屋(selectSmithKnight)モード: 1体目に選んだ騎士頂点ID（2体目のタップで昇格）。
   getSmithFirst: () => string | null = () => null,
   setSmithFirst: (vid: string | null) => void = () => {},
+  // 騎士と商人・脱走兵(selectDeserterKnight)モード: 1手目に選んだ「消す相手の騎士」の頂点ID。
+  //   非nullなら2手目＝獲得騎士の設置先選択へ切替。
+  getDeserterRemove: () => string | null = () => null,
+  setDeserterRemove: (vid: string | null) => void = () => {},
 ): void {
   svg.addEventListener('click', (e) => {
     // 直前のパン/ピンチで動いた指のクリックは配置に使わない（誤配置防止）。
@@ -564,12 +573,29 @@ export function attachBoardEvents(
       return;
     }
 
-    // ---- 騎士と商人: 脱走兵カードの騎士除去（光った相手の騎士をタップ → PLAY_PROGRESS deserterVertexId）----
+    // ---- 騎士と商人: 脱走兵。1手目=消す相手の騎士をタップ、2手目=獲得した騎士の設置先をタップ ----
     if (state.phase === 'MAIN' && state.turnPhase === 'TRADE_BUILD' && mode === 'selectDeserterKnight') {
-      const ptk = clickToBoardPixel(svg, e.clientX, e.clientY);
-      const vid = ptk ? nearestDeserterVertexId(state, pid, ptk.x, ptk.y) : null;
       const card = state.players[pid]?.progressCards?.find(c => c.type === 'deserter');
-      if (vid && card) dispatch({ type: 'PLAY_PROGRESS', cardId: card.id, choice: { deserterVertexId: vid } });
+      if (!card) return;
+      const ptk = clickToBoardPixel(svg, e.clientX, e.clientY);
+      const removeVid = getDeserterRemove();
+      if (removeVid == null) {
+        // 1手目: 消す相手の騎士を選ぶ
+        const vid = ptk ? nearestDeserterVertexId(state, pid, ptk.x, ptk.y) : null;
+        if (!vid) return;
+        // 獲得騎士の置き場が無ければ、除去のみで即実行（現行どおり＝置けない）
+        if (deserterPlacementTargets(state, pid).length === 0) {
+          dispatch({ type: 'PLAY_PROGRESS', cardId: card.id, choice: { deserterVertexId: vid } });
+          return;
+        }
+        setDeserterRemove(vid); // → 2手目（設置先選択）へ切替
+        return;
+      }
+      // 2手目: 獲得した騎士の設置先を選ぶ
+      const placeVid = ptk ? nearestDeserterPlaceVertexId(state, pid, ptk.x, ptk.y) : null;
+      if (!placeVid) { setDeserterRemove(null); return; } // 空タップ＝1手目からやり直し
+      dispatch({ type: 'PLAY_PROGRESS', cardId: card.id, choice: { deserterVertexId: removeVid, deserterPlaceVertexId: placeVid } });
+      setDeserterRemove(null);
       return;
     }
 
