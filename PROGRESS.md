@@ -10,8 +10,8 @@
 ## 0. 現在の状態（2026-07-05）
 - **いま作業中のテーマ = 交易と蛮族（Traders & Barbarians, T&B）拡張の新規実装**。
 - **作業ブランチ `feat/traders-barbarians`（未push・未マージ＝本番未反映）**。ここに全T&B作業がある。
-  - `33d1b2f` 確定仕様書追加 ／ `4d22d47` 増分1「強き港(Strongest Ports)」／ 増分2「親切な盗賊(The Friendly Robber)」実装済み。
-  - このブランチで **vitest 981緑・typecheck緑・build緑**。
+  - `33d1b2f` 確定仕様書 ／ `4d22d47` 増分1「強き港(Strongest Ports)」 ／ `7dbf120` 増分2「親切な盗賊(The Friendly Robber)」（=HEAD）。
+  - このブランチで **vitest 981緑・typecheck緑・build緑**（コミット済み・作業ツリークリーン）。
 - **catan main**: `3ab026d`（== origin/main・vitest **950**緑）。T&B はまだ入っていない。
 - **100万石(fork)**: `art-pass/100man-goku` @ `ccbd159`（==hyaku/main・vitest 917緑）。**今回未変更**。
 - 検証コマンド: `npm run typecheck` / `npx vitest run` / `npm run build`。dev=`npm run dev`。
@@ -46,11 +46,19 @@
   - Merchant Trains: 水場=盤中央・数字なし。荷馬車22。目標12。
   - 各シナリオ勝利目標: Fishing10 / Rivers10 / MerchantTrains12 / Barbarian12 / T&B13 / Harbors(基本+1=11)。
 - **Strongest Ports は「movable bonus」パターンで実装**（最長道路/最大騎士団と同型）＝`updateStrongestPorts`＋`GameState.strongestPortsHolder`＋`calcVP` に+2項。ScenarioRules `strongestPorts` フラグで有効化。
+- **Friendly Robber の実装解釈**（原文と根拠は仕様書§2-1に記載。テストで固定済み）:
+  - 「2VPしか持たない」は**公開VP**（`calcPublicVP`）で判定＝隠しVPカードが盗賊の合法手から逆算されるのを防ぐ。原文どおり**手番プレイヤー自身の2VP建物も区別しない**。奪えるのは「2VP超（公開3VP以上）」のみ。
+  - 砂漠フォールバックで盗賊が既に砂漠なら**その場に留まる**（同一タイル移動を例外許可）。砂漠が無い盤は原文想定外→通常候補へ（進行を止めない保険）。
+  - **盗賊の合法移動先は `getRobberMoveTargets`（robber.ts）に一元化**（現在地除外・S5数字限定・保護・砂漠フォールバック）。エンジン/AI/LAN CPU/ウォッチドッグ/盤ハイライト/クリックの全経路がこれを使う。今後の変種もここに足す。
 - **実装はデータ駆動＋テストで数値固定**が原則。変種/シナリオは既存 `classic` 盤や `ScenarioRules` トグルへ薄く乗せる。
 
 ## 4. 未完了タスク（優先順位順・次セッションはここから）
 > すべて [docs/交易と蛮族_仕様書_v6.md](docs/交易と蛮族_仕様書_v6.md) をデータ化＋テスト固定していく。各増分ごとに `tsc`/`vitest`/`build` 緑・区切りコミット。
-1. **増分3：残りの変種を実装**。次=**Catan Event Cards**（§2-3・ダイス→イベントデッキ置換。36枚の数字分布が残存【要確認】＝実装時に公式PDF p5-6 のカード面を要読）、次いで **Catan for Two**（§2-4・2人＋中立プレイヤー）。
+1. **増分3：残りの変種を実装**。次=**Catan Event Cards**（仕様書§2-3・ダイス→イベントデッキ置換）。着手手順:
+   - (a) まず**残存【要確認】C6 を解決**: 公式PDF p5-6 のカード面をPNGレンダリング（§5の環境手順）し、**36枚の「枚数内訳×生産数字ディスクの割当て」**を読み取って仕様書§2-3を確定させる。
+   - (b) デッキ構築（36枚シャッフル→下5枚→New Year→残り）・ROLL_DICE 置換（カードめくり→イベント解決→数字で生産 or 7）・New Year で再構築。イベント13種の効果は仕様書§2-3に一覧済み。
+   - (c) `game.ts` の `ROLL_DICE` 分岐に代替経路（C&K `applyEventDie` が雛形）。シナリオ登録・テスト固定は増分1/2（`4d22d47`/`7dbf120`）の流儀どおり。
+   - その後 **Catan for Two**（§2-4・trade token＋中立2人。2人戦の生産2回等）。
 2. **増分4以降：5シナリオ**（Fishing→Rivers→Merchant Trains→Barbarian Attack→Traders & Barbarians）。
    - **Fishing on Catan**（§3-1）は最初の完全シナリオだが**要設計**: 湖が**4数字**で産出＝現 `Tile.number:number|null`（単一）を拡張要／漁場は盤ヘックスでなく**フレーム上の産出源**＝新しい盤フィーチャー／fishトークン経済（秘匿・上限7・ぼろ靴・消費アクション）。
    - Rivers=川タイル(3+4hex)＋沼＋橋(新建物)＋コイン＋最富豪/極貧。Barbarian/T&B=騎士・蛮族・専用デッキ・荷馬車で最も重い。
@@ -64,7 +72,9 @@
   - PDF URL: `https://www.catan.com/sites/default/files/2025-04/CN3089%20CATAN%20%E2%80%93%20T&B%20Rulebook.pdf`（ローカルにも `C:\Users\b1242\Downloads\CATAN_交易と蛮族_第6版_CN3089.pdf`）。
   - テキスト抽出=`/mingw64/bin/pdftotext -layout`（散文は raw の方が綺麗）。**画像レンダラは未導入**→ scratchpad で `npm i pdfjs-dist@^4 @napi-rs/canvas` して `render.mjs`/`crop.mjs`（**clip の undefined を吸収するパッチ必須・スケールは≤10**。14はskia確保失敗）。ページ1/19/24はSMaskで描画失敗するが重要図版なし。
   - **PDFのページ番号と印刷ページ番号がズレる箇所あり**（例: PDF8=印刷8だがCatan for Two、Fishingは印刷9-10=PDF9-10）。仕様書の出典は印刷ページ。
-- **`scenarios.test.ts` は「表示シナリオ集合」を厳密に固定**＝**可視シナリオを1つ追加するたびにこのテストの配列を更新**する（今回 tb_harbors で更新済み）。
+- **`scenarios.test.ts` は「表示シナリオ集合」を厳密に固定**＝**可視シナリオを1つ追加するたびにこのテストの配列を更新**する（tb_harbors / tb_friendly_robber で更新済み）。`scenarios_smoke` は表示シナリオを自動で拾い「3人CPUフルゲーム完走」まで回す（新シナリオ追加で自動的に+1件）。
+- **numberHexOnly(S5) と friendlyRobber は併用不可**（砂漠フォールバックと数字限定が矛盾。現行シナリオに併用なし・robber.ts にコメント済み）。将来変種を合成する時は要再設計。
+- 増分2はウルトラコード多角レビュー済み（実装バグ0・テスト強化3件反映済み）。**未反映の指摘は無し**。
 - **網羅Recordが多い**: `SCENARIOS`/`SCENARIO_RULES`（Record<ScenarioId>）、`TILE_COUNTS`/`TILE_RESOURCE_MAP`/`TILE_COMMODITY_MAP`（Record<TileType>）、`category` union（`scenarios.ts`×2＋`scenarioSelect.ts`）。id/tile/category を足すと全部直さないと tsc が通らない（＝抜け漏れ検知になる）。
 - **vitest が稀に ESM ローダで一時クラッシュ(exit 134)**: 失敗ではない。再実行で緑。
 - 参考メモリ: `seafarers-pr9-known-bugs` / `seafarers-official-rebuild`。フォーク同期は SYNC.md／100万石 `docs/reskin/GLOSSARY.md`。
