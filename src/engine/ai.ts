@@ -4,7 +4,7 @@
 
 import type { GameState, Action, PlayerId, ResourceType, AiDifficulty, ResourceHand, DevCardType, CkTrack } from '../types';
 import { RESOURCE_TYPES, COMMODITY_TYPES, BUILD_COSTS, VP_TABLE, TILE_RESOURCE_MAP, LONGEST_ROAD_MIN } from '../constants';
-import { discardCount, robbableCardCount } from './robber';
+import { discardCount, robbableCardCount, getRobberMoveTargets, isFriendlyRobberProtected } from './robber';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, hasEnoughResources } from './actions';
 import {
   isCk, canBuildImprovement, canActivateKnight, canBuildKnight, canUpgradeKnight, canPlayProgress,
@@ -748,10 +748,11 @@ function robberHexScore(state: GameState, tileId: string, pid: PlayerId): number
  */
 export function chooseRobberHex(state: GameState, pid: PlayerId, rng: () => number = Math.random): string {
   const current = Object.values(state.tiles).find(t => t.hasRobber)?.id;
-  // 強盗は陸タイルのみ（海は海賊の領分）。砂漠・現在地・海を除外。
-  const candidates = Object.keys(state.tiles).filter(
-    tid => tid !== current && state.tiles[tid]?.type !== 'desert' && state.tiles[tid]?.type !== 'sea',
-  );
+  // 合法な移動先のみ（陸のみ・現在地除外・S5の数字限定・T&B親切な盗賊の保護/砂漠フォールバックを一元化）。
+  const legal = getRobberMoveTargets(state);
+  // AI選好: 砂漠は誰の生産も止めないので避ける（親切な盗賊の砂漠フォールバック時は砂漠しか無いのでそのまま）。
+  const nonDesert = legal.filter(tid => state.tiles[tid]?.type !== 'desert');
+  const candidates = nonDesert.length > 0 ? nonDesert : legal;
   const scored = candidates.filter(tid => robberHexScore(state, tid, pid) > -Infinity);
   if (scored.length > 0) {
     return pickByScore(scored, tid => robberHexScore(state, tid, pid), rng);
@@ -769,7 +770,10 @@ export function chooseRobberHex(state: GameState, pid: PlayerId, rng: () => numb
 export function chooseStealTarget(
   state: GameState, tileId: string, pid: PlayerId, rng: () => number = Math.random,
 ): PlayerId | null {
-  const opps = opponentsOnTile(state, tileId, pid).filter(o => robbableCardCount(state, o) > 0);
+  const opps = opponentsOnTile(state, tileId, pid)
+    .filter(o => robbableCardCount(state, o) > 0)
+    // 交易と蛮族「親切な盗賊」: 公開VP2以下の相手からは奪えない（砂漠フォールバック時に効く）。
+    .filter(o => !state.friendlyRobber || !isFriendlyRobberProtected(state, o));
   if (opps.length === 0) return null;
   return pickByScore(opps, o => robbableCardCount(state, o) + calcVP(state, o) * 2, rng);
 }
@@ -778,11 +782,11 @@ function chooseRobberAction(state: GameState, pid: PlayerId, rng: () => number):
   const difficulty = getDifficulty(state, pid);
 
   if (difficulty === 'weak') {
-    // 弱: 現在地以外の非砂漠・非海の陸タイルからランダム。
+    // 弱: 合法な移動先（親切な盗賊等の制限込み）から砂漠を避けてランダム。
     const current = Object.values(state.tiles).find(t => t.hasRobber)?.id;
-    const candidates = Object.keys(state.tiles).filter(
-      tid => tid !== current && state.tiles[tid]?.type !== 'desert' && state.tiles[tid]?.type !== 'sea',
-    );
+    const legal = getRobberMoveTargets(state);
+    const nonDesert = legal.filter(tid => state.tiles[tid]?.type !== 'desert');
+    const candidates = nonDesert.length > 0 ? nonDesert : legal;
     const tileId = candidates.length > 0
       ? candidates[Math.floor(rng() * candidates.length)]!
       : fallbackTileId(state, current);

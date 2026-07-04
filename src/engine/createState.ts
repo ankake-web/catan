@@ -148,6 +148,8 @@ export function createInitialGameState(
     ...(scenario.rules?.noShips != null ? { noShips: scenario.rules.noShips } : {}),
     // 交易と蛮族「強き港」: 有効時は Strongest Ports タイル（保持者は初期 null）を配線。
     ...(scenario.rules?.strongestPorts ? { strongestPorts: true, strongestPortsHolder: null } : {}),
+    // 交易と蛮族「親切な盗賊」: 有効時は盗賊の移動先制限（公開VP2以下の建物ヘックス禁止）を配線。
+    ...(scenario.rules?.friendlyRobber ? { friendlyRobber: true } : {}),
     ...(scenario.rules?.maxCities != null ? { maxCities: scenario.rules.maxCities } : {}),
     ...(scenario.rules?.missingNumberTokens ? { numberTokenSupply: scenario.rules.numberTokenSupply ?? 5 } : {}),
     ...(scenario.rules?.regionBonusVp != null ? { regionBonusVp: scenario.rules.regionBonusVp } : {}),

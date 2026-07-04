@@ -16,7 +16,7 @@
 
 import type { GameState, Action, PlayerId } from '../types';
 import { chooseAction, evaluateTradeOffer, chooseStealTarget } from './ai';
-import { discardCount } from './robber';
+import { discardCount, getRobberMoveTargets } from './robber';
 import { canBuildSettlement, canBuildRoad } from './actions';
 
 export interface CpuStep {
@@ -138,9 +138,9 @@ export function cpuFallbackAction(state: GameState, pid: PlayerId): Action {
   if (state.turnPhase === 'PRE_ROLL') return { type: 'ROLL_DICE' };
   if (state.turnPhase === 'ROBBER') {
     const robberTile = Object.values(state.tiles).find(t => t.hasRobber)?.id;
-    // 強盗は陸タイルのみ（海を除外）。
-    const tileId = Object.keys(state.tiles).find(t => t !== robberTile && state.tiles[t]?.type !== 'sea') ?? robberTile!;
-    // 強奪は必須: 移動先に手札持ちの相手がいれば選ぶ（chooseStealTarget が 0枚を除外・不在なら null）。
+    // 合法な移動先（陸のみ・数字限定・親切な盗賊の保護/砂漠フォールバック込み）から先頭を選ぶ。
+    const tileId = getRobberMoveTargets(state)[0] ?? robberTile!;
+    // 強奪は必須: 移動先に手札持ちの相手がいれば選ぶ（chooseStealTarget が 0枚・保護対象を除外・不在なら null）。
     return { type: 'MOVE_ROBBER', tileId, stealFromPlayerId: chooseStealTarget(state, tileId, pid) };
   }
   if (state.turnPhase === 'DISCARD') {

@@ -5,7 +5,7 @@
 import type { GameState, Action, PlayerId, CkTrack } from '../types';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from '../engine/actions';
 import { canMoveKnight, isKnightMovable, robberAdjacentChasableVertexIds, canBuildKnight, canActivateKnight, canUpgradeKnight, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from '../engine/citiesKnights';
-import { getPirateRobbablePlayerIds, robbableCardCount, pirateRobbableCount } from '../engine/robber';
+import { getPirateRobbablePlayerIds, robbableCardCount, pirateRobbableCount, getRobberMoveTargets, isFriendlyRobberProtected } from '../engine/robber';
 
 // 公開情報での奪取可能枚数（LANではマスクされ handCount/commodityCount に枚数が入る。
 // 騎士と商人では商品も奪取対象なので合算する）。エンジンの判定と一致させる。
@@ -981,14 +981,20 @@ function handleTileClick(
 
   // ---- 陸タイル: 盗賊を移動（隣接建物の所有者から盗む）----
   const currentRobberTile = Object.values(state.tiles).find(t => t.hasRobber);
-  if (currentRobberTile?.id === tileId) return;
+  if (state.friendlyRobber) {
+    // 交易と蛮族「親切な盗賊」: 保護ヘックス（公開VP2以下の建物あり）へのタップは無視。
+    // 砂漠フォールバック時は「現在地=砂漠に留まる」タップも合法なので、現在地チェックより先に判定する。
+    if (!getRobberMoveTargets(state).includes(tileId)) return;
+  } else if (currentRobberTile?.id === tileId) return;
 
   const vertexIds = state.tileToVertices[tileId] ?? [];
   const opponents = [...new Set(
     vertexIds
       .map(vid => state.vertices[vid]?.building?.playerId)
       .filter((p): p is PlayerId => p != null && p !== pid),
-  )].filter(p => publicCardCount(state, p) > 0); // 手札を持つ相手だけ（強奪は必須・0枚は対象外）
+  )].filter(p => publicCardCount(state, p) > 0) // 手札を持つ相手だけ（強奪は必須・0枚は対象外）
+    // 親切な盗賊: 公開VP2以下は強奪対象外（砂漠フォールバック時に効く）。
+    .filter(p => !state.friendlyRobber || !isFriendlyRobberProtected(state, p));
 
   if (opponents.length <= 1) {
     // 0人または1人：即座にディスパッチ

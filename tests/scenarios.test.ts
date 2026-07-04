@@ -37,6 +37,7 @@ describe('scenarios: registry', () => {
         'ck_seafarers_newshores', 'ck_seafarers_oceania', 'ck_seafarers_greatercatan',
         'oasis',
         // 交易と蛮族（Traders & Barbarians）
+        'tb_friendly_robber',
         'tb_harbors',
       ].sort(),
     );

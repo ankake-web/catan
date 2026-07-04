@@ -16,7 +16,7 @@ import {
   canBuildCity, buildCity,
   hasEnoughResources,
 } from './actions';
-import { moveRobber, movePirate, discardResources, stealResource, stealResourceOrCloth, getRobbablePlayerIds, getPirateRobbablePlayerIds, discardCount, robbableCardCount, pirateRobbableCount, findPendingDiscarder } from './robber';
+import { moveRobber, movePirate, discardResources, stealResource, stealResourceOrCloth, getRobbablePlayerIds, getPirateRobbablePlayerIds, discardCount, robbableCardCount, pirateRobbableCount, findPendingDiscarder, getRobberMoveTargets, isFriendlyRobberProtected } from './robber';
 import {
   isCk, applyEventDie, distributeCkProduction,
   canBuildKnight, buildKnight, canActivateKnight, activateKnight, canUpgradeKnight, upgradeKnight,
@@ -344,19 +344,32 @@ export function applyAction(
       if (state.tiles[tileId]?.type === 'sea') throw new Error('MOVE_ROBBER: robber cannot move onto a sea tile (use the pirate)');
       // S5 忘れられた部族: 盗賊は数字ディスクのあるヘクスにしか動かせない（砂漠等の無数字ヘックス不可）。
       if (state.numberHexOnly && state.tiles[tileId]?.number == null) throw new Error('MOVE_ROBBER: robber can only move to a numbered hex in this scenario');
-      // 強盗は必ず現在地とは別ヘクスへ移動する（標準ルール）。
       const currentRobberTileId = Object.keys(state.tiles).find(tid => state.tiles[tid]!.hasRobber);
-      if (currentRobberTileId === tileId) throw new Error('MOVE_ROBBER: must move to a different tile');
+      // 交易と蛮族「親切な盗賊」(CN3089 p3): 公開VP2以下のプレイヤーの建物があるヘックスへは移動不可。
+      // 合法ヘックスが無ければ砂漠のみ許可（getRobberMoveTargets が砂漠フォールバックまで解決する）。
+      const friendlyTargets = state.friendlyRobber ? getRobberMoveTargets(state) : null;
+      if (friendlyTargets && !friendlyTargets.includes(tileId))
+        throw new Error('MOVE_ROBBER: the friendly robber cannot move to a hex with a building of a player with only 2 VP');
+      // 強盗は必ず現在地とは別ヘクスへ移動する（標準ルール）。
+      // 例外: 親切な盗賊の砂漠フォールバックで盗賊が既に砂漠に居る場合のみ「その場に留まる」を許す。
+      if (currentRobberTileId === tileId && !friendlyTargets?.includes(tileId))
+        throw new Error('MOVE_ROBBER: must move to a different tile');
 
       let next = moveRobber(state, tileId);
 
       // 強奪は必須: 移動先タイルに隣接し手札を持つ相手がいるなら、必ずその中の1人から盗む
       // （『盗まない』選択は不可。標準ルール）。隣接相手が全員0枚 or 不在なら盗まずに済む。
-      const robbable = getRobbablePlayerIds(next, tileId, pid).filter(p => robbableCardCount(next, p) > 0);
+      // 親切な盗賊: 公開VP2以下の相手は強奪対象外（公式: "more than 2 VPs" からのみ。砂漠フォールバック時に効く）。
+      const robbable = getRobbablePlayerIds(next, tileId, pid)
+        .filter(p => robbableCardCount(next, p) > 0)
+        .filter(p => !state.friendlyRobber || !isFriendlyRobberProtected(next, p));
       if (stealFromPlayerId != null) {
         // 盗む相手は「移動先タイルに隣接する建物を持つ相手」に限る（盤面と無関係な強奪を防ぐ）。
         if (!getRobbablePlayerIds(next, tileId, pid).includes(stealFromPlayerId))
           throw new Error('MOVE_ROBBER: steal target is not adjacent to the robber tile');
+        // 親切な盗賊: 保護対象（公開VP2以下）を指定した強奪は不可。
+        if (state.friendlyRobber && isFriendlyRobberProtected(next, stealFromPlayerId))
+          throw new Error('MOVE_ROBBER: the friendly robber does not steal from a player with only 2 VP');
         // 手札持ちの相手がいるなら、手札0枚の相手を指定して強奪を踏み倒すことはできない。
         if (robbable.length > 0 && !robbable.includes(stealFromPlayerId))
           throw new Error('MOVE_ROBBER: must steal from an adjacent opponent who holds cards');

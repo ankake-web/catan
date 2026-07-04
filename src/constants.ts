@@ -190,6 +190,10 @@ export const STRONGEST_PORTS_MIN = 3;
 
 export const DICE_ROBBER_NUMBER      = 7;
 export const ROBBER_HAND_DISCARD_MIN = 8; // 手札がこの枚数以上で半数捨て
+// 交易と蛮族「親切な盗賊(The Friendly Robber)」: 公開VPがこの値以下のプレイヤーは保護される
+// （公式 CN3089 p3: "a player who only has 2 VPs" の建物ヘックスへ盗賊を動かせず、
+//   奪えるのは "more than 2 VPs" のプレイヤーのみ）。
+export const FRIENDLY_ROBBER_SAFE_VP = 2;
 
 // ---- 交易タイムアウト ----
 

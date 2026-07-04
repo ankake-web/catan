@@ -10,8 +10,8 @@
 ## 0. 現在の状態（2026-07-05）
 - **いま作業中のテーマ = 交易と蛮族（Traders & Barbarians, T&B）拡張の新規実装**。
 - **作業ブランチ `feat/traders-barbarians`（未push・未マージ＝本番未反映）**。ここに全T&B作業がある。
-  - `33d1b2f` 確定仕様書追加 ／ `4d22d47` 増分1「強き港(Strongest Ports)」実装。
-  - このブランチで **vitest 960緑・typecheck緑・build緑**。
+  - `33d1b2f` 確定仕様書追加 ／ `4d22d47` 増分1「強き港(Strongest Ports)」／ 増分2「親切な盗賊(The Friendly Robber)」実装済み。
+  - このブランチで **vitest 981緑・typecheck緑・build緑**。
 - **catan main**: `3ab026d`（== origin/main・vitest **950**緑）。T&B はまだ入っていない。
 - **100万石(fork)**: `art-pass/100man-goku` @ `ccbd159`（==hyaku/main・vitest 917緑）。**今回未変更**。
 - 検証コマンド: `npm run typecheck` / `npx vitest run` / `npm run build`。dev=`npm run dev`。
@@ -25,7 +25,9 @@
 2. （完了・維持）航海者版を公式準拠で完成＋100万石へ順方向同期（SYNC.md／GLOSSARY.md が正）。
 
 ## 2. 完了したこと（新しい順）
-- **2026-07-05 T&B セッション（本ブランチ）**:
+- **2026-07-05 T&B セッション2（本ブランチ）**:
+  - **増分2「The Friendly Robber（親切な盗賊）」変種**（CN3089 p3・原文をPDFから再確認して実装）: 公開VP2以下のプレイヤーの建物ヘックスへ盗賊移動不可／合法ヘックスなしなら砂漠へ（既に砂漠なら留まる）／強奪は2VP超のみ。`getRobberMoveTargets`/`isFriendlyRobberProtected`（robber.ts）に一元化し、game.ts(MOVE_ROBBER)・ai.ts・lanCpu.ts・main.ts(ハイライト/ウォッチドッグ)・events.ts(クリック/強奪対象) の全経路へ配線。シナリオ `tb_friendly_robber`（基本盤・10点）。テスト20件で仕様固定（計981緑）。実装解釈は仕様書§2-1に追記。ウルトラコード多角レビュー（4視点＋指摘ごとに3人反証・変異実験）で実装バグ0件を確認し、変異に耐えるようテスト3箇所を強化。
+- **2026-07-05 T&B セッション1（本ブランチ）**:
   - **フェーズ0（コード把握）**: シナリオはデータ駆動（`scenarios.ts` の `Scenario`＝coords()+build()+`ScenarioRules`+victoryTarget）。base/航海者は `category`＋海タイル有無で区別、C&K だけ `expansion` フラグ。特殊VPは `scoring.ts` `calcVP`/`calcPublicVP` に項追加＋`update*` 関数（最長道路/最大騎士団が雛形）。
   - **フェーズ1（仕様抽出）**: 公式PDFを精読。テキスト抽出で拾えなかった**図版（橋コスト/盤配置/数字ディスク/湖/荷馬車ボード）を、PDFをPNGレンダリングして直接視認し確定**。主要な【要確認】をほぼ全て解決（下記§3）。docs に確定仕様書を作成。
   - **フェーズ2（実装）増分1**: **T&B新カテゴリ `traders_barbarians`＋「強き港(Strongest Ports)」変種**を実装。港上の建物VP合計(開拓地1/都市2)最多(最低3VP)に+2VPタイル、同点は現保持者優先・strictly上回りで移動（最大騎士団と同型）。シナリオ `tb_harbors`（基本盤・11点）。テスト9件で数値固定。全960緑。
@@ -48,8 +50,8 @@
 
 ## 4. 未完了タスク（優先順位順・次セッションはここから）
 > すべて [docs/交易と蛮族_仕様書_v6.md](docs/交易と蛮族_仕様書_v6.md) をデータ化＋テスト固定していく。各増分ごとに `tsc`/`vitest`/`build` 緑・区切りコミット。
-1. **増分2：残りの変種を実装**（軽い順に低リスク）。**推奨=The Friendly Robber**（仕様書§2-1・盗賊移動の1ルール変更＝`robber.ts` の移動候補フィルタ＋盗み対象を「3VP以上」に。`friendlyRobber` フラグ＋シナリオ＋テスト）。次いで **Catan Event Cards**（§2-3・ダイス→イベントデッキ置換）、**Catan for Two**（§2-4・2人＋中立プレイヤー）。
-2. **増分3以降：5シナリオ**（Fishing→Rivers→Merchant Trains→Barbarian Attack→Traders & Barbarians）。
+1. **増分3：残りの変種を実装**。次=**Catan Event Cards**（§2-3・ダイス→イベントデッキ置換。36枚の数字分布が残存【要確認】＝実装時に公式PDF p5-6 のカード面を要読）、次いで **Catan for Two**（§2-4・2人＋中立プレイヤー）。
+2. **増分4以降：5シナリオ**（Fishing→Rivers→Merchant Trains→Barbarian Attack→Traders & Barbarians）。
    - **Fishing on Catan**（§3-1）は最初の完全シナリオだが**要設計**: 湖が**4数字**で産出＝現 `Tile.number:number|null`（単一）を拡張要／漁場は盤ヘックスでなく**フレーム上の産出源**＝新しい盤フィーチャー／fishトークン経済（秘匿・上限7・ぼろ靴・消費アクション）。
    - Rivers=川タイル(3+4hex)＋沼＋橋(新建物)＋コイン＋最富豪/極貧。Barbarian/T&B=騎士・蛮族・専用デッキ・荷馬車で最も重い。
 3. **残存【要確認】（軽微・データ定数で1行修正可）**: 荷馬車アップグレードの**木の本数(Lv3-5)**（暫定「木2」で実装可）／Event Cards の**36枚の生産数字分布**（Event Cards実装時に §p5-6 を要読）。
@@ -68,6 +70,6 @@
 - 参考メモリ: `seafarers-pr9-known-bugs` / `seafarers-official-rebuild`。フォーク同期は SYNC.md／100万石 `docs/reskin/GLOSSARY.md`。
 
 ## 過去ログ（要約）
-- 2026-07-05: T&B 仕様確定（公式PDF図版をPNG視認）＋増分1「強き港」実装（feat/traders-barbarians・未push）。
+- 2026-07-05: T&B 仕様確定（公式PDF図版をPNG視認）＋増分1「強き港」＋増分2「親切な盗賊」実装（feat/traders-barbarians・未push）。
 - 2026-07-04: 航海者フルリビルドのフォーク全移植／脱走兵UI／オセアニア再設計（catan PR#14-17・fork→hyaku/main）。
 - 2026-06-28〜07-03: 公式準拠リビルド（S1〜S8＋NW）→敵対レビュー→ultracode監査→docs整理。

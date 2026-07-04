@@ -36,6 +36,7 @@ export type ScenarioId =
   | 'ck_seafarers_oceania'     // 公式アプリ「都市と騎士—オセアニア」（霧の2島＋C&K・15点）
   | 'ck_seafarers_greatercatan'// 公式アプリ「都市と騎士—大カタン」（数値トークン欠＋C&K・20点）
   | 'oasis'                    // 公式アプリ「オアシス」（基本ゲーム＋道で砂漠/霧を探索＋財宝・10点）
+  | 'tb_friendly_robber'       // 交易と蛮族「親切な盗賊(The Friendly Robber)」変種（基本盤＋盗賊の移動制限・10点）
   | 'tb_harbors'               // 交易と蛮族「強き港(Harbors of Catan / Strongest Ports)」変種（基本盤＋2VPタイル・11点）
   | 'cities_knights';
 
@@ -1312,6 +1313,22 @@ const seafarersOasis: Scenario = {
   rules: { startingRoads: 30, noShips: true, newIslandBonusVp: 0 },
 };
 
+// ---- 交易と蛮族「親切な盗賊（The Friendly Robber）」変種（第6版 CN3089 p3） ----
+// 基本19タイル盤（classic と同じ生成）に盗賊の移動制限を加えた変種。公開VPが2以下のプレイヤーの
+// 建物があるヘックスへは盗賊を移動できない。合法ヘックスが無ければ盗賊は砂漠へ＝その場合は
+// 隣接建物を持つ「2VP超」のプレイヤーからのみ無作為に1枚奪う。勝利目標は本体準拠（基本=10点）。
+const tbFriendlyRobber: Scenario = {
+  id: 'tb_friendly_robber',
+  name: '交易と蛮族：親切な盗賊',
+  description: '基本19タイル。2点しか持たない人の建物があるヘックスへは盗賊を動かせない（10点で勝利）。',
+  category: 'traders_barbarians',
+  recommendedPlayers: '4人',
+  coords: () => getAllTileCoords(),
+  build: (geo, rng) => createRandomBoard(geo, rng),
+  victoryTarget: 10,
+  rules: { friendlyRobber: true },
+};
+
 // ---- 交易と蛮族「強き港（Harbors of Catan / Strongest Ports）」変種（第6版 CN3089 p3-4） ----
 // 基本19タイル盤（classic と同じ生成）に「Strongest Ports」ボーナスVPタイル(+2VP)を加えた変種。
 // 港上の建物のVP合計（開拓地1・都市2）が最多（最低3VP）のプレイヤーがタイルを保持し、他者が上回れば即移動。
@@ -1354,6 +1371,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   ck_seafarers_greatercatan: ckSeafarersGreaterCatan,
   oasis: seafarersOasis,
   // 交易と蛮族（Traders & Barbarians）
+  tb_friendly_robber: tbFriendlyRobber,
   tb_harbors: tbHarbors,
   cities_knights: citiesKnights,
 };
@@ -1475,6 +1493,11 @@ const SCENARIO_RULES: Record<ScenarioId, string[]> = {
     'オアシス（資源地）を発見すると資源1枚。砂漠の奥に道を伸ばして探索を進める。',
     '財宝が砂漠やオアシスに眠る。財宝の辺に道を置くと、資源や発展カードがもらえる。',
   ],
+  tb_friendly_robber: [
+    '10点で勝ち。盗賊が弱い人を狙わない「親切な盗賊」ルールで遊ぶ。',
+    '2点しか持っていない人の建物があるヘックスへは、盗賊を動かせない（点数は盤面で見える公開点で数える）。',
+    '動かせるヘックスが1つも無いときは盗賊を砂漠へ。そのときは砂漠のまわりに建物を持つ3点以上の人からだけ、無作為に1枚奪う。',
+  ],
   tb_harbors: [
     '11点で勝ち。基本19タイルに「強き港（Strongest Ports）」タイルが加わる。',
     '港（2:1/3:1）の上に建てた建物のVP合計（開拓地1・都市2）が最も多い人が「強き港」タイル（+2点）を得る。',
@@ -1527,6 +1550,7 @@ const VISIBLE_SCENARIO_IDS: ReadonlySet<ScenarioId> = new Set<ScenarioId>([
   // 基本ゲーム＋砂漠探索
   'oasis',
   // 交易と蛮族
+  'tb_friendly_robber',
   'tb_harbors',
 ]);
 /** 盤面選択UIに表示するシナリオ一覧（listScenarios のうち VISIBLE のみ）。 */

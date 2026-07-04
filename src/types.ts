@@ -322,6 +322,10 @@ export interface ScenarioRules {
   /** 交易と蛮族「強き港(Harbors of Catan / Strongest Ports)」変種を有効化（既定false）。
    *  港上の建物のVP合計が最多のプレイヤーに Strongest Ports タイル(+2VP)を与える。勝利目標は+1（例:11）。 */
   strongestPorts?: boolean;
+  /** 交易と蛮族「親切な盗賊(The Friendly Robber)」変種を有効化（既定false・CN3089 p3）。
+   *  公開VPが2以下のプレイヤーの建物があるヘックスへ盗賊を移動できず、2VP超の相手からしか奪えない。
+   *  合法ヘックスが無い場合は盗賊を砂漠へ。 */
+  friendlyRobber?: boolean;
 }
 
 // 航海者 S5「忘れられた部族」/「宝島」: 海の辺に事前配置されるトークンの種別。
@@ -436,6 +440,7 @@ export interface GameState {
   noIslandSettlement?: boolean;   // 小島（本島以外）に開拓地を建てられない（既定false。S6=true）
   noShips?: boolean;              // 船を一切使わない盤か（既定false。オアシス=true。海タイルはあるが船UIを出さない）
   strongestPorts?: boolean;       // 交易と蛮族「強き港」変種が有効か（既定false）。ScenarioRules から配線。
+  friendlyRobber?: boolean;       // 交易と蛮族「親切な盗賊」変種が有効か（既定false）。ScenarioRules から配線。
   maxCities?: number;             // 1プレイヤーの都市建設上限（既定なし。大カタン=8）
   // 大カタン「抜けている数値トークン」: 残りの供給枚数。0になると以後は本島の数字を抜いて小島へ配る。
   numberTokenSupply?: number;

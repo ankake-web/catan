@@ -10,7 +10,7 @@ import { createInitialGameState } from './engine/createState';
 import type { ScenarioId } from './engine/scenarios';
 import type { PlayerSpec } from './engine/createState';
 import { applyAction, setupGainFor } from './engine/game';
-import { findPendingDiscarder, discardCount } from './engine/robber';
+import { findPendingDiscarder, discardCount, getRobberMoveTargets } from './engine/robber';
 import {
   playSE, bgmStart, bgmStop, bgmSetVolume, setBgmTrack, BGM_TRACKS,
   isBgmEnabled, setBgmEnabled, getBgmVolume, getBgmTrack, isSeEnabled, setSeEnabled,
@@ -642,16 +642,15 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
 
   if (state.phase === 'MAIN') {
     if (state.turnPhase === 'ROBBER') {
-      // 盗賊(陸)＋海賊(海)の移動先。現在地（盗賊タイル/海賊タイル）は除外。
-      // S5 忘れられた部族: 盗賊は数字ヘックスのみ（無数字の陸＝海賊用の海は別途タップで海賊移動）。
-      const robberTile = Object.values(state.tiles).find(t => t.hasRobber)?.id;
+      // 盗賊(陸)＋海賊(海)の移動先。陸側の合法集合は getRobberMoveTargets に一元化
+      // （現在地除外・S5 の数字ヘックス限定・T&B 親切な盗賊の2VP保護と砂漠フォールバック）。
+      const landTargets = new Set(getRobberMoveTargets(state));
       opts.validTileIds = new Set(
         Object.keys(state.tiles).filter(tid => {
-          if (tid === robberTile || tid === state.piratePosition) return false;
           const t = state.tiles[tid]!;
-          // numberHexOnly のとき、陸タイルは数字付きのみ強盗可（海タイルは海賊用なので常に候補）。
-          if (state.numberHexOnly && t.type !== 'sea' && t.number == null) return false;
-          return true;
+          // 海タイルは海賊の移動先（現在地は除外）。
+          if (t.type === 'sea') return tid !== state.piratePosition;
+          return landTargets.has(tid);
         }),
       );
       return opts;
@@ -1729,10 +1728,9 @@ function safeFallbackAction(): Action | null {
   const cur = state.playerOrder[state.currentPlayerIndex];
   if (!cur || state.players[cur]?.type !== 'ai') return null; // 人間の番は強制しない
   if (state.turnPhase === 'ROBBER') {
-    const robberTile = Object.values(state.tiles).find(t => t.hasRobber)?.id;
-    // 強盗は陸タイルのみ（海を除外しないと MOVE_ROBBER が弾かれ進行が止まりうる）。
-    const tileId = Object.keys(state.tiles).find(t => t !== robberTile && state.tiles[t]?.type !== 'sea');
-    // 強奪は必須: 手札持ちの相手がいれば選ぶ（chooseStealTarget が 0枚除外・不在なら null）。
+    // 合法な移動先から選ぶ（海・数字限定・親切な盗賊の保護ヘックスを避けないと MOVE_ROBBER が弾かれ進行が止まりうる）。
+    const tileId = getRobberMoveTargets(state)[0];
+    // 強奪は必須: 手札持ちの相手がいれば選ぶ（chooseStealTarget が 0枚・保護対象を除外・不在なら null）。
     if (tileId) return { type: 'MOVE_ROBBER', tileId, stealFromPlayerId: chooseStealTarget(state, tileId, cur) };
     return null;
   }
