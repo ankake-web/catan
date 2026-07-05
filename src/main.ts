@@ -25,7 +25,7 @@ import { attachNameField, savePlayerName } from './net/nameField';
 import { saveResume, loadResume, clearResume } from './net/resume';
 import type { ResumeInfo } from './net/resume';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from './engine/actions';
-import { isKnightMovable, canMoveKnight, robberAdjacentChasableVertexIds, isCk, computeCkProduction, canBuildKnight, canActivateKnight, canUpgradeKnight, plainCityVertexIds, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, improvementTakesMetropolis, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from './engine/citiesKnights';
+import { isKnightMovable, canMoveKnight, robberAdjacentChasableVertexIds, isCk, computeCkProduction, canBuildKnight, canActivateKnight, canUpgradeKnight, plainCityVertexIds, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, improvementTakesMetropolis, craneEligibleTracks, craneTrack, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from './engine/citiesKnights';
 import type { CkTrack, CommodityType } from './types';
 import type { RollSpec, DiceGLController } from './renderer/diceGL';
 import { renderBoard } from './renderer/board';
@@ -811,8 +811,11 @@ function setSmithFirst(vid: string | null): void { smithFirstKnight = vid; redra
 // 脱走兵: 1手目に選んだ「消す相手の騎士」頂点（非null＝2手目＝獲得騎士の設置先選択中）。
 let deserterRemoveVid: string | null = null;
 function setDeserterRemove(vid: string | null): void { deserterRemoveVid = vid; redraw(); }
-// メトロポリス手動選択中に「今+1する都市改善ツリー」を控える（候補2つ以上で盤面タップさせる時）。
-let pendingMetropolisTrack: CkTrack | null = null;
+// メトロポリス手動選択中に「今+1する都市改善ツリー」と、その改善の発生源（改善ボタン or クレーンカード）を控える。
+// 候補（自分の平の都市）が2つ以上ある時に盤面タップで化ける都市を選ばせる。
+//   via==='improvement': 都市タップで BUILD_IMPROVEMENT を再送。
+//   via==='crane':       都市タップで PLAY_PROGRESS(crane) を craneMetropolisVertexId 付きで再送。
+let pendingMetropolis: { track: CkTrack; via: 'improvement' } | { track: CkTrack; via: 'crane'; cardId: string } | null = null;
 let uiPhase: UIPhase = { type: 'idle' };
 // 強盗/海賊を「先に移動」してから相手選択させる時、移動先をプレビュー描画したタイル。
 // 相手確定(MOVE_ROBBER/MOVE_PIRATE)時の二重スライドを抑止するためにも使う。
@@ -2592,6 +2595,26 @@ function triggerProgressCardAnimation(oldState: GameState, newState: GameState):
   if (any && !pendingPhase) holdResourceAnimating(delay + RES_FLY_MS + 120);
 }
 
+// 騎士と商人: 誰かが進歩カードを手に入れたら「○○がカードを手に入れた」と盤面へ全体通知する。
+// カードの種類は伏せる（公開情報の枚数差分だけを使う）。色イベント抽選・撃退同点・スパイ強奪など
+// カードが増える全経路をカバーする。飛行アニメ（triggerProgressCardAnimation）は reduced-motion で
+// 出ないため、情報としての告知はこちらで別に出す（reduced-motion でも表示）。蛮族襲来の全画面演出が
+// 出ている間は、それが消えてから告知する（被り防止）。
+function maybeNoticeProgressCardGain(prevState: GameState, newState: GameState): void {
+  if (!isCk(newState)) return;
+  const gainers: string[] = [];
+  for (const pid of newState.playerOrder) {
+    const before = prevState.players[pid]?.progressCardCount ?? prevState.players[pid]?.progressCards?.length ?? 0;
+    const after = newState.players[pid]?.progressCardCount ?? newState.players[pid]?.progressCards?.length ?? 0;
+    if (after > before) gainers.push(newState.players[pid]?.name ?? pid);
+  }
+  if (gainers.length === 0) return;
+  const msg = `🎴 ${gainers.join('・')} がカードを手に入れた`;
+  const delay = pendingOverlayDelay();
+  if (delay > 0) window.setTimeout(() => showBoardNotice(msg, '#c9a227'), delay + 120);
+  else showBoardNotice(msg, '#c9a227');
+}
+
 // 進歩カードを使用した瞬間、盤面中央へそのカードを大きく短時間表示する（何を使ったか分かりやすく）。
 // 札種は公開情報 newState.lastProgressPlay から特定する（使うと全員に種類が分かる）。LAN では
 // 使用者の手札が秘匿され prevState から札種を引けないため、この公開フィールドが他プレイヤー表示に必須。
@@ -3206,6 +3229,7 @@ function runTransitionFx(
   }
   triggerResourceAnimation(prevState, state, action, diceTotal);
   triggerProgressCardAnimation(prevState, state);
+  maybeNoticeProgressCardGain(prevState, state);
   showPlayedProgressCard(prevState, state, action);
   animateBuildPlacement(action);
   triggerVpGainEffects(prevState, state);
@@ -3452,6 +3476,20 @@ function dispatch(action: Action): void {
       showBoardNotice('🗡 退去させる敵騎士をタップ（自分の道に隣接）');
       return;
     }
+    // クレーン: 割引改善が Lv4到達（=メトロポリス化）で、化ける都市の候補が2つ以上ある時は
+    //   改善ボタンと同じく盤面で都市を選ばせる（従来は先頭都市へ自動配置され選べなかった回帰の修正）。
+    if (pcard?.type === 'crane' && pHuman && action.choice?.craneMetropolisVertexId == null
+        && state.turnPhase === 'TRADE_BUILD') {
+      const chosen = action.choice?.craneTrack;
+      const track = (chosen && craneEligibleTracks(state, ppid).includes(chosen)) ? chosen : craneTrack(state, ppid);
+      if (track && improvementTakesMetropolis(state, ppid, track) && metropolisCityChoices(state, ppid).length > 1) {
+        pendingMetropolis = { track, via: 'crane', cardId: action.cardId };
+        document.querySelector('.help-overlay')?.remove();
+        setBuildMode('selectMetropolis');
+        showBoardNotice('🏛 メトロポリスにする自分の都市をタップ（+2点）');
+        return;
+      }
+    }
   }
   // 騎士と商人: 都市改善でメトロポリスを新規獲得し、化ける都市の候補が2つ以上ある時は
   // 自動でなく盤面で都市を選ばせる（候補1つ以下ならエンジンが自動配置）。
@@ -3461,7 +3499,7 @@ function dispatch(action: Action): void {
     if (iHuman && state.turnPhase === 'TRADE_BUILD'
         && improvementTakesMetropolis(state, ipid, action.track)
         && metropolisCityChoices(state, ipid).length > 1) {
-      pendingMetropolisTrack = action.track;
+      pendingMetropolis = { track: action.track, via: 'improvement' };
       document.querySelector('.help-overlay')?.remove();
       setBuildMode('selectMetropolis');
       showBoardNotice('🏛 メトロポリスにする自分の都市をタップ（+2点）');
@@ -3533,7 +3571,7 @@ function dispatch(action: Action): void {
       action.type === 'BUILD_IMPROVEMENT'
     ) {
       buildMode = 'idle';
-      pendingMetropolisTrack = null;
+      pendingMetropolis = null;
     }
 
     if (action.type === 'PLAY_ROAD_BUILDING') {
@@ -3542,8 +3580,9 @@ function dispatch(action: Action): void {
       if (currentPid(state) === selfPlayerId()) scrollToBoard();
     }
 
-    // 街道建設カード使用中は引き続き道建設モードを維持（2本目以降は同じ盤面なので再スクロールしない）
-    if (state.roadBuildingRoadsRemaining > 0) {
+    // 街道建設カード使用中は引き続き建設モードを維持（2本目以降は同じ盤面なので再スクロールしない）。
+    // 航海者: プレイヤーが「船を置く」を選んでいれば船モードを保持し、それ以外は道モードへ。
+    if (state.roadBuildingRoadsRemaining > 0 && buildMode !== 'ship') {
       buildMode = 'road';
     }
 
@@ -3742,6 +3781,17 @@ let boardEventsAttached = false;
 // 盤面クリック/ジェスチャの登録は一度だけ（ローカル/LAN 共通の単一経路）。
 // ※ startGame と startLanGame で別々に attachBoardEvents を呼ぶと引数の渡し忘れ（発明家の
 //   getter/setter 欠落で inventorSwap が無反応になった回帰）が起きるため、必ずこの関数に集約する。
+// メトロポリス手動選択で都市をタップした時に投げるアクション（改善ボタン or クレーンカード経由）。
+// 候補外の頂点は events.ts 側で弾かれるため、ここでは pendingMetropolis の発生源だけで分岐する。
+function metropolisPickAction(vid: string): Action | null {
+  if (!pendingMetropolis) return null;
+  if (pendingMetropolis.via === 'crane') {
+    return { type: 'PLAY_PROGRESS', cardId: pendingMetropolis.cardId,
+      choice: { craneTrack: pendingMetropolis.track, craneMetropolisVertexId: vid } };
+  }
+  return { type: 'BUILD_IMPROVEMENT', track: pendingMetropolis.track, metropolisVertexId: vid };
+}
+
 function attachBoardEventsOnce(): void {
   if (boardEventsAttached) return;
   attachBoardEvents(
@@ -3749,7 +3799,7 @@ function attachBoardEventsOnce(): void {
     () => moveShipFrom, setMoveShipFrom,
     () => moveKnightFrom, setMoveKnightFrom,
     () => inventorFirstTile, setInventorFirst,
-    () => pendingMetropolisTrack,
+    metropolisPickAction,
     () => smithFirstKnight, setSmithFirst,
     () => deserterRemoveVid, setDeserterRemove,
   );
@@ -4205,7 +4255,7 @@ function applyNetState(action: Action | undefined, newState: GameState): void {
   if (action && (action.type === 'BUILD_ROAD' || action.type === 'BUILD_SETTLEMENT' || action.type === 'BUILD_CITY'
       || action.type === 'PLAY_PROGRESS' || action.type === 'BUILD_IMPROVEMENT')) {
     buildMode = 'idle';
-    pendingMetropolisTrack = null;
+    pendingMetropolis = null;
     inventorFirstTile = null;
     smithFirstKnight = null;
     deserterRemoveVid = null;

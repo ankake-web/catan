@@ -654,7 +654,8 @@ export function craneEligibleTracks(state: GameState, pid: PlayerId): CkTrack[] 
     return lvl < CK_MAX_IMPROVEMENT && commodities(p)[CK_TRACK_COMMODITY[t]] >= Math.max(0, improvementCost(lvl) - 1);
   });
 }
-function craneTrack(state: GameState, pid: PlayerId): CkTrack | null {
+/** crane: 手動指定が無いときエンジンが自動で選ぶトラック（lvl最大優先）。UI の割込み判定でも使う。 */
+export function craneTrack(state: GameState, pid: PlayerId): CkTrack | null {
   const ok = [...craneEligibleTracks(state, pid)];
   const p = state.players[pid];
   if (p) ok.sort((a, b) => improvements(p)[b] - improvements(p)[a]);
@@ -1092,7 +1093,8 @@ export function playProgress(state: GameState, pid: PlayerId, cardId: string, rn
       // 手動でトラックを選べる（choice.craneTrack）。割引後に払える＆未最大なら採用。なければ自動。
       const chosen = choice?.craneTrack;
       const track = (chosen && craneEligibleTracks(removed, pid).includes(chosen)) ? chosen : craneTrack(removed, pid);
-      return track ? buildImprovement(removed, pid, track, 1) : removed;
+      // Lv4到達でメトロポリス化する場合は、化ける都市を手動指定できる（改善ボタンと同じ体験）。
+      return track ? buildImprovement(removed, pid, track, 1, choice?.craneMetropolisVertexId) : removed;
     }
     case 'medicine':         return playMedicine(removed, pid, choice);
     case 'inventor':         return playInventor(removed, pid, choice);

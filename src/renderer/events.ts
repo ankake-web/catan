@@ -2,7 +2,7 @@
 // src/renderer/events.ts — F-02: ボードクリックイベント処理
 // ============================================================
 
-import type { GameState, Action, PlayerId, CkTrack } from '../types';
+import type { GameState, Action, PlayerId } from '../types';
 import { RESOURCE_TYPES, TB_ROAD_REPAIR_COST } from '../constants';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from '../engine/actions';
 import { canMoveKnight, isKnightMovable, robberAdjacentChasableVertexIds, canBuildKnight, canActivateKnight, canUpgradeKnight, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from '../engine/citiesKnights';
@@ -420,8 +420,9 @@ export function attachBoardEvents(
   // 騎士と商人・発明家(inventorSwap)モード: 1枚目に選んだタイルID。
   getInventorFirst: () => string | null = () => null,
   setInventorFirst: (tid: string | null) => void = () => {},
-  // 騎士と商人・メトロポリス手動選択(selectMetropolis)モード: 今+1する都市改善ツリー。
-  getMetropolisTrack: () => CkTrack | null = () => null,
+  // 騎士と商人・メトロポリス手動選択(selectMetropolis)モード: タップした都市を化けさせる
+  //   アクション（改善ボタン経由=BUILD_IMPROVEMENT / クレーン経由=PLAY_PROGRESS）を返す。null=選択不可。
+  getMetropolisAction: (vid: string) => Action | null = () => null,
   // 騎士と商人・鍛冶屋(selectSmithKnight)モード: 1体目に選んだ騎士頂点ID（2体目のタップで昇格）。
   getSmithFirst: () => string | null = () => null,
   setSmithFirst: (vid: string | null) => void = () => {},
@@ -680,8 +681,8 @@ export function attachBoardEvents(
       let vid = (e.target as SVGElement).closest('[data-vertex-id]')?.getAttribute('data-vertex-id') ?? null;
       if (!vid && ptp) vid = nearestMetropolisVertexId(state, pid, ptp.x, ptp.y);
       else if (vid && !new Set(metropolisCityChoices(state, pid)).has(vid)) vid = null; // 候補外の直接ヒットは無効
-      const track = getMetropolisTrack();
-      if (vid && track) dispatch({ type: 'BUILD_IMPROVEMENT', track, metropolisVertexId: vid });
+      const act = vid ? getMetropolisAction(vid) : null;
+      if (act) dispatch(act);
       return;
     }
 

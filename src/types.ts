@@ -582,6 +582,9 @@ export interface ProgressChoice {
   merchantTileId?: TileId;
   // クレーン: 1段安く改善するトラック（交易/政治/科学）。
   craneTrack?: CkTrack;
+  // クレーン: Lv4到達でメトロポリス化する自分の都市の頂点ID（未指定/不正なら先頭へ自動）。
+  //   改善ボタン(BUILD_IMPROVEMENT.metropolisVertexId)と同じ役割を、クレーン経由の改善に与える。
+  craneMetropolisVertexId?: VertexId;
   // 僧正(bishop): 盗賊を置くタイルのID（隣接する全相手から1枚ずつ奪う）。
   bishopTileId?: TileId;
   // 外交官(diplomat): 撤去する相手の「端の道」の辺ID。

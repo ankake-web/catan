@@ -215,6 +215,41 @@ describe('C&K メトロポリス', () => {
     expect(r.metropolis!.science!.vertexId).toBe(vidB);
   });
 
+  // 回帰: クレーンで Lv3→4（メトロポリス化）する時、化ける都市を手動指定できなかった
+  //   （craneMetropolisVertexId 未対応で先頭都市へ自動配置されていた）。UIの都市選択もこれで機能する。
+  it('crane: メトロポリス化する都市を craneMetropolisVertexId で手動選択できる', async () => {
+    const { playProgress, metropolisCityChoices } = await import('../src/engine/citiesKnights');
+    const { createRng } = await import('../src/engine/setup');
+    let s = oneTile('mountain', [[0, 'city', 'player1'], [1, 'city', 'player1']]);
+    const tid = Object.keys(s.tileToVertices).find(t => (s.tileToVertices[t]?.length ?? 0) >= 3)!;
+    const vids = s.tileToVertices[tid]!;
+    const vidA = vids[0]!, vidB = vids[1]!;
+    s = {
+      ...s,
+      expansion: 'cities_knights',
+      players: {
+        ...s.players,
+        // Lv3・割引後(4-1=3)を払える紙3・クレーン所持。
+        player1: makePlayer('player1', {
+          improvements: { trade: 0, politics: 0, science: 3 },
+          commodities: { coin: 0, cloth: 0, paper: 3 },
+          progressCards: [{ id: 'cr', type: 'crane', deck: 'science' }],
+        }),
+      },
+    } as GameState;
+    expect(metropolisCityChoices(s, 'player1').sort()).toEqual([vidA, vidB].sort());
+    // クレーンで science を Lv4へ。化ける都市に vidB を明示 → 先頭(vidA)でなく vidB が化ける。
+    const r = playProgress(s, 'player1', 'cr', createRng(1),
+      { craneTrack: 'science', craneMetropolisVertexId: vidB });
+    expect(r.players.player1!.improvements!.science).toBe(4);
+    expect(r.vertices[vidB]!.building!.metropolis).toBe(true);
+    expect(r.vertices[vidA]!.building!.metropolis ?? false).toBe(false);
+    expect(r.metropolis!.science!.vertexId).toBe(vidB);
+    expect((r.players.player1!.progressCards ?? []).length).toBe(0); // カード消費
+    // 割引が効いている（紙 3→0）。
+    expect(r.players.player1!.commodities!.paper).toBe(0);
+  });
+
   it('既にそのツリーのメトロポリスを保持中は都市選択不要（improvementTakesMetropolis=false）', async () => {
     const { improvementTakesMetropolis } = await import('../src/engine/citiesKnights');
     let s = oneTile('mountain', [[0, 'city', 'player1']]);
