@@ -34,7 +34,7 @@ import type { ClientMessage, ServerMessage, LobbyPlayer, LanOrderMode } from '..
 import type { PlayerId, PlayerColor, PlayerType, GameState, Action, LogEntry, AiDifficulty } from '../src/types';
 import type { PlayerSpec } from '../src/engine/createState';
 import type { ScenarioId } from '../src/engine/scenarios';
-import { listScenarios } from '../src/engine/scenarios';
+import { listScenarios, getScenario } from '../src/engine/scenarios';
 
 // 受理する盤面シナリオID（レジストリ由来＝追加シナリオも自動で許可）。
 const KNOWN_SCENARIO_IDS = new Set<ScenarioId>(listScenarios().map(s => s.id));
@@ -69,6 +69,11 @@ export function requiredActor(state: GameState, action: Action): PlayerId | null
     case 'DOWNGRADE_CITY':    return action.playerId;
     case 'DISCARD_PROGRESS':  return action.playerId;
     case 'RESPOND_TRADE':     return action.response.playerId;
+    // 交易と蛮族「イベントカード」: 多人数解決は action.playerId、強奪は保留中の奪う側本人のみ。
+    case 'CHOOSE_EVENT_GIVE':    return action.playerId;
+    case 'CHOOSE_EVENT_HELPFUL': return action.playerId;
+    case 'CHOOSE_EVENT_DAMAGE':  return action.playerId;
+    case 'CHOOSE_EVENT_STEAL':   return state.tbPendingEventSteal?.playerId ?? null;
     default:                  return state.playerOrder[state.currentPlayerIndex] ?? null;
   }
 }
@@ -208,9 +213,14 @@ function cpuSlots(room: Room): PlayerId[] {
   return PLAYER_IDS.filter(id => !used.has(id)).slice(0, room.cpuCount);
 }
 
-// 人間＋CPU が 4 を超えないよう CPU 人数をクランプする。
+// シナリオ別の最大人数（交易と蛮族「Catan for Two」は実プレイヤー2人専用。それ以外は4）。
+function scenarioMaxPlayers(room: Room): number {
+  return getScenario(room.scenario).rules?.catanForTwo ? 2 : MAX_PLAYERS;
+}
+
+// 人間＋CPU がシナリオ上限（通常4・2人用カタンは2）を超えないよう CPU 人数をクランプする。
 function clampCpu(room: Room): void {
-  const maxCpu = Math.max(0, MAX_PLAYERS - room.members.length);
+  const maxCpu = Math.max(0, scenarioMaxPlayers(room) - room.members.length);
   room.cpuCount = Math.min(Math.max(0, room.cpuCount), maxCpu);
 }
 
@@ -257,10 +267,11 @@ function broadcastLobby(room: Room, urls: string[]): void {
     code: room.code,
     hostUrls: urls,
     players: lobbyPlayers(room),
-    // 人間が1人以上、合計2〜4人なら開始可（CPUだけの対戦は不可）
-    canStart: humans >= 1 && total >= MIN_PLAYERS && total <= MAX_PLAYERS,
+    // 人間が1人以上、合計2〜4人なら開始可（CPUだけの対戦は不可）。
+    // 2人用カタン（catanForTwo）は合計ちょうど2人のときのみ開始可。
+    canStart: humans >= 1 && total >= MIN_PLAYERS && total <= scenarioMaxPlayers(room),
     cpuCount: room.cpuCount,
-    maxCpu: Math.max(0, MAX_PLAYERS - humans),
+    maxCpu: Math.max(0, scenarioMaxPlayers(room) - humans),
     cpuDifficulty: room.cpuDifficulty,
     orderMode: room.orderMode,
     scenario: room.scenario,
@@ -385,8 +396,10 @@ function applyCpuStep(room: Room, pid: PlayerId, action: Action): Action['type']
     try {
       const prev = room.state;
       const cur = prev.playerOrder[prev.currentPlayerIndex];
-      // フォールバックの actor: 捨て札/金選択/交易応答は対象本人、それ以外は手番者。
-      const fbActor = (action.type === 'DISCARD_RESOURCES' || action.type === 'CHOOSE_GOLD' || action.type === 'RESPOND_TRADE') ? pid : (cur ?? pid);
+      // フォールバックの actor: 捨て札/金選択/交易応答/T&Bイベント選択は対象本人、それ以外は手番者。
+      const fbActor = (action.type === 'DISCARD_RESOURCES' || action.type === 'CHOOSE_GOLD' || action.type === 'RESPOND_TRADE'
+        || action.type === 'CHOOSE_EVENT_GIVE' || action.type === 'CHOOSE_EVENT_HELPFUL'
+        || action.type === 'CHOOSE_EVENT_STEAL' || action.type === 'CHOOSE_EVENT_DAMAGE') ? pid : (cur ?? pid);
       const fb = cpuFallbackAction(prev, fbActor as PlayerId);
       const next = applyAction(prev, fb, Math.random);
       room.state = next;
@@ -550,6 +563,12 @@ export function attachLanServer(httpServer: Server, fallbackPort = 5173, opts: L
           const total = humans + room.cpuCount;
           if (humans < 1 || total < MIN_PLAYERS || total > MAX_PLAYERS) {
             send(ws, { t: 'error', message: '人間1人以上・合計2〜4人で開始できます' });
+            return;
+          }
+          // 交易と蛮族「Catan for Two」は2人専用（createInitialGameState が不変条件として検証
+          // するため、超過人数のまま startGame を呼ぶとサーバ例外になる。ここで先に弾く）。
+          if (total > scenarioMaxPlayers(room)) {
+            send(ws, { t: 'error', message: 'このシナリオ（2人用カタン）は合計2人でのみ開始できます' });
             return;
           }
           startGame(room);

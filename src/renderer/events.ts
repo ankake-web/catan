@@ -2,10 +2,11 @@
 // src/renderer/events.ts — F-02: ボードクリックイベント処理
 // ============================================================
 
-import type { GameState, Action, PlayerId, CkTrack } from '../types';
+import type { GameState, Action, PlayerId } from '../types';
+import { RESOURCE_TYPES, TB_ROAD_REPAIR_COST } from '../constants';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from '../engine/actions';
 import { canMoveKnight, isKnightMovable, robberAdjacentChasableVertexIds, canBuildKnight, canActivateKnight, canUpgradeKnight, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from '../engine/citiesKnights';
-import { getPirateRobbablePlayerIds, robbableCardCount, pirateRobbableCount } from '../engine/robber';
+import { getPirateRobbablePlayerIds, robbableCardCount, pirateRobbableCount, getRobberMoveTargets, isFriendlyRobberProtected } from '../engine/robber';
 
 // 公開情報での奪取可能枚数（LANではマスクされ handCount/commodityCount に枚数が入る。
 // 騎士と商人では商品も奪取対象なので合算する）。エンジンの判定と一致させる。
@@ -343,6 +344,31 @@ function edgeDist2(state: GameState, edgeId: string, x: number, y: number): numb
   return distToSegmentSq(x, y, a.pixel.x, a.pixel.y, b.pixel.x, b.pixel.y);
 }
 
+/** 交易と蛮族イベント「地震」: 点(x,y)に最も近い「損傷させられる道」（pending プレイヤーの未損傷道）。 */
+function nearestTbDamageEdgeId(state: GameState, x: number, y: number, maxDist = EDGE_TAP_RADIUS): string | null {
+  const pendingSet = new Set(state.tbPendingEventDamage ?? []);
+  let best: string | null = null;
+  let bestD = maxDist * maxDist;
+  for (const e of Object.values(state.edges)) {
+    if (!e.road || e.road.damaged || !pendingSet.has(e.road.playerId)) continue;
+    const d = edgeDist2(state, e.id, x, y);
+    if (d <= bestD) { bestD = d; best = e.id; }
+  }
+  return best;
+}
+
+/** 交易と蛮族イベント「地震」: 点(x,y)に最も近い自分の損傷道（修理対象）。 */
+function nearestTbRepairEdgeId(state: GameState, pid: PlayerId, x: number, y: number, maxDist = EDGE_TAP_RADIUS): string | null {
+  let best: string | null = null;
+  let bestD = maxDist * maxDist;
+  for (const e of Object.values(state.edges)) {
+    if (e.road?.playerId !== pid || !e.road.damaged) continue;
+    const d = edgeDist2(state, e.id, x, y);
+    if (d <= bestD) { bestD = d; best = e.id; }
+  }
+  return best;
+}
+
 export function nearestValidShipEdgeId(
   state: GameState, pid: PlayerId, mode: BuildMode, x: number, y: number, maxDist = EDGE_TAP_RADIUS,
 ): string | null {
@@ -351,6 +377,38 @@ export function nearestValidShipEdgeId(
   let bestD = maxDist * maxDist;
   for (const e of Object.values(state.edges)) {
     if (!canBuildShip(state, pid, e.id)) continue;
+    const a = state.vertices[e.vertexIds[0]];
+    const b = state.vertices[e.vertexIds[1]];
+    if (!a || !b) continue;
+    const d = distToSegmentSq(x, y, a.pixel.x, a.pixel.y, b.pixel.x, b.pixel.y);
+    if (d <= bestD) { bestD = d; best = e.id; }
+  }
+  return best;
+}
+
+/** 交易と蛮族「Catan for Two」: 点(x,y)に最も近い「中立 owner が開拓地を置ける」頂点ID。 */
+export function nearestTbNeutralVertexId(
+  state: GameState, owner: PlayerId, x: number, y: number, maxDist = VERTEX_TAP_RADIUS,
+): string | null {
+  let best: string | null = null;
+  let bestD = maxDist * maxDist;
+  for (const v of Object.values(state.vertices)) {
+    if (!canBuildSettlement(state, owner, v.id)) continue;
+    const dx = v.pixel.x - x, dy = v.pixel.y - y;
+    const d = dx * dx + dy * dy;
+    if (d <= bestD) { bestD = d; best = v.id; }
+  }
+  return best;
+}
+
+/** 交易と蛮族「Catan for Two」: 点(x,y)に最も近い「中立 owner が道を置ける」辺ID。 */
+export function nearestTbNeutralEdgeId(
+  state: GameState, owner: PlayerId, x: number, y: number, maxDist = EDGE_TAP_RADIUS,
+): string | null {
+  let best: string | null = null;
+  let bestD = maxDist * maxDist;
+  for (const e of Object.values(state.edges)) {
+    if (!canBuildRoad(state, owner, e.id)) continue;
     const a = state.vertices[e.vertexIds[0]];
     const b = state.vertices[e.vertexIds[1]];
     if (!a || !b) continue;
@@ -394,8 +452,9 @@ export function attachBoardEvents(
   // 騎士と商人・発明家(inventorSwap)モード: 1枚目に選んだタイルID。
   getInventorFirst: () => string | null = () => null,
   setInventorFirst: (tid: string | null) => void = () => {},
-  // 騎士と商人・メトロポリス手動選択(selectMetropolis)モード: 今+1する都市改善ツリー。
-  getMetropolisTrack: () => CkTrack | null = () => null,
+  // 騎士と商人・メトロポリス手動選択(selectMetropolis)モード: タップした都市を化けさせる
+  //   アクション（改善ボタン経由=BUILD_IMPROVEMENT / クレーン経由=PLAY_PROGRESS）を返す。null=選択不可。
+  getMetropolisAction: (vid: string) => Action | null = () => null,
   // 騎士と商人・鍛冶屋(selectSmithKnight)モード: 1体目に選んだ騎士頂点ID（2体目のタップで昇格）。
   getSmithFirst: () => string | null = () => null,
   setSmithFirst: (vid: string | null) => void = () => {},
@@ -403,6 +462,10 @@ export function attachBoardEvents(
   //   非nullなら2手目＝獲得騎士の設置先選択へ切替。
   getDeserterRemove: () => string | null = () => null,
   setDeserterRemove: (vid: string | null) => void = () => {},
+  // 航海者・盗賊/海賊の事前選択: 'robber'=盗賊(陸)のみ / 'pirate'=海賊(海)のみ / null=未選択（両方動かせる盤で先に選ぶ）。
+  getRobberPiece: () => 'robber' | 'pirate' | null = () => null,
+  // 交易と蛮族「Catan for Two」: TB_NEUTRAL で配置する中立プレイヤー（null=未選択。バーで先に選ぶ）。
+  getTbNeutralOwner: () => PlayerId | null = () => null,
 ): void {
   svg.addEventListener('click', (e) => {
     // 直前のパン/ピンチで動いた指のクリックは配置に使わない（誤配置防止）。
@@ -423,7 +486,7 @@ export function attachBoardEvents(
         const pt = clickToBoardPixel(svg, e.clientX, e.clientY);
         if (pt) tileId = nearestTileId(state, pt.x, pt.y);
       }
-      if (tileId) handleTileClick(tileId, state, pid, setUIPhase, dispatch);
+      if (tileId) handleTileClick(tileId, state, pid, setUIPhase, dispatch, getRobberPiece());
       return;
     }
 
@@ -446,6 +509,64 @@ export function attachBoardEvents(
       const owner = vid ? state.vertices[vid]?.building?.playerId : null;
       if (vid && owner) dispatch({ type: 'DOWNGRADE_CITY', playerId: owner, vertexId: vid });
       return;
+    }
+
+    // ---- 交易と蛮族「Catan for Two」: 中立コマの無償配置（TB_NEUTRAL）。
+    //      光った合法位置をタップ → TB_NEUTRAL_ROAD / TB_NEUTRAL_SETTLEMENT。
+    //      両中立に置ける時はバーで中立(色)を選んでから（未選択なら無視）。 ----
+    if (state.phase === 'MAIN' && state.turnPhase === 'TB_NEUTRAL') {
+      const owner = getTbNeutralOwner();
+      if (!owner) return; // 先に「どちらの中立に置くか」を選ぶ
+      const ptn = clickToBoardPixel(svg, e.clientX, e.clientY);
+      if (!ptn) return;
+      if (state.tbNeutralPending === 'settlement') {
+        const vid = nearestTbNeutralVertexId(state, owner, ptn.x, ptn.y);
+        if (vid) dispatch({ type: 'TB_NEUTRAL_SETTLEMENT', owner, vertexId: vid });
+      } else {
+        const eid = nearestTbNeutralEdgeId(state, owner, ptn.x, ptn.y);
+        if (eid) dispatch({ type: 'TB_NEUTRAL_ROAD', owner, edgeId: eid });
+      }
+      return;
+    }
+
+    // ---- 交易と蛮族イベント「地震」: 光った自分の道をタップ → CHOOSE_EVENT_DAMAGE（多人数解決）----
+    if (state.phase === 'MAIN' && state.turnPhase === 'EVENT_DAMAGE') {
+      const pendingSet = new Set(state.tbPendingEventDamage ?? []);
+      const damageable = (id: string | null): boolean => {
+        const r = id ? state.edges[id]?.road : null;
+        return !!r && !r.damaged && pendingSet.has(r.playerId);
+      };
+      let eid = target.closest('[data-road-edge-id]')?.getAttribute('data-road-edge-id')
+        ?? target.closest('[data-edge-id]')?.getAttribute('data-edge-id') ?? null;
+      if (!damageable(eid)) {
+        const ptd = clickToBoardPixel(svg, e.clientX, e.clientY);
+        eid = ptd ? nearestTbDamageEdgeId(state, ptd.x, ptd.y) : null;
+      }
+      const owner = eid ? state.edges[eid]?.road?.playerId : null;
+      if (eid && owner && damageable(eid)) dispatch({ type: 'CHOOSE_EVENT_DAMAGE', playerId: owner, edgeId: eid });
+      return;
+    }
+
+    // ---- 交易と蛮族イベント「地震」: 損傷した自分の道をタップ → REPAIR_ROAD（レンガ1木1）----
+    if (state.phase === 'MAIN' && state.turnPhase === 'TRADE_BUILD' && mode === 'idle' && state.tbEventCards) {
+      let eid = target.closest('[data-road-edge-id]')?.getAttribute('data-road-edge-id')
+        ?? target.closest('[data-edge-id]')?.getAttribute('data-edge-id') ?? null;
+      const isMyDamaged = (id: string | null): boolean => {
+        const r = id ? state.edges[id]?.road : null;
+        return !!r && r.damaged === true && r.playerId === pid;
+      };
+      if (!isMyDamaged(eid)) {
+        const ptr = clickToBoardPixel(svg, e.clientX, e.clientY);
+        eid = ptr ? nearestTbRepairEdgeId(state, pid, ptr.x, ptr.y) : null;
+      }
+      if (eid && isMyDamaged(eid)) {
+        const hand = state.players[pid]!.hand;
+        if (RESOURCE_TYPES.every(r => hand[r] >= TB_ROAD_REPAIR_COST[r])) {
+          dispatch({ type: 'REPAIR_ROAD', edgeId: eid });
+        }
+        return; // 損傷道のタップは他のクリック処理へ流さない（資源不足時は何もしない）
+      }
+      // 該当なし: 通常のクリック処理へフォールスルー
     }
 
     // ---- 航海者: 船の移動モード（2段階: 船を選択 → 移動先をタップ）----
@@ -614,8 +735,8 @@ export function attachBoardEvents(
       let vid = (e.target as SVGElement).closest('[data-vertex-id]')?.getAttribute('data-vertex-id') ?? null;
       if (!vid && ptp) vid = nearestMetropolisVertexId(state, pid, ptp.x, ptp.y);
       else if (vid && !new Set(metropolisCityChoices(state, pid)).has(vid)) vid = null; // 候補外の直接ヒットは無効
-      const track = getMetropolisTrack();
-      if (vid && track) dispatch({ type: 'BUILD_IMPROVEMENT', track, metropolisVertexId: vid });
+      const act = vid ? getMetropolisAction(vid) : null;
+      if (act) dispatch(act);
       return;
     }
 
@@ -672,17 +793,12 @@ export function attachBoardEvents(
       const eid = nearestValidEdgeId(state, pid, mode, pt.x, pt.y);
       const sid = nearestValidShipEdgeId(state, pid, mode, pt.x, pt.y);
       // 道と船の両方が候補になる場面（航海者の初期配置＝海岸の開拓地／街道建設カード）では、
-      // タップ位置に近い方を選ぶ（道を先に決め打ちすると沿岸で船を選べない）。
-      if (eid && sid) {
-        if (edgeDist2(state, sid, pt.x, pt.y) < edgeDist2(state, eid, pt.x, pt.y)) {
-          placeShipEdge(sid, state, pid, setUIPhase, dispatch);
-        } else {
-          placeEdge(eid, state, pid, mode, setUIPhase, dispatch);
-        }
-        return;
-      }
-      if (eid) { placeEdge(eid, state, pid, mode, setUIPhase, dispatch); return; }
-      if (sid) { placeShipEdge(sid, state, pid, setUIPhase, dispatch); return; }
+      // タップ位置に近い方の辺を採用。その辺が道も船も置けるなら placeEdgeSmart が
+      // その場に「道/船」の選択を出す（片方だけなら即配置）。
+      const near = (eid && sid)
+        ? (edgeDist2(state, sid, pt.x, pt.y) < edgeDist2(state, eid, pt.x, pt.y) ? sid : eid)
+        : (eid ?? sid);
+      if (near) { placeEdgeSmart(near, state, pid, mode, setUIPhase, dispatch); return; }
     }
 
     // ---- フォールバック: 直接ヒットした要素（マウスの精密クリック等）----
@@ -695,13 +811,13 @@ export function attachBoardEvents(
     const shipEl = target.closest('[data-ship-edge-id]');
     if (shipEl) {
       const sid = shipEl.getAttribute('data-ship-edge-id');
-      if (sid) placeShipEdge(sid, state, pid, setUIPhase, dispatch);
+      if (sid) placeEdgeSmart(sid, state, pid, mode, setUIPhase, dispatch);
       return;
     }
     const edgeEl = target.closest('[data-edge-id]');
     if (edgeEl) {
       const edgeId = edgeEl.getAttribute('data-edge-id');
-      if (edgeId) placeEdge(edgeId, state, pid, mode, setUIPhase, dispatch);
+      if (edgeId) placeEdgeSmart(edgeId, state, pid, mode, setUIPhase, dispatch);
     }
   });
 }
@@ -752,6 +868,33 @@ function placeShipEdge(
   } else {
     dispatch({ type: 'BUILD_SHIP', edgeId: eid });
   }
+}
+
+// 航海者: いまの局面で「道も船も」置ける状況か（＝辺タップ時に道/船を選ばせるべきか）。
+//   - 初期配置(SETUP)の2個目: 海岸の開拓地なら道か船。
+//   - 街道建設カード使用中（道モード）: 道2/船2/道1+船1。
+//   - 通常の道モード・船モードは単一なので選択は出さない（船モードは船だけ）。
+function bothPiecesOffered(state: GameState, mode: BuildMode): boolean {
+  const isSetup = state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD';
+  if (isSetup) return state.setupSubPhase === 'PLACE_ROAD';
+  if (mode === 'ship') return false;
+  return state.turnPhase === 'TRADE_BUILD' && state.roadBuildingRoadsRemaining > 0;
+}
+
+// 辺への配置（道/船どちらもありうる場面の入口）。海岸の辺で道も船も置けるなら
+// その場で「道/船」を選ばせ、片方だけなら従来どおり即配置（＝迷いなく置ける）。
+export function placeEdgeSmart(
+  eid: string, state: GameState, pid: PlayerId, mode: BuildMode,
+  setUIPhase: (p: UIPhase) => void, dispatch: (a: Action) => void,
+): void {
+  if (bothPiecesOffered(state, mode) && canBuildRoad(state, pid, eid) && canBuildShip(state, pid, eid)) {
+    setUIPhase({ type: 'edgePieceChoice', edgeId: eid });
+    return;
+  }
+  // 単一可: 船モードは船、それ以外は置ける方（道優先→船）。
+  if (mode === 'ship') { placeShipEdge(eid, state, pid, setUIPhase, dispatch); return; }
+  if (canBuildRoad(state, pid, eid)) { placeEdge(eid, state, pid, mode, setUIPhase, dispatch); return; }
+  placeShipEdge(eid, state, pid, setUIPhase, dispatch);
 }
 
 // 仮置きプレビューを確定して実アクションへ変換する（main.ts の確認バーから呼ぶ）。
@@ -955,16 +1098,28 @@ export function attachBoardGestures(
 // 個別ハンドラ
 // ============================================================
 
-function handleTileClick(
+export function handleTileClick(
   tileId: string,
   state: GameState,
   pid: PlayerId,
   setUIPhase: (p: UIPhase) => void,
   dispatch: (a: Action) => void,
+  // 航海者: 先に選んだコマ（'robber'=盗賊/'pirate'=海賊）。両方動かせる盤で選択前(null)はタップを無視する。
+  piece: 'robber' | 'pirate' | null = null,
 ): void {
   if (state.phase !== 'MAIN' || state.turnPhase !== 'ROBBER') return;
   const tile = state.tiles[tileId];
   if (!tile) return;
+
+  // 航海者: 盗賊も海賊も動かせる盤では、先に選んだコマ以外のタイルは無視する（選択前は両方無視）。
+  const robberAvail = getRobberMoveTargets(state).length > 0;
+  const pirateAvail = state.piratePosition != null
+    && Object.values(state.tiles).some(t => t.type === 'sea' && t.id !== state.piratePosition);
+  if (robberAvail && pirateAvail) {
+    if (piece == null) return;                       // 先に盗賊/海賊を選ぶ
+    if (tile.type === 'sea' && piece !== 'pirate') return;
+    if (tile.type !== 'sea' && piece !== 'robber') return;
+  }
 
   // ---- 海タイル: 海賊を移動（隣接船の所有者から奪う）----
   if (tile.type === 'sea') {
@@ -981,14 +1136,20 @@ function handleTileClick(
 
   // ---- 陸タイル: 盗賊を移動（隣接建物の所有者から盗む）----
   const currentRobberTile = Object.values(state.tiles).find(t => t.hasRobber);
-  if (currentRobberTile?.id === tileId) return;
+  if (state.friendlyRobber) {
+    // 交易と蛮族「親切な盗賊」: 保護ヘックス（公開VP2以下の建物あり）へのタップは無視。
+    // 砂漠フォールバック時は「現在地=砂漠に留まる」タップも合法なので、現在地チェックより先に判定する。
+    if (!getRobberMoveTargets(state).includes(tileId)) return;
+  } else if (currentRobberTile?.id === tileId) return;
 
   const vertexIds = state.tileToVertices[tileId] ?? [];
   const opponents = [...new Set(
     vertexIds
       .map(vid => state.vertices[vid]?.building?.playerId)
       .filter((p): p is PlayerId => p != null && p !== pid),
-  )].filter(p => publicCardCount(state, p) > 0); // 手札を持つ相手だけ（強奪は必須・0枚は対象外）
+  )].filter(p => publicCardCount(state, p) > 0) // 手札を持つ相手だけ（強奪は必須・0枚は対象外）
+    // 親切な盗賊: 公開VP2以下は強奪対象外（砂漠フォールバック時に効く）。
+    .filter(p => !state.friendlyRobber || !isFriendlyRobberProtected(state, p));
 
   if (opponents.length <= 1) {
     // 0人または1人：即座にディスパッチ

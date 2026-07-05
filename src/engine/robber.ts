@@ -3,7 +3,8 @@
 // ============================================================
 
 import type { GameState, PlayerId, TileId, ResourceType, CommodityType } from '../types';
-import { RESOURCE_TYPES, COMMODITY_TYPES, ROBBER_HAND_DISCARD_MIN, CK_WALL_DISCARD_BONUS, makeCommodities } from '../constants';
+import { RESOURCE_TYPES, COMMODITY_TYPES, ROBBER_HAND_DISCARD_MIN, CK_WALL_DISCARD_BONUS, FRIENDLY_ROBBER_SAFE_VP, makeCommodities } from '../constants';
+import { calcPublicVP } from './scoring';
 
 // ============================================================
 // 手札合計
@@ -130,6 +131,55 @@ export function moveRobber(state: GameState, tileId: TileId): GameState {
   }
 
   return { ...state, tiles: newTiles };
+}
+
+// ============================================================
+// 親切な盗賊（交易と蛮族 The Friendly Robber・CN3089 p3）
+// ============================================================
+
+/**
+ * 親切な盗賊の保護対象か＝公開VPが FRIENDLY_ROBBER_SAFE_VP(2) 以下。
+ * 原文: "You may not move the robber to a hex with the building of a player who only has 2 VPs.
+ *        ... steal 1 random card from a player with an adjacent building as long as they have more than 2 VPs."
+ * VPは公開VP（calcPublicVP）で判定する。隠し勝利点カードまで数えると、盗賊の合法手から
+ * 非公開手札が逆算できてしまう（物理卓でも見えている点数でしか運用できない）。
+ */
+export function isFriendlyRobberProtected(state: GameState, playerId: PlayerId): boolean {
+  return calcPublicVP(state, playerId) <= FRIENDLY_ROBBER_SAFE_VP;
+}
+
+/** そのタイルに保護対象（公開VP2以下）の建物が面しているか。原文どおり手番プレイヤー自身の建物も区別しない。 */
+function tileHasProtectedBuilding(state: GameState, tileId: TileId): boolean {
+  return (state.tileToVertices[tileId] ?? []).some(vid => {
+    const pid = state.vertices[vid]?.building?.playerId;
+    return pid != null && isFriendlyRobberProtected(state, pid);
+  });
+}
+
+/**
+ * 盗賊の合法な移動先タイル一覧（陸のみ。海＝海賊の移動先は含まない）。
+ *   - 現在地は除外（標準ルール: 必ず別ヘックスへ）。
+ *   - numberHexOnly（S5 忘れられた部族）: 数字ディスクの無い陸ヘックスを除外。
+ *   - friendlyRobber（交易と蛮族）: 公開VP2以下のプレイヤーの建物があるヘックスを除外。
+ *     合法ヘックスが無ければ公式どおり砂漠のみ（盗賊が既に砂漠に居れば「その場に留まる」＝現在地も合法）。
+ *     盤に砂漠が無い場合は原文の想定外なので、進行を止めない保険として通常の制限なし集合を返す。
+ *   - 注: numberHexOnly と friendlyRobber を併用するシナリオは現行存在しない。併用すると
+ *     「砂漠フォールバック（無数字ヘックス）」と S5 の数字ヘックス限定が矛盾するため、その時点で要再設計。
+ */
+export function getRobberMoveTargets(state: GameState): TileId[] {
+  const current = Object.keys(state.tiles).find(tid => state.tiles[tid]!.hasRobber);
+  const targets = Object.keys(state.tiles).filter(tid => {
+    const t = state.tiles[tid]!;
+    if (t.type === 'sea') return false;
+    if (tid === current) return false;
+    if (state.numberHexOnly && t.number == null) return false;
+    return true;
+  });
+  if (!state.friendlyRobber) return targets;
+  const legal = targets.filter(tid => !tileHasProtectedBuilding(state, tid));
+  if (legal.length > 0) return legal;
+  const deserts = Object.keys(state.tiles).filter(tid => state.tiles[tid]!.type === 'desert');
+  return deserts.length > 0 ? deserts : targets;
 }
 
 // ============================================================

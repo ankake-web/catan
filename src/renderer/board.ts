@@ -508,6 +508,15 @@ function renderEdges(
         'stroke-width': 7,
         'stroke-linecap': 'round',
       });
+      // 交易と蛮族イベント「地震」: 損傷した道は中点まわりに回転させて「横倒し」を表現＋破線。
+      if (edge.road.damaged) {
+        const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        line.setAttribute('transform', `rotate(38 ${mx} ${my})`);
+        line.classList.add('road-damaged');
+      }
+      // 敷設済みの道が validEdgeIds に入る場面（T&B地震の損傷選択/修理、C&K外交官の道撤去）は
+      // 光らせて「タップ対象」であることを示す（従来の外交官は無表示だったため改善を兼ねる）。
+      if (opts?.validEdgeIds?.has(edge.id)) line.classList.add('road-selectable');
       g.appendChild(line);
     } else if (edge.ship) {
       // 船: 破線＋ボート。道と視覚的に区別する。
@@ -576,8 +585,12 @@ function renderEdges(
     }
 
     // S5「忘れられた部族」: 海辺トークン（V=VP / D=開発カード / H=港）を辺の中点に表示。
+    // 財宝(treasure)はテキストでなく宝箱アイコンを描く（オアシス/宝島。「財」表示はチープだったため）。
     const token = state.edgeTokens?.[edge.id];
-    if (token) {
+    if (token === 'treasure') {
+      const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+      g.appendChild(drawTreasureChest(mx, my, angle));
+    } else if (token) {
       const badge = svgEl('circle');
       badge.classList.add('edge-token');
       setAttrs(badge, { cx: mx, cy: my, r: 11 });
@@ -585,10 +598,33 @@ function renderEdges(
       const label = svgEl('text');
       label.classList.add('edge-token-label');
       setAttrs(label, { x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'central' });
-      label.textContent = token === 'vp' ? 'V' : token === 'dev' ? 'D' : token === 'treasure' ? '財' : 'H';
+      label.textContent = token === 'vp' ? 'V' : token === 'dev' ? 'D' : 'H';
       g.appendChild(label);
     }
   }
+  return g;
+}
+
+// 財宝トークン: 小さな宝箱を描く（本体＝焦げ茶・蓋＝明るい茶・金の帯と錠前）。
+// 公式アプリの見た目に寄せ、辺の向き(angleDeg)に合わせて少し傾けて置く。
+function drawTreasureChest(mx: number, my: number, angleDeg: number): SVGGElement {
+  const g = svgEl('g');
+  g.classList.add('treasure-chest');
+  // 辺に沿って傾ける（±30度に収めて読みやすさ優先）。
+  const tilt = Math.max(-30, Math.min(30, ((angleDeg + 90) % 180) - 90));
+  g.setAttribute('transform', `translate(${mx},${my}) rotate(${tilt})`);
+  const rect = (x: number, y: number, w: number, h: number, fill: string, stroke: string, rx = 1.5): SVGElement => {
+    const el = svgEl('rect');
+    setAttrs(el, { x, y, width: w, height: h, rx, fill, stroke, 'stroke-width': 1 });
+    return el;
+  };
+  // 蓋（上・かまぼこ形の代わりに角丸長方形）→ 本体 → 金帯 → 錠前の順で重ねる。
+  g.appendChild(rect(-11, -9, 22, 8, '#a06a32', '#5a3a1a', 3));   // 蓋
+  g.appendChild(rect(-10, -2, 20, 10, '#7a4e26', '#4a2f16', 2));  // 本体
+  g.appendChild(rect(-2.6, -9, 5.2, 17, '#e8b64c', '#a97c1f', 1)); // 金の帯
+  const lock = svgEl('circle');
+  setAttrs(lock, { cx: 0, cy: -0.5, r: 2, fill: '#8a6410', stroke: '#5f4508', 'stroke-width': 0.8 });
+  g.appendChild(lock);
   return g;
 }
 

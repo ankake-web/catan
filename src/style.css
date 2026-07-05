@@ -499,6 +499,17 @@ html.reduce-motion .building-downgrade { animation: none; filter: drop-shadow(0 
 }
 .edge-line:hover { stroke: rgba(255,255,255,0.55); }
 
+/* ---- 交易と蛮族イベント「地震」: 損傷した道（横倒し＝rotateはSVG側）と選択ハイライト ---- */
+.road-line-built.road-damaged { opacity: 0.72; stroke-dasharray: 6 5; }
+.road-line-built.road-selectable {
+  cursor: pointer;
+  animation: tb-road-pulse 1.2s ease-in-out infinite;
+}
+@keyframes tb-road-pulse {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 210, 80, 0.9)); }
+  50%      { filter: drop-shadow(0 0 8px rgba(255, 210, 80, 1)); }
+}
+
 /* ---- 有効配置ハイライト ---- */
 .vertex-dot.valid {
   fill: rgba(80, 255, 140, 0.75);
@@ -640,7 +651,7 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
 /* ---- 配置確認バー（盤面の直下に出す。top/left は JS が盤面実測で設定） ----
    質問テキストを上段・[確定][やめる]を下段に並べ、ボタンが改行/折返しせず
    常に横並びになるようにする。狭幅でも崩れない。 */
-#place-confirm {
+#place-confirm, #edge-piece-choice, #robber-piece-choice {
   position: fixed;
   /* left/top は updatePlaceConfirmBar が盤面位置に合わせて設定。transform で中央寄せ。 */
   transform: translateX(-50%);
@@ -655,6 +666,17 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
   color: #fff; font-size: 0.9rem;
   max-width: 92vw;
 }
+/* 道/船の選択ボタン: 道=茶、船=青で見分けやすく（.place-confirm-ok を色替え） */
+.place-confirm-ok.epc-road { background: #9c6b2e; }
+.place-confirm-ok.epc-road:hover { background: #b57f3a; }
+.place-confirm-ok.epc-ship { background: #2f6fd0; }
+.place-confirm-ok.epc-ship:hover { background: #3a83ee; }
+/* 道/船選択の「やめる」は小さめ（幅を取らない） */
+#edge-piece-choice .place-confirm-cancel { flex: 0 0 auto; min-width: 44px; }
+/* 盗賊/海賊の選択: 未選択は控えめ、選択中は緑＋白枠で強調 */
+#robber-piece-choice .place-confirm-ok { background: rgba(255,255,255,0.16); }
+#robber-piece-choice .place-confirm-ok:hover { background: rgba(255,255,255,0.28); }
+#robber-piece-choice .place-confirm-ok.rpc-active { background: #2a8a3a; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.6); }
 .place-confirm-text { text-align: center; white-space: nowrap; font-weight: bold; }
 /* 確定/やめるは必ず横並び（nowrap）。狭幅でも縦積みにしない。 */
 .place-confirm-actions { display: flex; flex-wrap: nowrap; gap: 10px; justify-content: center; }

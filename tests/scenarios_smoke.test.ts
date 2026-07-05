@@ -13,6 +13,7 @@ import { chooseAction } from '../src/engine/ai';
 import { applyAction } from '../src/engine/game';
 import { computeIslandReps } from '../src/engine/islands';
 import { findPendingDiscarder } from '../src/engine/robber';
+import { tbEventPendingIds } from '../src/engine/tbEvents';
 import { listScenarios, getScenario, type ScenarioId } from '../src/engine/scenarios';
 import type { GameState } from '../src/types';
 
@@ -22,10 +23,17 @@ const SPECS3: PlayerSpec[] = [
   { id: 'player3', name: 'C', color: 'purple', type: 'ai', aiDifficulty: 'strong' },
 ];
 
+// 交易と蛮族「Catan for Two」は実プレイヤー2人専用（3人だと createInitialGameState がエラー）。
+const SPECS2: PlayerSpec[] = SPECS3.slice(0, 2);
+function specsFor(scenario: ScenarioId): PlayerSpec[] {
+  return getScenario(scenario).rules?.catanForTwo ? SPECS2 : SPECS3;
+}
+
 // 1ゲームを GAME_OVER まで回す（DISCARD/GOLD は対象プレイヤーを選んで解決）。
 function playToEnd(scenario: ScenarioId, seed: number): GameState {
   const rng = createRng(seed);
-  let s = createInitialGameState(SPECS3, 'fixed', ['player1', 'player2', 'player3'], rng, scenario);
+  const specs = specsFor(scenario);
+  let s = createInitialGameState(specs, 'fixed', specs.map(p => p.id), rng, scenario);
   for (let i = 0; i < 120_000 && s.phase !== 'GAME_OVER'; i++) {
     let pid = s.playerOrder[s.currentPlayerIndex]!;
     if (s.phase === 'MAIN' && s.turnPhase === 'DISCARD') {
@@ -36,6 +44,8 @@ function playToEnd(scenario: ScenarioId, seed: number): GameState {
       pid = (s.pendingCityDowngrade ?? [])[0] ?? pid; // 蛮族敗北の都市格下げは対象プレイヤーが解決
     } else if (s.phase === 'MAIN' && s.turnPhase === 'PROGRESS_DISCARD') {
       pid = (s.pendingProgressDiscard ?? [])[0] ?? pid; // 進歩カード上限超過の捨て札は対象プレイヤーが解決
+    } else if (s.phase === 'MAIN' && tbEventPendingIds(s).length > 0) {
+      pid = tbEventPendingIds(s)[0] ?? pid; // 交易と蛮族イベントの選択は対象プレイヤーが解決
     }
     const action = chooseAction(s, pid, { rng });
     if (!action) break;

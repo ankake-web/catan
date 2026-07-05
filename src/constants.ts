@@ -2,7 +2,7 @@
 // src/constants.ts — ゲーム定数
 // ============================================================
 
-import type { AxialCoord, ResourceType, TileType, DevCardType, ResourceHand, CommodityType, CommodityHand, CkTrack, ProgressCardType } from './types';
+import type { AxialCoord, ResourceType, TileType, DevCardType, ResourceHand, CommodityType, CommodityHand, CkTrack, ProgressCardType, TbEventCard } from './types';
 
 // ---- リソース ----
 
@@ -177,16 +177,110 @@ export const VP_TABLE = {
   largestArmy:  2,
   victoryPoint: 1,
   island:       2, // 航海者: 新しい島への最初の入植ボーナス
+  strongestPorts: 2, // 交易と蛮族「強き港」: Strongest Ports タイルの勝利点
   target:       10,
 } as const;
 
 export const LONGEST_ROAD_MIN = 5;
 export const LARGEST_ARMY_MIN = 3;
+// 交易と蛮族「強き港」: 港上の建物のVP合計がこの値以上で Strongest Ports タイルを獲得できる（公式: 3VP）。
+export const STRONGEST_PORTS_MIN = 3;
 
 // ---- 強盗 ----
 
 export const DICE_ROBBER_NUMBER      = 7;
 export const ROBBER_HAND_DISCARD_MIN = 8; // 手札がこの枚数以上で半数捨て
+// 交易と蛮族「親切な盗賊(The Friendly Robber)」: 公開VPがこの値以下のプレイヤーは保護される
+// （公式 CN3089 p3: "a player who only has 2 VPs" の建物ヘックスへ盗賊を動かせず、
+//   奪えるのは "more than 2 VPs" のプレイヤーのみ）。
+export const FRIENDLY_ROBBER_SAFE_VP = 2;
+
+// ---- 交易と蛮族「イベントカード(Catan Event Cards)」変種（CN3089 p4-6） ----
+
+// 地震(EARTHQUAKE)で損傷した道の修理コスト（公式 CN3089 p5: "It costs 1 brick and 1 wood to repair a road."）
+export const TB_ROAD_REPAIR_COST: ResourceHand = makeHand({ wood: 1, brick: 1 });
+
+// イベントデッキ作成時に底へ伏せる枚数（公式 CN3089 p5: "Deal 5 cards face down to start the event deck."
+// → その上に New Year → 残り31枚。＝New Year 以降の5枚はそのゲームでは使われない）。
+export const TB_EVENT_DECK_BOTTOM = 5;
+
+// イベント表示名（UI/ログ用の和訳。ルール数値ではないため任意訳）。
+export const TB_EVENT_NAME: Record<import('./types').TbEventType, string> = {
+  beautiful_day:    '良き日',
+  calm_seas:        '穏やかな海',
+  conflict:         '衝突',
+  earthquake:       '地震',
+  epidemic:         '疫病',
+  good_neighbors:   '良き隣人',
+  helpful_neighbor: '親切な隣人',
+  new_year:         '新年',
+  plentiful_year:   '豊作の年',
+  robber_attacks:   '盗賊の襲撃',
+  robber_flees:     '盗賊の逃走',
+  tournament:       '馬上槍試合',
+  trade_advantage:  '交易優位',
+};
+
+// イベントカード36枚（New Year を除く）の「イベント×生産数字」対応。
+// 出典: 公式ドイツ語版第6版ルールブック(Kosmos 685140, catan.de 2025) p.5 が全カードの
+//   枚数×印刷数字を明文列挙（英語版 CN3089 には内訳記載なし）。旧版 Mayfair T&B ルールブック
+//   pp.4-5 の "Prod. #" 見出し・BGG 実カード写真(image/149884)・CatanFusion の列挙とも完全一致。
+// 数字別合計は 2d6 の確率分布どおり: 2×1, 3×2, 4×3, 5×4, 6×5, 7×6, 8×5, 9×4, 10×3, 11×2, 12×1。
+// 詳細は docs/交易と蛮族_仕様書_v6.md §2-3。
+export const TB_EVENT_CARDS_36: readonly TbEventCard[] = [
+  { event: 'plentiful_year',   number: 2 },
+  { event: 'conflict',         number: 3 },
+  { event: 'beautiful_day',    number: 3 },
+  { event: 'robber_flees',     number: 4 },
+  { event: 'robber_flees',     number: 4 },
+  { event: 'beautiful_day',    number: 4 },
+  { event: 'tournament',       number: 5 },
+  { event: 'trade_advantage',  number: 5 },
+  { event: 'beautiful_day',    number: 5 },
+  { event: 'beautiful_day',    number: 5 },
+  { event: 'epidemic',         number: 6 },
+  { event: 'earthquake',       number: 6 },
+  { event: 'good_neighbors',   number: 6 },
+  { event: 'beautiful_day',    number: 6 },
+  { event: 'beautiful_day',    number: 6 },
+  { event: 'robber_attacks',   number: 7 },
+  { event: 'robber_attacks',   number: 7 },
+  { event: 'robber_attacks',   number: 7 },
+  { event: 'robber_attacks',   number: 7 },
+  { event: 'robber_attacks',   number: 7 },
+  { event: 'robber_attacks',   number: 7 },
+  { event: 'epidemic',         number: 8 },
+  { event: 'beautiful_day',    number: 8 },
+  { event: 'beautiful_day',    number: 8 },
+  { event: 'beautiful_day',    number: 8 },
+  { event: 'beautiful_day',    number: 8 },
+  { event: 'calm_seas',        number: 9 },
+  { event: 'beautiful_day',    number: 9 },
+  { event: 'beautiful_day',    number: 9 },
+  { event: 'beautiful_day',    number: 9 },
+  { event: 'helpful_neighbor', number: 10 },
+  { event: 'beautiful_day',    number: 10 },
+  { event: 'beautiful_day',    number: 10 },
+  { event: 'helpful_neighbor', number: 11 },
+  { event: 'beautiful_day',    number: 11 },
+  { event: 'calm_seas',        number: 12 },
+];
+
+// ---- 交易と蛮族「Catan for Two（2人用）」変種（CN3089 p7） ----
+
+// trade token: 総数20・各プレイヤー初期5（残り10が供給）。
+export const TB2_TRADE_TOKEN_TOTAL = 20;
+export const TB2_TRADE_TOKEN_START = 5;
+// 取得: 砂漠に開拓地=2 ／ 沿岸に開拓地=1 ／ ターン1回・表向き騎士カード1枚を捨てて=2。
+export const TB2_TOKENS_DESERT = 2;
+export const TB2_TOKENS_COAST  = 1;
+export const TB2_TOKENS_KNIGHT_DISCARD = 2;
+// 消費（Forced Trade / Move Robber・1ターン1回）: 自分の公開VP ≤ 相手なら1、上回っていれば2。
+export const TB2_SPEND_COST_BEHIND = 1;
+export const TB2_SPEND_COST_AHEAD  = 2;
+// Forced Trade: 相手の手札から無作為2枚（相手が1枚なら1枚）を取り、自分の任意2枚を渡す。
+export const TB2_FORCED_TRADE_TAKE = 2;
+export const TB2_FORCED_TRADE_GIVE = 2;
 
 // ---- 交易タイムアウト ----
 

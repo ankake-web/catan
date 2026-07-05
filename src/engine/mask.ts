@@ -56,5 +56,10 @@ export function maskStateFor(state: GameState, viewerId: PlayerId): GameState {
     devDeck: state.devDeck.map(() => ({ id: '', type: 'knight' as const, purchasedOnTurn: -1 })),
     // 騎士と商人: 錬金術師で事前指定した次のダイス目は秘匿情報（相手に先読みさせない）。
     ...(state.alchemistForcedDice != null ? { alchemistForcedDice: null } : {}),
+    // 交易と蛮族「イベントカード」: デッキの並び順は秘匿（次のイベント/数字を先読みさせない）。
+    // 枚数だけを保った不透明スタブに置換する（tbLastEventCard＝めくった札は公開のまま）。
+    ...(state.tbEventDeck
+      ? { tbEventDeck: state.tbEventDeck.map(() => ({ event: 'beautiful_day' as const, number: null })) }
+      : {}),
   };
 }

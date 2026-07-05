@@ -3,7 +3,7 @@
 // ============================================================
 
 import type { GameState, Action, PlayerId, ResourceType, Player, ResourceHand } from '../types';
-import { RESOURCE_TYPES, BUILD_COSTS, CK_COSTS, VP_TABLE } from '../constants';
+import { RESOURCE_TYPES, BUILD_COSTS, CK_COSTS, VP_TABLE, TB_ROAD_REPAIR_COST } from '../constants';
 import { calcVP, calcPublicVP, victoryTarget } from '../engine/scoring';
 import { LONGEST_ROAD_MIN, LARGEST_ARMY_MIN } from '../constants';
 import { hasEnoughResources, playerHasMovableShip, canBuildShip } from '../engine/actions';
@@ -15,12 +15,15 @@ import {
   isCk, canBuildImprovement, canBuildKnight, canActivateKnight, canUpgradeKnight, canBuildCityWall, canPlayProgressLoose,
   playerHasMovableKnight, playerHasChasableKnight, robberAdjacentChasableVertexIds, inventorTiles, progressDiscardCandidates, craneEligibleTracks,
 } from '../engine/citiesKnights';
-import { CK_TRACK_NAME, CK_TRACK_COMMODITY, CK_BARBARIAN_MAX, COMMODITY_TYPES, improvementCost, PROGRESS_CARD_NAME, PROGRESS_CARD_DESC, PROGRESS_DECK_CARDS, TILE_RESOURCE_MAP } from '../constants';
+import { CK_TRACK_NAME, CK_TRACK_COMMODITY, CK_BARBARIAN_MAX, COMMODITY_TYPES, improvementCost, PROGRESS_CARD_NAME, PROGRESS_CARD_DESC, PROGRESS_DECK_CARDS, TILE_RESOURCE_MAP, TB_EVENT_NAME } from '../constants';
+import { tbEventStealTargets } from '../engine/tbEvents';
+import { tbSpendCost, tbCanSpendWindow } from '../engine/tbTwo';
+import { makeHand, TB2_TOKENS_KNIGHT_DISCARD } from '../constants';
 import type { CkTrack, CommodityType, CommodityHand, TradeKind, ProgressCard, ProgressChoice } from '../types';
 import type { BuildMode } from './events';
 
 // 画像参照は中央マニフェスト経由（単一の真実）。
-import { ASSETS, assetImg, houseImg, cityImg, metropolisImg, type ColorKey } from '../assets/manifest';
+import { ASSETS, assetImg, houseImg, cityImg, metropolisImg, shipImg, type ColorKey } from '../assets/manifest';
 
 const knightImg = ASSETS.knight.basic;
 // 騎士と商人: 商品アイコン画像（手札チップ等）。テキスト埋め込み箇所は絵文字のまま。
@@ -159,6 +162,10 @@ export type UIPhase =
   | { type: 'monopoly'; resource: ResourceType | null }
   | { type: 'robberTarget'; tileId: string; opponents: PlayerId[]; kind?: 'robber' | 'pirate' }
   | { type: 'placePreview'; kind: 'settlement' | 'city' | 'road' | 'ship' | 'activateKnight' | 'upgradeKnight' | 'placeMerchant'; targetId: string }
+  // 航海者: 海岸の辺は道も船も置ける。タップ時にどちらを置くか盤面でその場に選ばせる。
+  | { type: 'edgePieceChoice'; edgeId: string }
+  // 交易と蛮族「Catan for Two」: 強制交易で渡す2枚の選択中。
+  | { type: 'tbForcedTrade'; give: ResourceHand }
   | { type: 'playerTradeOffer'; give: ResourceHand; receive: ResourceHand; targetPids: PlayerId[] };
 
 // ============================================================
@@ -263,8 +270,17 @@ function phaseText(state: GameState): string {
   }
 
   switch (state.turnPhase) {
-    case 'PRE_ROLL':
+    case 'PRE_ROLL': {
+      // 交易と蛮族「Catan for Two」: 生産フェーズ2回制の2回目であることを明示。
+      if (state.tbCatanForTwo && (state.tbRollsDone ?? 0) === 1) {
+        return isCpuTurn ? '手番中…（2回目の生産）' : '2回目の生産：ダイスを振る';
+      }
       return isCpuTurn ? '手番中…' : 'ダイスを振る';
+    }
+    case 'TB_NEUTRAL': {
+      const piece = state.tbNeutralPending === 'settlement' ? '開拓地' : '道';
+      return isCpuTurn ? `中立の${piece}を配置中…` : `中立の${piece}を置く場所をタップ`;
+    }
     case 'ROBBER':
       return isCpuTurn ? '盗賊を移動中…' : '盗賊を動かすタイルをクリック';
     case 'DISCARD': {
@@ -601,7 +617,13 @@ export function buildGoldChoiceUI(
       : Array.from({ length: owed }, () => null);
 
   const header = el('div', 'modal-header');
-  header.textContent = `✨ 金タイル：資源${owed}枚を選んで受け取る`;
+  // T&B イベント（豊作の年/穏やかな海/馬上槍試合）でも GOLD を流用するため文言を出し分ける。
+  // 複数人が同時に選ぶ局面（豊作の年）では誰の番かを明示（ホットシートで混乱しないように）。
+  const multi = Object.keys(state.pendingGoldChoice ?? {}).length > 1;
+  const who = multi ? `${state.players[gpid]?.name ?? ''}：` : '';
+  header.textContent = state.tbPendingEventNumber != null
+    ? `${who}✨ イベント：供給から資源${owed}枚を選んで受け取る`
+    : `✨ 金タイル：資源${owed}枚を選んで受け取る`;
   div.appendChild(header);
 
   const status = el('div', 'modal-section-label');
@@ -746,6 +768,183 @@ function buildMonopolyUI(
     () => { if (resource) dispatch({ type: 'PLAY_MONOPOLY', resource }); },
   ));
   div.appendChild(makeBtn('✕ キャンセル', 'btn-end', false, () => setUIPhase({ type: 'idle' })));
+  return div;
+}
+
+// ============================================================
+// 交易と蛮族「イベントカード」: イベント選択UI（多人数解決）
+// ============================================================
+
+// 良き隣人(GOOD NEIGHBORS): 左隣へ渡す資源を1枚選ぶ（1タップで確定）。
+// ホットシート（同一端末に複数人間）では複数人が順に解決するため「誰の番か」を先頭に出す。
+function buildTbEventGiveUI(state: GameState, me: PlayerId, dispatch: (a: Action) => void): HTMLDivElement {
+  const div = el('div', 'modal-panel');
+  const toId = (state.tbPendingEventGive ?? {})[me];
+  const multi = Object.keys(state.tbPendingEventGive ?? {}).length > 1;
+  const who = multi ? `${state.players[me]?.name ?? ''}：` : '';
+  const header = el('div', 'modal-header');
+  header.textContent = `${who}🎁 良き隣人：左隣の ${toId ? state.players[toId]?.name ?? '' : ''} へ渡す資源を選んでください`;
+  div.appendChild(header);
+  const hand = state.players[me]!.hand;
+  const row = el('div', 'modal-res-row');
+  for (const r of RESOURCE_TYPES) {
+    if (hand[r] < 1) continue;
+    row.appendChild(makeImgBtn(RESOURCE_IMG[r], `${RESOURCE_NAMES[r]}×${hand[r]}`, 'btn-build', false,
+      () => dispatch({ type: 'CHOOSE_EVENT_GIVE', playerId: me, resource: r })));
+  }
+  div.appendChild(row);
+  return div;
+}
+
+// 親切な隣人(HELPFUL NEIGHBOR): 渡す相手（自分より公開VPの少ない人）ごとに資源ボタンを並べる。
+function buildTbEventHelpfulUI(state: GameState, me: PlayerId, dispatch: (a: Action) => void): HTMLDivElement {
+  const div = el('div', 'modal-panel');
+  const multi = (state.tbPendingEventHelpful ?? []).length > 1;
+  const who = multi ? `${state.players[me]?.name ?? ''}：` : '';
+  const header = el('div', 'modal-header');
+  header.textContent = `${who}🎁 親切な隣人：渡す相手と資源を選んでください`;
+  div.appendChild(header);
+  const myVp = calcPublicVP(state, me);
+  const hand = state.players[me]!.hand;
+  for (const p of state.playerOrder) {
+    if (p === me || calcPublicVP(state, p) >= myVp) continue;
+    const label = el('div', 'modal-section-label');
+    label.textContent = `→ ${state.players[p]?.name ?? p}（${calcPublicVP(state, p)}点）へ渡す:`;
+    div.appendChild(label);
+    const row = el('div', 'modal-res-row');
+    for (const r of RESOURCE_TYPES) {
+      if (hand[r] < 1) continue;
+      row.appendChild(makeImgBtn(RESOURCE_IMG[r], RESOURCE_NAMES[r], 'btn-build', false,
+        () => dispatch({ type: 'CHOOSE_EVENT_HELPFUL', playerId: me, resource: r, toPlayerId: p })));
+    }
+    div.appendChild(row);
+  }
+  return div;
+}
+
+// ============================================================
+// 交易と蛮族「Catan for Two」: trade token の使用UI
+// ============================================================
+
+// 強制交易: 渡す2枚を選ぶモーダル（相手の無作為2枚⇄自分の任意2枚）。
+function buildTbForcedTradeUI(
+  state: GameState,
+  pid: PlayerId,
+  player: Player,
+  uiPhase: Extract<UIPhase, { type: 'tbForcedTrade' }>,
+  setUIPhase: (p: UIPhase) => void,
+  dispatch: (a: Action) => void,
+): HTMLDivElement {
+  const div = el('div', 'modal-panel');
+  const opp = state.playerOrder.find(p => p !== pid);
+  const oppName = opp ? state.players[opp]?.name ?? '' : '';
+  const cost = tbSpendCost(state, pid);
+  const selected = uiPhase.give;
+  const selCount = RESOURCE_TYPES.reduce((s, r) => s + selected[r], 0);
+
+  const header = el('div', 'modal-header');
+  header.textContent = `🤝 強制交易（🪙${cost}）: ${oppName} の手札から無作為に2枚もらい、自分の2枚を渡す`;
+  div.appendChild(header);
+
+  const label = el('div', 'modal-section-label');
+  label.textContent = `渡す資源を2枚選んでください（${selCount}/2）`;
+  div.appendChild(label);
+
+  const row = el('div', 'modal-res-row');
+  for (const r of RESOURCE_TYPES) {
+    const have = player.hand[r];
+    if (have < 1) continue;
+    const picked = selected[r];
+    const canAdd = selCount < 2 && picked < have;
+    const btn = makeImgBtn(
+      RESOURCE_IMG[r],
+      picked > 0 ? `${RESOURCE_NAMES[r]} ×${picked}` : `${RESOURCE_NAMES[r]}（${have}）`,
+      picked > 0 ? 'btn-active' : 'btn-build',
+      !canAdd && picked === 0,
+      () => {
+        // タップで1枚追加。選択済みをタップすると1枚戻す（トグル的に調整できるように）。
+        const next = { ...selected };
+        if (picked > 0 && !canAdd) next[r] = picked - 1;
+        else if (canAdd) next[r] = picked + 1;
+        else next[r] = Math.max(0, picked - 1);
+        setUIPhase({ type: 'tbForcedTrade', give: next });
+      },
+    );
+    row.appendChild(btn);
+  }
+  div.appendChild(row);
+
+  div.appendChild(makeBtn(
+    '✓ 強制交易する',
+    selCount === 2 ? 'btn-primary' : 'btn-disabled',
+    selCount !== 2,
+    () => dispatch({ type: 'TB_FORCED_TRADE', give: selected }),
+  ));
+  div.appendChild(makeBtn('✕ キャンセル', 'btn-end', false, () => setUIPhase({ type: 'idle' })));
+  return div;
+}
+
+// trade token の取得/使用ボタン群（PRE_ROLL=1回目の生産前 と TRADE_BUILD に出す）。
+function appendTb2TokenButtons(
+  div: HTMLDivElement,
+  state: GameState,
+  pid: PlayerId,
+  player: Player,
+  setUIPhase: (p: UIPhase) => void,
+  dispatch: (a: Action) => void,
+): void {
+  if (!state.tbCatanForTwo || !tbCanSpendWindow(state)) return;
+  const tokens = (state.tbTradeTokens ?? {})[pid] ?? 0;
+  const cost = tbSpendCost(state, pid);
+  const opp = state.playerOrder.find(p => p !== pid);
+  const spent = state.tbTradeTokenSpentThisTurn === true;
+
+  if (!spent && tokens >= cost) {
+    // 強制交易: 相手に手札が1枚以上・自分が2枚以上のときだけ有効。
+    const oppCards = opp ? robbableCardCount(state, opp) : 0;
+    const myCards = RESOURCE_TYPES.reduce((s, r) => s + player.hand[r], 0);
+    const canForced = oppCards >= 1 && myCards >= 2;
+    div.appendChild(makeBtn(`🤝 強制交易 🪙${cost}`, canForced ? 'btn-build' : 'btn-disabled', !canForced,
+      () => setUIPhase({ type: 'tbForcedTrade', give: makeHand() })));
+
+    // 盗賊を砂漠へ（奪わない）: 盗賊が砂漠以外に居るときだけ有効。
+    const deserts = Object.values(state.tiles).filter(t => t.type === 'desert');
+    const canFlee = state.useRobber !== false && deserts.length > 0 && !deserts.some(d => d.hasRobber);
+    div.appendChild(makeBtn(`🦹→🏜 盗賊を砂漠へ 🪙${cost}`, canFlee ? 'btn-build' : 'btn-disabled', !canFlee,
+      () => dispatch({ type: 'TB_MOVE_ROBBER' })));
+  }
+
+  // 騎士カード1枚を捨てて trade token 2（1ターン1回・最大騎士力を失いうる）。
+  if (!state.tbKnightTokenThisTurn && player.knightsPlayed >= 1 && (state.tbTradeTokenBank ?? 0) >= 1) {
+    div.appendChild(makeBtn(`♞→🪙 騎士1枚を🪙${TB2_TOKENS_KNIGHT_DISCARD}に`, 'btn-build', false,
+      () => dispatch({ type: 'TB_DISCARD_KNIGHT' })));
+  }
+}
+
+// 衝突(CONFLICT)/交易優位(TRADE ADVANTAGE): 奪う相手を選ぶ。騎士カード最多（タイル無し）の場合のみ見送り可。
+function buildTbEventStealUI(state: GameState, dispatch: (a: Action) => void): HTMLDivElement {
+  const div = el('div', 'modal-panel');
+  const pending = state.tbPendingEventSteal;
+  if (!pending) return div;
+  const header = el('div', 'modal-header');
+  const evName = state.tbLastEventCard ? TB_EVENT_NAME[state.tbLastEventCard.event] : 'イベント';
+  header.textContent = `⚔ ${evName}：奪う相手を選んでください（無作為に1枚）`;
+  div.appendChild(header);
+  const row = el('div', 'modal-res-row');
+  for (const opponentPid of tbEventStealTargets(state)) {
+    const opponent = state.players[opponentPid];
+    if (!opponent) continue;
+    const color = PLAYER_COLORS[opponentPid] ?? '#aaa';
+    const btn = makeBtn(`${opponent.name}（手札${robbableCardCount(state, opponentPid)}枚）`, 'btn-build', false,
+      () => dispatch({ type: 'CHOOSE_EVENT_STEAL', targetPlayerId: opponentPid }));
+    btn.style.borderLeft = `4px solid ${color}`;
+    row.appendChild(btn);
+  }
+  div.appendChild(row);
+  if (pending.optional) {
+    div.appendChild(makeBtn('🕊 奪わない（見送る）', 'btn-end', false,
+      () => dispatch({ type: 'CHOOSE_EVENT_STEAL', targetPlayerId: null })));
+  }
   return div;
 }
 
@@ -1845,6 +2044,45 @@ function buildActionButtons(
     return div;
   }
 
+  // ---- 交易と蛮族「イベントカード」: イベント選択（多人数解決。対象の人間にだけ表示）----
+  if (state.turnPhase === 'EVENT_GIVE') {
+    const pending = Object.keys(state.tbPendingEventGive ?? {}) as PlayerId[];
+    const me = lanMode && viewerId != null ? viewerId : pending.find(p => state.players[p]?.type === 'human');
+    if (!me || !pending.includes(me)) return null;
+    div.appendChild(buildTbEventGiveUI(state, me, dispatch));
+    return div;
+  }
+  if (state.turnPhase === 'EVENT_HELPFUL') {
+    const pending = state.tbPendingEventHelpful ?? [];
+    const me = lanMode && viewerId != null ? viewerId : pending.find(p => state.players[p]?.type === 'human');
+    if (!me || !pending.includes(me)) return null;
+    div.appendChild(buildTbEventHelpfulUI(state, me, dispatch));
+    return div;
+  }
+  if (state.turnPhase === 'EVENT_STEAL') {
+    const chooser = state.tbPendingEventSteal?.playerId;
+    if (!chooser || state.players[chooser]?.type !== 'human') return null;
+    if (lanMode && viewerId != null && viewerId !== chooser) return null; // LANは本人のみ
+    div.appendChild(buildTbEventStealUI(state, dispatch));
+    return div;
+  }
+  if (state.turnPhase === 'EVENT_DAMAGE') {
+    const pending = state.tbPendingEventDamage ?? [];
+    const me = lanMode && viewerId != null ? viewerId : pending.find(p => state.players[p]?.type === 'human');
+    if (!me || !pending.includes(me)) return null;
+    // ボタンは出さず、盤面の光った自分の道をタップして選ぶ（都市格下げと同方式）。
+    const panel = el('div', 'modal-panel');
+    const header = el('div', 'modal-header');
+    // ホットシートで複数人が順に損傷させる局面では「誰の番か」を明示。
+    const who = pending.length > 1 ? `${state.players[me]?.name ?? ''}：` : '';
+    header.textContent = `${who}🚧 地震！`;
+    panel.appendChild(header);
+    panel.appendChild(Object.assign(el('div', 'modal-section-label'),
+      { textContent: '盤面で光っている自分の道を1本タップして損傷させてください（修理するまで道の新設不可・レンガ1木1で修理）' }));
+    div.appendChild(panel);
+    return div;
+  }
+
   // ---- F-05: ペンディング交易 ----
   if (state.pendingTrade !== null) {
     div.appendChild(buildPendingTradeUI(state, pid, dispatch, viewerId, lanMode));
@@ -1868,6 +2106,10 @@ function buildActionButtons(
     div.appendChild(buildMonopolyUI(uiPhase, setUIPhase, dispatch));
     return div;
   }
+  if (uiPhase.type === 'tbForcedTrade') {
+    div.appendChild(buildTbForcedTradeUI(state, pid, player, uiPhase, setUIPhase, dispatch));
+    return div;
+  }
   if (uiPhase.type === 'playerTradeOffer') {
     div.appendChild(buildPlayerTradeOfferUI(player, pid, state, uiPhase, setUIPhase, dispatch));
     return div;
@@ -1880,11 +2122,32 @@ function buildActionButtons(
   // LAN: 自分の手番でない端末には操作ボタンを出さない（サーバでも検証）。
   if (lanMode && viewerId != null && viewerId !== pid) return null;
 
+  // ---- 交易と蛮族「Catan for Two」: 中立コマの配置（盤面タップで解決。ここは案内のみ）----
+  if (state.turnPhase === 'TB_NEUTRAL') {
+    const panel = el('div', 'modal-panel');
+    const header = el('div', 'modal-header');
+    header.textContent = '🏳 中立プレイヤーの建設';
+    panel.appendChild(header);
+    const piece = state.tbNeutralPending === 'settlement' ? '開拓地' : '道';
+    panel.appendChild(Object.assign(el('div', 'modal-section-label'), {
+      textContent: `自分の建設に伴い、どちらかの中立の${piece}を1つ無償で置きます。盤面で光っている場所をタップしてください（両方に置ける時は盤面上のバーで中立を選択/切替）`,
+    }));
+    div.appendChild(panel);
+    return div;
+  }
+
   // ---- PRE_ROLL ----
   if (state.turnPhase === 'PRE_ROLL') {
-    div.appendChild(makeBtn('🎲 ダイスを振る', 'btn-primary', false, () => dispatch({ type: 'ROLL_DICE' })));
+    // 交易と蛮族: イベントカード=めくる文言 / Catan for Two の2回目の生産=2回目と明示。
+    const tb2Second = state.tbCatanForTwo === true && (state.tbRollsDone ?? 0) === 1;
+    const rollLabel = state.tbEventCards ? '🃏 カードをめくる'
+      : tb2Second ? '🎲 2回目のダイスを振る' : '🎲 ダイスを振る';
+    div.appendChild(makeBtn(rollLabel, 'btn-primary', false, () => dispatch({ type: 'ROLL_DICE' })));
+    // Catan for Two: 1回目の生産前ならトークンを使える（盗賊を砂漠へ 等）。
+    appendTb2TokenButtons(div, state, pid, player, setUIPhase, dispatch);
     // ダイス前は騎士のみ使用可（appendDevCardButtons 内で制御）。LANも対応。
-    appendDevCardButtons(div, state, player, setUIPhase, dispatch);
+    // Catan for Two の「2つの生産フェーズの間」は騎士も使えない（エンジンが拒否）ため出さない。
+    if (!tb2Second) appendDevCardButtons(div, state, player, setUIPhase, dispatch);
     if (calcVP(state, pid) >= victoryTarget(state)) {
       div.appendChild(makeBtn('🏆 勝利宣言！', 'btn-primary', false, () => dispatch({ type: 'DECLARE_VICTORY' })));
     }
@@ -1893,17 +2156,42 @@ function buildActionButtons(
 
   if (state.turnPhase !== 'TRADE_BUILD') return null;
 
+  // ---- 交易と蛮族イベント「地震」: 損傷した道の修理案内（修理するまで道を建てられない）----
+  // 道ボタンが押せても候補0本になり無反応に見えるため、盤面タップで修理する導線を明示する。
+  if (state.tbEventCards) {
+    const damaged = Object.values(state.edges).filter(e => e.road?.playerId === pid && e.road.damaged).length;
+    if (damaged > 0) {
+      const canRepair = hasEnoughResources(player.hand, TB_ROAD_REPAIR_COST);
+      const info = el('div', 'turn-phase-text');
+      info.textContent = canRepair
+        ? `🚧 損傷した道が${damaged}本。盤面で光った道をタップして修理（🧱1🌲1）。全て直すまで道を新設できません`
+        : `🚧 損傷した道が${damaged}本。修理には🧱1🌲1が必要（交易で集めましょう）。全て直すまで道を新設できません`;
+      div.appendChild(info);
+    }
+  }
+
   // ---- 街道建設カード使用中 ----
   if (state.roadBuildingRoadsRemaining > 0) {
+    // 航海者: 街道建設は道だけでなく船も無料配置できる（道2／船2／道1+船1）。
+    // 海のある盤では「船を置く」ボタンも出す（基本盤・オアシスは船が無いので道だけ）。
+    const rbHasSea = !state.noShips && Object.values(state.tiles).some(t => t.type === 'sea');
     const info = el('div', 'turn-phase-text');
-    info.textContent = `🛤 街道建設カード使用中（残り ${state.roadBuildingRoadsRemaining} 本）`;
+    info.textContent = rbHasSea
+      ? `🛤 街道建設カード使用中（残り ${state.roadBuildingRoadsRemaining} 本・道でも船でもOK）`
+      : `🛤 街道建設カード使用中（残り ${state.roadBuildingRoadsRemaining} 本）`;
     div.appendChild(info);
     div.appendChild(modeBtn('🛤 道を置く', 'road', player.remainingRoads > 0, buildMode, setBuildMode));
+    if (rbHasSea) {
+      div.appendChild(modeBtn('🚢 船を置く', 'ship', (player.remainingShips ?? 0) > 0, buildMode, setBuildMode));
+    }
     div.appendChild(makeBtn('✓ 道路建設を完了', 'btn-end', false, () => dispatch({ type: 'FINISH_ROAD_BUILDING' })));
     return div;
   }
 
   // ---- TRADE_BUILD ----
+  // 交易と蛮族「Catan for Two」: trade token の使用/取得ボタン（1ターン1回）。
+  appendTb2TokenButtons(div, state, pid, player, setUIPhase, dispatch);
+
   const canRoad  = player.remainingRoads > 0 && hasEnoughResources(player.hand, BUILD_COSTS.road);
   const canSettl = player.remainingSettlements > 0 && hasEnoughResources(player.hand, BUILD_COSTS.settlement);
   const canCity  = player.remainingCities > 0 && hasEnoughResources(player.hand, BUILD_COSTS.city);
@@ -1920,7 +2208,7 @@ function buildActionButtons(
   const ckey = PLAYER_COLOR_KEY[pid] ?? 'red';
   div.appendChild(modeImgBtn(ASSETS.action.road, [costLabel('道', resCostParts(BUILD_COSTS.road))], 'road', canRoad, buildMode, setBuildMode));
   if (hasSea) {
-    div.appendChild(modeBtn('🚢 船', 'ship', canShip, buildMode, setBuildMode));
+    div.appendChild(modeImgBtn(shipImg(ckey), [costLabel('船', resCostParts(BUILD_COSTS.ship))], 'ship', canShip, buildMode, setBuildMode));
     // 航海者: 動かせる船があるときだけ「船を移動」モードを出す（1ターン1回）。
     if (playerHasMovableShip(state, pid)) {
       div.appendChild(modeBtn('⛵ 船を移動', 'moveShip', true, buildMode, setBuildMode));
@@ -2354,6 +2642,13 @@ function buildPlayerPanel(
   const cChip = statChip(cityImg(ckey), bd.cities); cChip.title = '都市';
   const hChip = statChip(null, handTotal, 'stat-hand', 'ic-cards'); hChip.title = isCk(state) ? '手札（資源＋商品の枚数）' : '手札（枚数）';
   counts.append(sChip, cChip, hChip);
+  // 交易と蛮族「Catan for Two」: trade token 保有数（公開情報）。
+  if (state.tbCatanForTwo && player.type !== 'neutral') {
+    const tk = el('span', 'stat-count');
+    tk.textContent = `🪙${(state.tbTradeTokens ?? {})[pId] ?? 0}`;
+    tk.title = '交易トークン（ターン1回、強制交易 か 盗賊を砂漠へ に使える）';
+    counts.appendChild(tk);
+  }
   statRow.appendChild(counts);
   h3.appendChild(statRow);
   div.appendChild(h3);

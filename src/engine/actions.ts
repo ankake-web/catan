@@ -36,6 +36,13 @@ function isSetupPhase(state: GameState): boolean {
   return state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD';
 }
 
+// 交易と蛮族「Catan for Two」: 中立プレイヤーのコマは常に無償（資源を持たないため、
+// コスト判定に掛けると恒久的に建設不可＝変種が成立しない）。tbTwo.ts の isTbNeutral と
+// 同義だが、循環 import（tbTwo → actions）を避けるためここでインライン判定する。
+function isTb2NeutralBuilder(state: GameState, playerId: PlayerId): boolean {
+  return (state.tbNeutralPlayerIds ?? []).includes(playerId);
+}
+
 // ============================================================
 // 道（Road）
 // ============================================================
@@ -51,6 +58,9 @@ export function canBuildRoad(state: GameState, playerId: PlayerId, edgeId: EdgeI
   if (!player) return false;
   if (player.remainingRoads <= 0) return false;
 
+  // 交易と蛮族イベント「地震」: 損傷した自分の道を全て修理するまで追加の道を建てられない（CN3089 p5）。
+  if (Object.values(state.edges).some(e => e.road?.playerId === playerId && e.road.damaged)) return false;
+
   const edge = state.edges[edgeId];
   if (!edge) return false;
   if (edge.road != null) return false;
@@ -58,8 +68,9 @@ export function canBuildRoad(state: GameState, playerId: PlayerId, edgeId: EdgeI
   // 道は陸に面した辺のみ（航海者: 純粋な海上の辺には置けない）。基本ゲームは常に true。
   if (!isLandEdge(edge, state.vertices, state.tiles)) return false;
 
-  // セットアップ or 街道建設カード使用中は資源コスト不要
-  const freeRoad = isSetupPhase(state) || state.roadBuildingRoadsRemaining > 0;
+  // セットアップ or 街道建設カード使用中 or 中立コマ（Catan for Two）は資源コスト不要
+  const freeRoad = isSetupPhase(state) || state.roadBuildingRoadsRemaining > 0
+    || isTb2NeutralBuilder(state, playerId);
   if (!freeRoad && !hasEnoughResources(player.hand, BUILD_COSTS.road)) return false;
 
   // セットアップ中は「直前に置いた開拓地」に接続する道のみ許可（標準ルール）。
@@ -246,7 +257,8 @@ export function moveShip(
 /** 道を建設して新しい GameState を返す（バリデーション済み前提）。 */
 export function buildRoad(state: GameState, playerId: PlayerId, edgeId: EdgeId): GameState {
   const player = state.players[playerId]!;
-  const freeRoad = isSetupPhase(state) || state.roadBuildingRoadsRemaining > 0;
+  const freeRoad = isSetupPhase(state) || state.roadBuildingRoadsRemaining > 0
+    || isTb2NeutralBuilder(state, playerId);
   const newHand = freeRoad ? player.hand : deductCost(player.hand, BUILD_COSTS.road);
   const newBank = freeRoad ? state.bank : returnToBank(state.bank, BUILD_COSTS.road);
 
@@ -294,13 +306,17 @@ export function canBuildSettlement(
   if (state.noIslandSettlement && !isHomeIslandVertex(state, vertexId)) return false;
   // S7「海賊の島々」: 海賊要塞の頂点には（奪取前は）開拓地を建てられない（攻撃で奪取する）。
   if (state.fortresses && Object.values(state.fortresses).some(f => !f.captured && f.vertexId === vertexId)) return false;
+  // 交易と蛮族イベント「地震」: 損傷した道（誰のものでも）に隣接する交差点には開拓地を建てられない（CN3089 p5）。
+  if (vertex.adjacentEdgeIds.some(eid => state.edges[eid]?.road?.damaged === true)) return false;
 
   if (!isDistanceRuleOk(vertex, state.vertices)) return false;
 
   const setup = isSetupPhase(state);
   // 航海者: 初期配置は本島のみ（新島へは航海で渡る）。基本ゲームは無制限。
   if (setup && !isHomeIslandVertex(state, vertexId)) return false;
-  if (!setup && !hasEnoughResources(player.hand, BUILD_COSTS.settlement)) return false;
+  // 中立コマ（Catan for Two）は無償（それ以外は MAIN で資源コスト必要）。
+  if (!setup && !isTb2NeutralBuilder(state, playerId)
+    && !hasEnoughResources(player.hand, BUILD_COSTS.settlement)) return false;
 
   // MAIN フェーズ: 自分の道 or 船への接続が必要（航海者: 船でも開拓地を建てられる）。
   if (!setup) {
@@ -319,9 +335,9 @@ export function buildSettlement(
   state: GameState, playerId: PlayerId, vertexId: VertexId,
 ): GameState {
   const player = state.players[playerId]!;
-  const setup = isSetupPhase(state);
-  const newHand = setup ? player.hand : deductCost(player.hand, BUILD_COSTS.settlement);
-  const newBank = setup ? state.bank : returnToBank(state.bank, BUILD_COSTS.settlement);
+  const free = isSetupPhase(state) || isTb2NeutralBuilder(state, playerId);
+  const newHand = free ? player.hand : deductCost(player.hand, BUILD_COSTS.settlement);
+  const newBank = free ? state.bank : returnToBank(state.bank, BUILD_COSTS.settlement);
 
   return {
     ...state,

@@ -53,7 +53,12 @@ export function computeDiceProduction(
       const vertex = state.vertices[vid];
       if (!vertex?.building) continue;
       const { playerId, type } = vertex.building;
-      const amount = type === 'city' ? 2 : 1;
+      // 交易と蛮族「Catan for Two」: 中立プレイヤーの開拓地は資源を受け取らない（CN3089 p7）。
+      // 需要にも算入しない——算入すると affectedPids/totalDemand が中立の「幻の需要」で膨らみ、
+      // バンク枯渇判定（複数人不足で全没収／単独例外の消失）が誤発動して実プレイヤーの配布がズレる。
+      if (state.players[playerId]?.type === 'neutral') continue;
+      // 交易と蛮族イベント「疫病(EPIDEMIC)」: このターンの生産は都市も資源1枚のみ（CN3089 p5）。
+      const amount = type === 'city' && !state.tbEpidemic ? 2 : 1;
       demand[resource][playerId] = (demand[resource][playerId] ?? 0) + amount;
     }
   }
@@ -112,6 +117,24 @@ export function computeGoldPicks(
       const amount = building.type === 'city' ? 2 : 1;
       picks[building.playerId] = (picks[building.playerId] ?? 0) + amount;
     }
+  }
+  return picks;
+}
+
+/**
+ * 「供給から任意資源を選ぶ枚数」(rawPicks) をバンク総在庫で頭打ちする（playerOrder 順に配分）。
+ * 全体の選択枚数がバンクを超えて手詰まりになるのを防ぐ。GOLD フェーズ（金タイル産出）と
+ * 交易と蛮族イベント（豊作の年/穏やかな海/馬上槍試合）で共用。
+ */
+export function capPicksByBank(
+  state: GameState,
+  rawPicks: Record<string, number>,
+): Record<string, number> {
+  let bankLeft = RESOURCE_TYPES.reduce((s, r) => s + state.bank[r], 0);
+  const picks: Record<string, number> = {};
+  for (const pid of state.playerOrder) {
+    const capped = Math.min(rawPicks[pid] ?? 0, bankLeft);
+    if (capped > 0) { picks[pid] = capped; bankLeft -= capped; }
   }
   return picks;
 }

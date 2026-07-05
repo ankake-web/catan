@@ -4,7 +4,7 @@
 
 import type { GameState, PlayerId, EdgeId, VertexId } from '../types';
 import {
-  VP_TABLE, LONGEST_ROAD_MIN, LARGEST_ARMY_MIN,
+  VP_TABLE, LONGEST_ROAD_MIN, LARGEST_ARMY_MIN, STRONGEST_PORTS_MIN,
 } from '../constants';
 
 // ============================================================
@@ -33,7 +33,19 @@ export function calcVP(state: GameState, playerId: PlayerId): number {
   vp += Math.floor(((state.cloth ?? {})[playerId] ?? 0) / 2); // 航海者 S6: 織物2枚=1VP（公開）
   vp += player.defenderVP ?? 0; // 騎士と商人: 蛮族撃退の守護者VP
   vp += ckProgressVP(state, playerId); // 進歩カード(印刷/立憲)＋商人コマ
+  if (state.strongestPortsHolder === playerId) vp += VP_TABLE.strongestPorts; // 交易と蛮族「強き港」タイル
 
+  return vp;
+}
+
+/** 交易と蛮族「強き港」: このプレイヤーの「港上の建物」のVP合計（開拓地1・都市2）。港=頂点に harborType がある。 */
+export function calcPortBuildingVp(state: GameState, playerId: PlayerId): number {
+  let vp = 0;
+  for (const vertex of Object.values(state.vertices)) {
+    if (vertex.harborType == null) continue;
+    if (vertex.building?.playerId !== playerId) continue;
+    vp += buildingVp(vertex.building);
+  }
   return vp;
 }
 
@@ -88,6 +100,7 @@ export function calcPublicVP(state: GameState, playerId: PlayerId): number {
   vp += Math.floor(((state.cloth ?? {})[playerId] ?? 0) / 2); // 航海者 S6: 織物2枚=1VPも公開
   vp += player.defenderVP ?? 0; // 守護者VPも公開情報
   vp += ckProgressVP(state, playerId); // 進歩カード恒久VP・商人コマも公開
+  if (state.strongestPortsHolder === playerId) vp += VP_TABLE.strongestPorts; // 強き港タイルも公開情報
 
   return vp;
 }
@@ -185,25 +198,30 @@ export function calcLongestRoad(state: GameState, playerId: PlayerId): number {
  *   D) maxLen < LONGEST_ROAD_MIN → 場外（null）。
  */
 export function updateLongestRoad(state: GameState): GameState {
+  // 交易と蛮族「Catan for Two」: 中立プレイヤーも最長交易路タイルの保持候補（CN3089 p7:
+  // "It is possible for a neutral player to receive the Longest Route tile."）。
+  // 判定・遷移則は実プレイヤーと同一で、候補集合に中立2人を加えるだけ（他変種では空）。
+  const candidates: PlayerId[] = [...state.playerOrder, ...(state.tbNeutralPlayerIds ?? [])];
+
   // 航海者: 最長交易路タイルを使わないシナリオ（S6 織物 / S7 海賊の島々）では誰も保持しない。
   // 長さ自体は表示用に保持しつつ、ボーナス保持者は常に null・全員 hasLongestRoad=false。
   if (state.useLongestRoute === false) {
     let ns = state;
-    for (const pid of state.playerOrder) {
+    for (const pid of candidates) {
       ns = {
         ...ns,
-        players: { ...ns.players, [pid]: { ...ns.players[pid]!, longestRoadLength: calcLongestRoad(state, pid as PlayerId), hasLongestRoad: false } },
+        players: { ...ns.players, [pid]: { ...ns.players[pid]!, longestRoadLength: calcLongestRoad(state, pid), hasLongestRoad: false } },
       };
     }
     return { ...ns, longestRoadHolder: null };
   }
 
-  // 全プレイヤーの実際の最長道路長を計算
+  // 全プレイヤー（＋中立）の実際の最長道路長を計算
   const lengths: Record<string, number> = {};
   let newState = state;
 
-  for (const pid of state.playerOrder) {
-    const length = calcLongestRoad(state, pid as PlayerId);
+  for (const pid of candidates) {
+    const length = calcLongestRoad(state, pid);
     lengths[pid] = length;
     newState = {
       ...newState,
@@ -215,7 +233,7 @@ export function updateLongestRoad(state: GameState): GameState {
   }
 
   const currentHolder = state.longestRoadHolder;
-  const maxLen = state.playerOrder.reduce((m, pid) => Math.max(m, lengths[pid] ?? 0), 0);
+  const maxLen = candidates.reduce((m, pid) => Math.max(m, lengths[pid] ?? 0), 0);
 
   let newHolder: PlayerId | null;
 
@@ -227,10 +245,10 @@ export function updateLongestRoad(state: GameState): GameState {
     newHolder = currentHolder;
   } else {
     // 最長者を特定: maxLen を持つプレイヤー一覧
-    const topPlayers = state.playerOrder.filter(pid => (lengths[pid] ?? 0) === maxLen);
+    const topPlayers = candidates.filter(pid => (lengths[pid] ?? 0) === maxLen);
     if (topPlayers.length === 1) {
       // 単独最長 → 獲得（保持者が更新されるか保持者がいなかった場合）
-      newHolder = topPlayers[0] as PlayerId;
+      newHolder = topPlayers[0]!;
     } else {
       // 複数同点 → 場外
       newHolder = null;
@@ -238,7 +256,7 @@ export function updateLongestRoad(state: GameState): GameState {
   }
 
   // ボーナスフラグを更新
-  for (const pid of state.playerOrder) {
+  for (const pid of candidates) {
     newState = {
       ...newState,
       players: {
@@ -289,7 +307,11 @@ export function updateLargestArmy(state: GameState): GameState {
     for (const pid of state.playerOrder) {
       if (pid === currentHolder) continue;
       const k = state.players[pid]?.knightsPlayed ?? 0;
-      if (k > maxKnights) { maxKnights = k; newHolder = pid as PlayerId; }
+      // 奪取側は常に LARGEST_ARMY_MIN(3) 以上が必要。通常は保持者≥3のため自明に満たすが、
+      // 交易と蛮族「Catan for Two」の騎士カード捨て（トークン化）で保持者が3枚未満に減った
+      // 場合でも、2枚以下の相手がタイルを受け取れないようにする（タイルの原文は
+      // 「最初に3枚出した人が獲得／他の人がより多く出したら移動」）。
+      if (k > maxKnights && k >= LARGEST_ARMY_MIN) { maxKnights = k; newHolder = pid as PlayerId; }
     }
   }
 
@@ -307,6 +329,52 @@ export function updateLargestArmy(state: GameState): GameState {
   }
 
   return { ...newState, largestArmyHolder: newHolder };
+}
+
+// ============================================================
+// 強き港（Strongest Ports・交易と蛮族「Harbors of Catan」変種）
+// ============================================================
+
+/**
+ * Strongest Ports タイル(+2VP)の保持者を更新した GameState を返す。
+ * strongestPorts が無効なシナリオでは no-op（保持者は常に未設定）。
+ *
+ * 公式ルール（最大騎士団と同型・最低3VP）:
+ *   - 最初に「港上の建物のVP合計」が STRONGEST_PORTS_MIN(3) 以上になったプレイヤーが獲得。
+ *   - その後は、他プレイヤーが現保持者を「上回った（strictly more）」場合のみ移動。同数では移動しない。
+ */
+export function updateStrongestPorts(state: GameState): GameState {
+  if (!state.strongestPorts) return state;
+
+  const portVp: Record<string, number> = {};
+  for (const pid of state.playerOrder) portVp[pid] = calcPortBuildingVp(state, pid as PlayerId);
+
+  const currentHolder = state.strongestPortsHolder ?? null;
+  let newHolder = currentHolder;
+
+  if (currentHolder === null) {
+    // 未取得: MIN 以上の最多者が獲得（単独最多のみ・同点は取得なし＝現保持者なし維持）。
+    let best = STRONGEST_PORTS_MIN - 1;
+    let leader: PlayerId | null = null;
+    let tie = false;
+    for (const pid of state.playerOrder) {
+      const v = portVp[pid] ?? 0;
+      if (v > best) { best = v; leader = pid as PlayerId; tie = false; }
+      else if (v === best && v >= STRONGEST_PORTS_MIN) { tie = true; }
+    }
+    newHolder = tie ? null : leader;
+  } else {
+    // 保持者あり: 他プレイヤーが保持者を strictly 上回ったときのみ移動。
+    const holderVp = portVp[currentHolder] ?? 0;
+    let best = holderVp;
+    for (const pid of state.playerOrder) {
+      if (pid === currentHolder) continue;
+      const v = portVp[pid] ?? 0;
+      if (v > best) { best = v; newHolder = pid as PlayerId; }
+    }
+  }
+
+  return { ...state, strongestPortsHolder: newHolder };
 }
 
 // ============================================================

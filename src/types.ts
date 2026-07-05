@@ -143,6 +143,9 @@ export interface ProgressCard {
 
 export interface Road {
   readonly playerId: PlayerId;
+  /** 交易と蛮族イベント「地震」: 横倒し（損傷）状態。修理(REPAIR_ROAD)するまで自分の道の追加建設不可・
+   *  隣接交差点への開拓地建設不可。最長交易路には損傷中も算入する（CN3089 p5）。 */
+  readonly damaged?: boolean;
 }
 
 // 航海者拡張: 船（海上の道）。
@@ -166,7 +169,9 @@ export interface Harbor {
 
 export type PlayerId = 'player1' | 'player2' | 'player3' | 'player4';
 export type PlayerColor = 'red' | 'blue' | 'purple' | 'orange';
-export type PlayerType = 'human' | 'ai';
+// 'neutral' = 交易と蛮族「Catan for Two」の中立プレイヤー（盤上のコマだけを持つ想像上のプレイヤー。
+// players には実体を持つが playerOrder に入らず、手番・生産・捨て札・勝利判定の対象外）。
+export type PlayerType = 'human' | 'ai' | 'neutral';
 // AIの強さ。内部4段階だが、UIは「弱い/普通/強い」の3択を normal/strong/elite に割り当てる
 //（'weak'=旧ランダム級は現在UI非公開。テスト互換のため型としては残す）。'elite' が最上位。
 export type AiDifficulty = 'weak' | 'normal' | 'strong' | 'elite';
@@ -246,6 +251,11 @@ export type TurnPhase =
   | 'GOLD'        // 航海者: 金タイル産出の資源選択待ち（DISCARD と同様の多人数解決）
   | 'CITY_DOWNGRADE' // 騎士と商人: 蛮族敗北で格下げする都市の選択待ち（DISCARD と同様の多人数解決）
   | 'PROGRESS_DISCARD' // 騎士と商人: 進歩カード上限超過（5枚目）で捨てる1枚の選択待ち（多人数解決）
+  | 'EVENT_GIVE'    // 交易と蛮族イベント「良き隣人」: 各自が左隣へ渡す資源1枚の選択待ち（多人数解決）
+  | 'EVENT_HELPFUL' // 交易と蛮族イベント「親切な隣人」: 最多VP者が渡す資源と相手の選択待ち（多人数解決）
+  | 'EVENT_STEAL'   // 交易と蛮族イベント「衝突/交易優位」: タイル保持者が奪う相手の選択待ち
+  | 'EVENT_DAMAGE'  // 交易と蛮族イベント「地震」: 各自が損傷させる自分の道の選択待ち（多人数解決）
+  | 'TB_NEUTRAL'  // 交易と蛮族「Catan for Two」: 手番プレイヤーが中立の道/開拓地を無償配置する待ち
   | 'TRADE_BUILD' // 交易・建設
   | 'END';
 
@@ -319,12 +329,50 @@ export interface ScenarioRules {
   startingRoads?: number;
   /** 船を使わない基本ゲーム（既定false）。オアシス＝true（霧/砂漠は道だけで探索する）。 */
   noShips?: boolean;
+  /** 交易と蛮族「強き港(Harbors of Catan / Strongest Ports)」変種を有効化（既定false）。
+   *  港上の建物のVP合計が最多のプレイヤーに Strongest Ports タイル(+2VP)を与える。勝利目標は+1（例:11）。 */
+  strongestPorts?: boolean;
+  /** 交易と蛮族「親切な盗賊(The Friendly Robber)」変種を有効化（既定false・CN3089 p3）。
+   *  公開VPが2以下のプレイヤーの建物があるヘックスへ盗賊を移動できず、2VP超の相手からしか奪えない。
+   *  合法ヘックスが無い場合は盗賊を砂漠へ。 */
+  friendlyRobber?: boolean;
+  /** 交易と蛮族「イベントカード(Catan Event Cards)」変種を有効化（既定false・CN3089 p4-6）。
+   *  生産フェーズで赤黄ダイスの代わりにイベントデッキの一番上をめくり、イベント効果を解決してから
+   *  カードの数字ディスク値で「資源生産」または「7の解決」を行う。New Year でデッキ再構築。 */
+  eventCards?: boolean;
+  /** 交易と蛮族「Catan for Two（2人用）」変種を有効化（既定false・CN3089 p7）。
+   *  実プレイヤー2人＋中立プレイヤー2人（残り2色）。生産フェーズ×2回・建設のたび中立の道/開拓地を
+   *  無償配置・trade token 経済（Forced Trade / Move Robber）。実プレイヤーは厳密に2人。 */
+  catanForTwo?: boolean;
 }
 
 // 航海者 S5「忘れられた部族」/「宝島」: 海の辺に事前配置されるトークンの種別。
 //   vp=VPトークン(+1点) / dev=開発カード(今ターン購入扱い) / harbor=港(沿岸の自分の建物隣に設置)
 //   treasure=財宝（宝島・船で到達すると資源2枚 or 開発カード1枚を獲得）。
 export type EdgeTokenKind = 'vp' | 'dev' | 'harbor' | 'treasure';
+
+// ---- 交易と蛮族「イベントカード(Catan Event Cards)」変種（CN3089 p4-6） ----
+// 13種のイベント。new_year のみ生産数字なし（デッキ再構築専用）。
+export type TbEventType =
+  | 'beautiful_day'    // 良き日: 効果なし・通常生産
+  | 'calm_seas'        // 穏やかな海: 港上の建物「数」最多者が任意資源1枚
+  | 'conflict'         // 衝突: 最大騎士力タイル保持者（無ければ騎士カード最多の単独者）が無作為1枚強奪
+  | 'earthquake'       // 地震: 各自 自分の道1本を損傷（修理まで道建設不可等）
+  | 'epidemic'         // 疫病: 今回の生産は都市も資源1枚のみ
+  | 'good_neighbors'   // 良き隣人: 各自 左隣へ任意資源1枚
+  | 'helpful_neighbor' // 親切な隣人: VP最多者が「より少ない者」へ任意資源1枚
+  | 'new_year'         // 新年: デッキ再構築→上を1枚めくって通常解決
+  | 'plentiful_year'   // 豊作の年: 各自 供給から任意資源1枚
+  | 'robber_attacks'   // 盗賊の襲撃: 7として解決（捨て札＋盗賊起動）
+  | 'robber_flees'     // 盗賊の逃走: 盗賊を砂漠へ（奪わない）。砂漠が無ければ盤外へ
+  | 'tournament'       // 馬上槍試合: 表向き騎士カード最多者が任意資源1枚
+  | 'trade_advantage'; // 交易優位: 最長交易路タイル保持者が無作為1枚強奪
+
+export interface TbEventCard {
+  readonly event: TbEventType;
+  /** 生産数字ディスク(2-12)。new_year のみ null。 */
+  readonly number: number | null;
+}
 
 // ---- GameState ----
 
@@ -403,6 +451,9 @@ export interface GameState {
 
   longestRoadHolder: PlayerId | null;
   largestArmyHolder: PlayerId | null;
+  // 交易と蛮族「強き港」: Strongest Ports タイル(+2VP)の現保持者。港建物VP最多（最低3VP・同点は現保持者優先）。
+  // strongestPorts が有効なシナリオのみ設定。null=未取得。
+  strongestPortsHolder?: PlayerId | null;
 
   // 勝利に必要な勝利点。シナリオ別（基本=10／航海者の大きい盤=13）。未設定は VP_TABLE.target。
   victoryTarget?: number;
@@ -429,6 +480,49 @@ export interface GameState {
   numberHexOnly?: boolean;        // 開拓地・盗賊を数字ヘックスのみに制限（既定false。S5=true）
   noIslandSettlement?: boolean;   // 小島（本島以外）に開拓地を建てられない（既定false。S6=true）
   noShips?: boolean;              // 船を一切使わない盤か（既定false。オアシス=true。海タイルはあるが船UIを出さない）
+  strongestPorts?: boolean;       // 交易と蛮族「強き港」変種が有効か（既定false）。ScenarioRules から配線。
+  friendlyRobber?: boolean;       // 交易と蛮族「親切な盗賊」変種が有効か（既定false）。ScenarioRules から配線。
+
+  // ---- 交易と蛮族「イベントカード(Catan Event Cards)」変種（CN3089 p4-6） ----
+  tbEventCards?: boolean;         // 変種が有効か（既定false）。ScenarioRules.eventCards から配線。
+  // イベントデッキ（先頭=一番上）。作成手順: New Year を除く36枚シャッフル→5枚を底に→その上に
+  // New Year→残り31枚を上に積む。LAN では中身（並び順）を秘匿し枚数のみ配信（mask.ts）。
+  tbEventDeck?: TbEventCard[];
+  // 直近の ROLL_DICE でめくったカード（表示・履歴用）。New Year 再構築後にめくった通常カードが入る。
+  tbLastEventCard?: TbEventCard | null;
+  // 直近の ROLL_DICE で New Year が出てデッキを再構築したか（演出用）。
+  tbNewYearRebuilt?: boolean;
+  // イベントの選択解決（EVENT_* / GOLD）が全て終わった後に実行する生産の数字。null=保留なし。
+  tbPendingEventNumber?: number | null;
+  // イベント「疫病(EPIDEMIC)」: このターンの生産で都市も資源1枚のみ（END_TURN でリセット）。
+  tbEpidemic?: boolean;
+  // イベント「良き隣人(GOOD NEIGHBORS)」: 未解決の giver → 受取人（左隣）。全員解決で生産へ。
+  tbPendingEventGive?: Record<string, PlayerId>;
+  // イベント「親切な隣人(HELPFUL NEIGHBOR)」: 未解決の giver（公開VP最多者）一覧。
+  tbPendingEventHelpful?: PlayerId[];
+  // イベント「衝突(CONFLICT)/交易優位(TRADE ADVANTAGE)」: 奪う側と任意性（衝突の騎士カード最多者は may）。
+  tbPendingEventSteal?: { playerId: PlayerId; optional: boolean } | null;
+  // イベント「地震(EARTHQUAKE)」: 損傷させる道が未選択のプレイヤー一覧。
+  tbPendingEventDamage?: PlayerId[];
+
+  // ---- 交易と蛮族「Catan for Two（2人用）」変種（CN3089 p7） ----
+  tbCatanForTwo?: boolean;        // 変種が有効か（既定false）。ScenarioRules.catanForTwo から配線。
+  // 中立プレイヤー（残り2色）。players に実体（type:'neutral'）を持つが playerOrder には入らない。
+  tbNeutralPlayerIds?: PlayerId[];
+  // 実プレイヤー別の trade token 保有数（公開情報。マスク不要）。
+  tbTradeTokens?: Record<string, number>;
+  // trade token の供給残数（総数20 − 初期配布5×2 = 10 から増減）。
+  tbTradeTokenBank?: number;
+  // TB_NEUTRAL フェーズで配置待ちの中立コマ種別（null=待ちなし）。
+  tbNeutralPending?: 'road' | 'settlement' | null;
+  // このターンに trade token を消費したか（Forced Trade / Move Robber は合わせて1ターン1回）。
+  tbTradeTokenSpentThisTurn?: boolean;
+  // このターンに騎士カード捨て→トークン2 を使ったか（1ターン1回）。
+  tbKnightTokenThisTurn?: boolean;
+  // このターンに解決済みの生産フェーズ数(0..2)。2回終えるまでアクションフェーズへ進まない。
+  tbRollsDone?: number;
+  // 1回目の生産フェーズの合計出目（2回目はこれと異なる合計まで振り直し）。END_TURN でリセット。
+  tbFirstRollTotal?: number | null;
   maxCities?: number;             // 1プレイヤーの都市建設上限（既定なし。大カタン=8）
   // 大カタン「抜けている数値トークン」: 残りの供給枚数。0になると以後は本島の数字を抜いて小島へ配る。
   numberTokenSupply?: number;
@@ -514,6 +608,9 @@ export interface ProgressChoice {
   merchantTileId?: TileId;
   // クレーン: 1段安く改善するトラック（交易/政治/科学）。
   craneTrack?: CkTrack;
+  // クレーン: Lv4到達でメトロポリス化する自分の都市の頂点ID（未指定/不正なら先頭へ自動）。
+  //   改善ボタン(BUILD_IMPROVEMENT.metropolisVertexId)と同じ役割を、クレーン経由の改善に与える。
+  craneMetropolisVertexId?: VertexId;
   // 僧正(bishop): 盗賊を置くタイルのID（隣接する全相手から1枚ずつ奪う）。
   bishopTileId?: TileId;
   // 外交官(diplomat): 撤去する相手の「端の道」の辺ID。
@@ -551,6 +648,16 @@ export type Action =
   | { type: 'BUILD_SHIP';          edgeId: EdgeId }
   | { type: 'MOVE_SHIP';           fromEdgeId: EdgeId; toEdgeId: EdgeId }
   | { type: 'CHOOSE_GOLD';         playerId: PlayerId; resources: Partial<ResourceHand> }
+  | { type: 'CHOOSE_EVENT_GIVE';   playerId: PlayerId; resource: ResourceType }                       // T&Bイベント「良き隣人」: 左隣へ渡す資源
+  | { type: 'CHOOSE_EVENT_HELPFUL'; playerId: PlayerId; resource: ResourceType; toPlayerId: PlayerId } // T&Bイベント「親切な隣人」: 渡す資源と相手
+  | { type: 'CHOOSE_EVENT_STEAL';  targetPlayerId: PlayerId | null }                                  // T&Bイベント「衝突/交易優位」: 奪う相手（nullは任意時の見送り）
+  | { type: 'CHOOSE_EVENT_DAMAGE'; playerId: PlayerId; edgeId: EdgeId }                               // T&Bイベント「地震」: 損傷させる自分の道
+  | { type: 'REPAIR_ROAD';         edgeId: EdgeId }                                                   // T&Bイベント「地震」: 損傷道の修理（レンガ1木1）
+  | { type: 'TB_NEUTRAL_ROAD';       owner: PlayerId; edgeId: EdgeId }     // T&B 2人用: 中立の道を無償配置（手番プレイヤーが owner と位置を選ぶ）
+  | { type: 'TB_NEUTRAL_SETTLEMENT'; owner: PlayerId; vertexId: VertexId } // T&B 2人用: 中立の開拓地を無償配置
+  | { type: 'TB_FORCED_TRADE';       give: Partial<ResourceHand> }         // T&B 2人用: トークン消費・強制交易（相手の無作為2枚⇄自分の任意2枚）
+  | { type: 'TB_MOVE_ROBBER' }                                             // T&B 2人用: トークン消費・盗賊を砂漠へ（奪わない）
+  | { type: 'TB_DISCARD_KNIGHT' }                                          // T&B 2人用: 表向き騎士カード1枚を捨てて trade token 2
   | { type: 'BUILD_SETTLEMENT';    vertexId: VertexId }
   | { type: 'BUILD_CITY';          vertexId: VertexId }
   | { type: 'BUILD_WONDER';        wonderId: string } // 航海者 S8: 不思議のレベルを1段建設（必要ならクレーム）

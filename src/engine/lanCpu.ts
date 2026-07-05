@@ -16,8 +16,9 @@
 
 import type { GameState, Action, PlayerId } from '../types';
 import { chooseAction, evaluateTradeOffer, chooseStealTarget } from './ai';
-import { discardCount } from './robber';
+import { discardCount, getRobberMoveTargets } from './robber';
 import { canBuildSettlement, canBuildRoad } from './actions';
+import { tbEventStealTargets } from './tbEvents';
 
 export interface CpuStep {
   readonly pid: PlayerId;
@@ -106,6 +107,23 @@ export function nextCpuAction(state: GameState, rng: () => number = Math.random)
     return null; // 人間の選択待ち
   }
 
+  // ---- 交易と蛮族「イベントカード」: イベント選択（手番に関わらず対象 CPU を1人ずつ処理）----
+  if (state.phase === 'MAIN'
+    && (state.turnPhase === 'EVENT_GIVE' || state.turnPhase === 'EVENT_HELPFUL'
+      || state.turnPhase === 'EVENT_STEAL' || state.turnPhase === 'EVENT_DAMAGE')) {
+    const pendingIds: PlayerId[] =
+      state.turnPhase === 'EVENT_GIVE' ? Object.keys(state.tbPendingEventGive ?? {}) as PlayerId[]
+      : state.turnPhase === 'EVENT_HELPFUL' ? (state.tbPendingEventHelpful ?? [])
+      : state.turnPhase === 'EVENT_STEAL' ? (state.tbPendingEventSteal ? [state.tbPendingEventSteal.playerId] : [])
+      : (state.tbPendingEventDamage ?? []);
+    const epid = pendingIds.find(p => isCpu(state, p));
+    if (epid) {
+      const action = chooseAction(state, epid, { rng });
+      if (action) return { pid: epid, action };
+    }
+    return null; // 人間の選択待ち
+  }
+
   // ---- 手番が CPU なら通常の一手（初期配置 / ダイス / 盗賊 / 建設等）----
   const cur = state.playerOrder[state.currentPlayerIndex];
   if (cur && isCpu(state, cur)) {
@@ -138,9 +156,9 @@ export function cpuFallbackAction(state: GameState, pid: PlayerId): Action {
   if (state.turnPhase === 'PRE_ROLL') return { type: 'ROLL_DICE' };
   if (state.turnPhase === 'ROBBER') {
     const robberTile = Object.values(state.tiles).find(t => t.hasRobber)?.id;
-    // 強盗は陸タイルのみ（海を除外）。
-    const tileId = Object.keys(state.tiles).find(t => t !== robberTile && state.tiles[t]?.type !== 'sea') ?? robberTile!;
-    // 強奪は必須: 移動先に手札持ちの相手がいれば選ぶ（chooseStealTarget が 0枚を除外・不在なら null）。
+    // 合法な移動先（陸のみ・数字限定・親切な盗賊の保護/砂漠フォールバック込み）から先頭を選ぶ。
+    const tileId = getRobberMoveTargets(state)[0] ?? robberTile!;
+    // 強奪は必須: 移動先に手札持ちの相手がいれば選ぶ（chooseStealTarget が 0枚・保護対象を除外・不在なら null）。
     return { type: 'MOVE_ROBBER', tileId, stealFromPlayerId: chooseStealTarget(state, tileId, pid) };
   }
   if (state.turnPhase === 'DISCARD') {
@@ -149,6 +167,35 @@ export function cpuFallbackAction(state: GameState, pid: PlayerId): Action {
   if (state.turnPhase === 'GOLD') {
     // owed な対象本人の選択を生成（chooseAction が GOLD を処理）。最終手段として銀1枚。
     return chooseAction(state, pid) ?? { type: 'CHOOSE_GOLD', playerId: pid, resources: { wool: 1 } };
+  }
+  // 交易と蛮族「イベントカード」: イベント選択（chooseAction が各フェーズを処理）。
+  if (state.turnPhase === 'EVENT_GIVE' || state.turnPhase === 'EVENT_HELPFUL'
+    || state.turnPhase === 'EVENT_DAMAGE') {
+    const a = chooseAction(state, pid);
+    if (a) return a;
+  }
+  if (state.turnPhase === 'EVENT_STEAL') {
+    const a = chooseAction(state, pid);
+    if (a) return a;
+    // 保険: 必須（タイル保持者）の場合でも合法になるよう、対象がいれば先頭を奪う。
+    const targets = tbEventStealTargets(state);
+    return targets.length > 0
+      ? { type: 'CHOOSE_EVENT_STEAL', targetPlayerId: targets[0]! }
+      : { type: 'CHOOSE_EVENT_STEAL', targetPlayerId: null };
+  }
+  // 交易と蛮族「Catan for Two」: 中立コマの配置待ち（エンジンは合法手がある時だけこのフェーズに入る）。
+  if (state.turnPhase === 'TB_NEUTRAL') {
+    const a = chooseAction(state, pid);
+    if (a) return a;
+    for (const n of state.tbNeutralPlayerIds ?? []) {
+      if (state.tbNeutralPending === 'settlement') {
+        const v = Object.keys(state.vertices).find(vid => canBuildSettlement(state, n, vid));
+        if (v) return { type: 'TB_NEUTRAL_SETTLEMENT', owner: n, vertexId: v };
+      } else {
+        const e = Object.keys(state.edges).find(eid => canBuildRoad(state, n, eid));
+        if (e) return { type: 'TB_NEUTRAL_ROAD', owner: n, edgeId: e };
+      }
+    }
   }
   return { type: 'END_TURN' };
 }

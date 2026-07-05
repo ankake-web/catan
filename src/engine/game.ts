@@ -5,9 +5,15 @@
 import type {
   GameState, Action, PlayerId, ResourceType, DevCard, VertexId, ResourceHand,
 } from '../types';
-import { RESOURCE_TYPES, COMMODITY_TYPES, BUILD_COSTS, DEV_CARD_COUNTS, TILE_RESOURCE_MAP, VP_TABLE } from '../constants';
+import { RESOURCE_TYPES, COMMODITY_TYPES, BUILD_COSTS, DEV_CARD_COUNTS, TILE_RESOURCE_MAP, VP_TABLE, TB_ROAD_REPAIR_COST, TB_EVENT_CARDS_36, TB2_TOKENS_KNIGHT_DISCARD, TB2_FORCED_TRADE_GIVE, TB2_FORCED_TRADE_TAKE } from '../constants';
 import type { CommodityType } from '../types';
-import { rollDice, distributeResources, computeGoldPicks } from './dice';
+import { rollDice, distributeResources, computeGoldPicks, capPicksByBank } from './dice';
+import { buildTbEventDeck, tbApplyEventEffect, tbEventStealTargets } from './tbEvents';
+import {
+  isTbNeutral, tbTwoOpponent, tbSpendCost, tbCanSpendWindow, tbGrantTokens,
+  tbTokensForSettlement, tbNeutralPendingAfterRoad, tbNeutralPendingAfterSettlement,
+  tbTwoAfterRollResolved,
+} from './tbTwo';
 import {
   canBuildRoad, buildRoad,
   canBuildShip, buildShip,
@@ -16,7 +22,7 @@ import {
   canBuildCity, buildCity,
   hasEnoughResources,
 } from './actions';
-import { moveRobber, movePirate, discardResources, stealResource, stealResourceOrCloth, getRobbablePlayerIds, getPirateRobbablePlayerIds, discardCount, robbableCardCount, pirateRobbableCount, findPendingDiscarder } from './robber';
+import { moveRobber, movePirate, discardResources, stealResource, stealResourceOrCloth, getRobbablePlayerIds, getPirateRobbablePlayerIds, discardCount, robbableCardCount, pirateRobbableCount, findPendingDiscarder, getRobberMoveTargets, isFriendlyRobberProtected } from './robber';
 import {
   isCk, applyEventDie, distributeCkProduction,
   canBuildKnight, buildKnight, canActivateKnight, activateKnight, canUpgradeKnight, upgradeKnight,
@@ -25,7 +31,7 @@ import {
   downgradeCity, discardProgressCard,
 } from './citiesKnights';
 import { executeBankTrade, canBankTrade, offerTrade, respondTrade, confirmTrade, cancelTrade } from './trade';
-import { updateLongestRoad, updateLargestArmy, checkVictory, calcVP, victoryTarget } from './scoring';
+import { updateLongestRoad, updateLargestArmy, updateStrongestPorts, checkVictory, calcVP, calcPublicVP, victoryTarget } from './scoring';
 import { newIslandBonusRep, islandRepOf } from './islands';
 import { edgeTileIds } from './board';
 import { revealFogAround, revealPendingNumbers } from './explore';
@@ -111,16 +117,46 @@ export function buildDevDeck(rng: () => number = Math.random): DevCard[] {
  * C&K×航海者コンボ（金タイル入りの盤）でも金が産出するようにする。
  */
 function applyGoldChoicePhase(next: GameState, total: number): GameState {
-  const rawPicks = computeGoldPicks(next, total);
-  let bankLeft = RESOURCE_TYPES.reduce((s, r) => s + next.bank[r], 0);
-  const goldPicks: Record<string, number> = {};
-  for (const pid of next.playerOrder) {
-    const capped = Math.min(rawPicks[pid] ?? 0, bankLeft);
-    if (capped > 0) { goldPicks[pid] = capped; bankLeft -= capped; }
-  }
+  const goldPicks = capPicksByBank(next, computeGoldPicks(next, total));
   return Object.keys(goldPicks).length > 0
     ? { ...next, turnPhase: 'GOLD', pendingGoldChoice: goldPicks }
     : { ...next, turnPhase: 'TRADE_BUILD' };
+}
+
+/**
+ * 基本/航海者: 出目（または交易と蛮族イベントカードの数字ディスク値）の解決。
+ * 7＝捨て札/盗賊、それ以外＝生産→織物→金タイル。ROLL_DICE 本体と、イベントカードの
+ * 選択解決後の再開（tbContinueAfterEvent）の両方から呼ぶ（重複排除＋一貫性）。
+ */
+function resolveBaseRollOutcome(next: GameState, total: number): GameState {
+  if (total === 7) {
+    // S7 海賊の島々では moveFleet が「資源収集前」に略奪して手札を減らしうるため、
+    // 捨て札要否は現在の手札(next)で判定する（詳細は ROLL_DICE 内コメント参照）。
+    const needsDiscard = next.playerOrder.some(p => {
+      const h = next.players[p]!.hand;
+      return RESOURCE_TYPES.reduce((s, r) => s + h[r], 0) >= 8;
+    });
+    // S7 海賊の島々（useRobber=false）: 盗賊不使用。7は手札破棄のみで盗賊移動・盗みは無し。
+    const afterDiscard = next.useRobber === false ? 'TRADE_BUILD' : 'ROBBER';
+    next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : afterDiscard };
+  } else {
+    next = distributeResources({ ...next, turnPhase: 'TRADE_BUILD' }, total);
+    // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
+    next = produceCloth(next, total);
+    // 航海者: 金タイル産出があれば、任意資源の選択待ち(GOLD)へ。無ければ通常どおり TRADE_BUILD。
+    next = applyGoldChoicePhase(next, total);
+  }
+  return checkClothEnd(next); // S6: 織物生産後、5村供給切れなら終了（無い盤では no-op）
+}
+
+/**
+ * 交易と蛮族「イベントカード」: イベント効果の選択解決（EVENT_* / GOLD）が全て終わったら、
+ * 保留しておいたカードの数字ディスク値で生産（または7の解決）へ進む。
+ */
+function tbContinueAfterEvent(next: GameState): GameState {
+  const total = next.tbPendingEventNumber;
+  if (total == null) return { ...next, turnPhase: 'TRADE_BUILD' }; // 保険（通常は必ず数字が保留されている）
+  return resolveBaseRollOutcome({ ...next, tbPendingEventNumber: null }, total);
 }
 
 function resolveCkRollOutcome(next: GameState, total: number): GameState {
@@ -172,6 +208,61 @@ export function applyAction(
       if (state.phase !== 'MAIN') throw new Error('ROLL_DICE: not MAIN phase');
       if (state.turnPhase !== 'PRE_ROLL') throw new Error('ROLL_DICE: not PRE_ROLL');
 
+      // ---- 交易と蛮族「イベントカード」: 赤黄ダイスの代わりにデッキの一番上をめくる ----
+      if (state.tbEventCards) {
+        let deck = state.tbEventDeck ?? [];
+        let rebuilt = false;
+        // New Year（または山札切れ＝保険）→ デッキを作り直してから一番上をめくって通常解決。
+        // New Year はデッキ再構築後の一番上には来ない（底から6枚目に埋まる）ため再帰しない。
+        if (deck.length === 0 || deck[0]!.event === 'new_year') {
+          deck = buildTbEventDeck(TB_EVENT_CARDS_36, rng);
+          rebuilt = true;
+        }
+        const card = deck[0]!;
+        deck = deck.slice(1);
+        const total = card.number!;
+        // lastDiceRoll にはカード数字の2分割を入れ、既存の生産演出/履歴/統計と互換にする
+        // （UI 側は tbLastEventCard を見てダイスの代わりにカードを表示する）。
+        const d1 = Math.min(6, Math.ceil(total / 2));
+        const d2 = total - d1;
+        let next: GameState = {
+          ...state,
+          tbEventDeck: deck,
+          tbLastEventCard: card,
+          tbNewYearRebuilt: rebuilt,
+          lastDiceRoll: [d1, d2],
+          diceRolledThisTurn: true,
+        };
+        // イベント効果を解決（CN3089 p5: 効果 → 数字ディスク値で生産 or 7 の順）。
+        next = tbApplyEventEffect(next, card);
+        // プレイヤーの選択が要る効果は保留フェーズ(EVENT_*/GOLD)へ遷移済み
+        // → 数字の解決は全選択の解決後（CHOOSE_* ハンドラの tbContinueAfterEvent）。
+        if (next.turnPhase !== 'PRE_ROLL') return { ...next, tbPendingEventNumber: total };
+        return resolveBaseRollOutcome(next, total);
+      }
+
+      // ---- 交易と蛮族「Catan for Two」: 生産フェーズを続けて2回行う（CN3089 p7） ----
+      // 1回目の出目解決（7の捨て札/盗賊まで）が完全に終わると tbTwoAfterRollResolved が
+      // turnPhase を PRE_ROLL へ戻し、2回目の ROLL_DICE を受ける。2回目は合計値が1回目と
+      // 異なるまでエンジン内で振り直す（公式: "re-roll until you have a different result"）。
+      // ※イベントカード/C&K との併用時の生産2回制は未実装（本変種は基本盤の単独シナリオのみ）。
+      if (state.tbCatanForTwo && !isCk(state)) {
+        const rollsDone = state.tbRollsDone ?? 0;
+        let [d1, d2] = rollDice(rng);
+        if (rollsDone >= 1 && state.tbFirstRollTotal != null) {
+          while (d1 + d2 === state.tbFirstRollTotal) [d1, d2] = rollDice(rng);
+        }
+        const total = d1 + d2;
+        const next: GameState = {
+          ...state,
+          lastDiceRoll: [d1, d2],
+          diceRolledThisTurn: true,
+          tbRollsDone: rollsDone + 1,
+          ...(rollsDone === 0 ? { tbFirstRollTotal: total } : {}),
+        };
+        return tbTwoAfterRollResolved(resolveBaseRollOutcome(next, total));
+      }
+
       // 騎士と商人: 錬金術師(alchemist)で目を事前指定済みなら、それを使い消費する。
       const forced = isCk(state) ? (state.alchemistForcedDice ?? null) : null;
       const [d1, d2] = forced ?? rollDice(rng);
@@ -189,30 +280,11 @@ export function applyAction(
       }
 
       // S7 海賊の島々: ダイス後・資源収集前に海賊艦隊が「小さい目」の数だけ前進し、隣接建物から略奪。
+      // （捨て札要否は略奪後の手札で判定する必要があるため、moveFleet は resolveBaseRollOutcome より前）
       if (state.pirateFleet) next = moveFleet(next, Math.min(d1, d2), rng);
 
-      if (total === 7) {
-        // S7 海賊の島々では上の moveFleet が「資源収集前」に略奪して手札を減らしうる。
-        // 捨て札要否は略奪後の手札(next)で判定する（state だと8→7に減った人がいても DISCARD に
-        // 入り、実際は誰も捨てる必要が無く手詰まりになる）。非艦隊シナリオでは next===state で不変。
-        const needsDiscard = next.playerOrder.some(p => {
-          const h = next.players[p]!.hand;
-          return RESOURCE_TYPES.reduce((s, r) => s + h[r], 0) >= 8;
-        });
-        // S7 海賊の島々（useRobber=false）: 盗賊不使用。7は手札破棄のみで盗賊移動・盗みは無し。
-        const afterDiscard = state.useRobber === false ? 'TRADE_BUILD' : 'ROBBER';
-        next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : afterDiscard };
-      } else {
-        next = distributeResources({ ...next, turnPhase: 'TRADE_BUILD' }, total);
-        // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
-        next = produceCloth(next, total);
-        // 航海者: 金タイル産出があれば、任意資源の選択待ち(GOLD)へ。無ければ通常どおり TRADE_BUILD。
-        // 選択枚数のバンク頭打ち（ソフトロック回避）は applyGoldChoicePhase に集約（CK経路と共通）。
-        next = applyGoldChoicePhase(next, total);
-      }
-
-      next = checkClothEnd(next); // S6: 織物生産後、5村供給切れなら終了（無い盤では no-op）
-      return next;
+      // 7の捨て札/盗賊 or 生産→織物→金タイル（T&Bイベントカード経路と共通の resolveBaseRollOutcome へ集約）。
+      return resolveBaseRollOutcome(next, total);
     }
 
     // ----------------------------------------------------------
@@ -250,10 +322,284 @@ export function applyAction(
         pendingGoldChoice: nextPending,
       };
       // 全員の選択が済んだら、手番プレイヤーの交易・建設フェーズへ進む。
+      // T&B イベントカードのイベント効果（豊作の年/穏やかな海/馬上槍試合）で GOLD に入っていた
+      // 場合は、保留中のカード数字の生産へ進む（tbContinueAfterEvent。通常の金タイルGOLDは
+      // tbPendingEventNumber が null なので従来どおり TRADE_BUILD）。
       if (Object.keys(nextPending).length === 0) {
-        next = { ...next, turnPhase: 'TRADE_BUILD', pendingGoldChoice: {} };
+        next = { ...next, pendingGoldChoice: {} };
+        // Catan for Two: 金の選択で1回目の出目解決が完結するなら2回目の生産へ（フックは no-op 安全）。
+        next = next.tbPendingEventNumber != null
+          ? tbContinueAfterEvent(next)
+          : tbTwoAfterRollResolved({ ...next, turnPhase: 'TRADE_BUILD' });
       }
       return next;
+    }
+
+    // ----------------------------------------------------------
+    // 交易と蛮族「イベントカード」: イベント効果の選択解決
+    // ----------------------------------------------------------
+
+    // 良き隣人(GOOD NEIGHBORS): 各自が左隣へ渡す任意資源1枚を選ぶ（多人数解決）。
+    case 'CHOOSE_EVENT_GIVE': {
+      if (state.turnPhase !== 'EVENT_GIVE') throw new Error('CHOOSE_EVENT_GIVE: not in EVENT_GIVE phase');
+      const { playerId, resource } = action;
+      const toId = (state.tbPendingEventGive ?? {})[playerId];
+      if (!toId) throw new Error('CHOOSE_EVENT_GIVE: no pending give for this player');
+      const giver = state.players[playerId];
+      const receiver = state.players[toId];
+      if (!giver || !receiver) throw new Error('CHOOSE_EVENT_GIVE: unknown player');
+      // resource は必ず既知の資源種別（LANの不正ペイロードで hand[bogus]=NaN を作らせない）。
+      if (!RESOURCE_TYPES.includes(resource)) throw new Error('CHOOSE_EVENT_GIVE: unknown resource');
+      if (giver.hand[resource] < 1) throw new Error('CHOOSE_EVENT_GIVE: resource not in hand');
+
+      const pending = { ...(state.tbPendingEventGive ?? {}) };
+      delete pending[playerId];
+      let next: GameState = {
+        ...state,
+        players: {
+          ...state.players,
+          [playerId]: { ...giver, hand: { ...giver.hand, [resource]: giver.hand[resource] - 1 } },
+          [toId]: { ...receiver, hand: { ...receiver.hand, [resource]: receiver.hand[resource] + 1 } },
+        },
+        tbPendingEventGive: pending,
+      };
+      if (Object.keys(pending).length === 0) next = tbContinueAfterEvent({ ...next, tbPendingEventGive: {} });
+      return next;
+    }
+
+    // 親切な隣人(HELPFUL NEIGHBOR): 公開VP最多者が「より少ない者」へ渡す資源と相手を選ぶ。
+    case 'CHOOSE_EVENT_HELPFUL': {
+      if (state.turnPhase !== 'EVENT_HELPFUL') throw new Error('CHOOSE_EVENT_HELPFUL: not in EVENT_HELPFUL phase');
+      const { playerId, resource, toPlayerId } = action;
+      if (!(state.tbPendingEventHelpful ?? []).includes(playerId))
+        throw new Error('CHOOSE_EVENT_HELPFUL: no pending give for this player');
+      const giver = state.players[playerId];
+      const receiver = state.players[toPlayerId];
+      if (!giver || !receiver || playerId === toPlayerId) throw new Error('CHOOSE_EVENT_HELPFUL: invalid players');
+      // resource は必ず既知の資源種別（LANの不正ペイロードで hand[bogus]=NaN を作らせない）。
+      if (!RESOURCE_TYPES.includes(resource)) throw new Error('CHOOSE_EVENT_HELPFUL: unknown resource');
+      if (giver.hand[resource] < 1) throw new Error('CHOOSE_EVENT_HELPFUL: resource not in hand');
+      // 受け取れるのは「渡す側よりVPの少ない」プレイヤーのみ（公開VPで判定・CN3089 p6）。
+      if (calcPublicVP(state, toPlayerId) >= calcPublicVP(state, playerId))
+        throw new Error('CHOOSE_EVENT_HELPFUL: recipient must have fewer VPs');
+
+      const pending = (state.tbPendingEventHelpful ?? []).filter(p => p !== playerId);
+      let next: GameState = {
+        ...state,
+        players: {
+          ...state.players,
+          [playerId]: { ...giver, hand: { ...giver.hand, [resource]: giver.hand[resource] - 1 } },
+          [toPlayerId]: { ...receiver, hand: { ...receiver.hand, [resource]: receiver.hand[resource] + 1 } },
+        },
+        tbPendingEventHelpful: pending,
+      };
+      if (pending.length === 0) next = tbContinueAfterEvent({ ...next, tbPendingEventHelpful: [] });
+      return next;
+    }
+
+    // 衝突(CONFLICT)/交易優位(TRADE ADVANTAGE): タイル保持者が奪う相手を選ぶ（無作為1枚）。
+    case 'CHOOSE_EVENT_STEAL': {
+      if (state.turnPhase !== 'EVENT_STEAL') throw new Error('CHOOSE_EVENT_STEAL: not in EVENT_STEAL phase');
+      const pending = state.tbPendingEventSteal;
+      if (!pending) throw new Error('CHOOSE_EVENT_STEAL: no pending steal');
+      const { targetPlayerId } = action;
+      if (targetPlayerId == null) {
+        // 見送りは「騎士カード最多の単独者」（原文 "may steal"）のときだけ許す。タイル保持者は必須。
+        if (!pending.optional) throw new Error('CHOOSE_EVENT_STEAL: stealing is mandatory for the tile holder');
+        return tbContinueAfterEvent({ ...state, tbPendingEventSteal: null });
+      }
+      if (!tbEventStealTargets(state).includes(targetPlayerId))
+        throw new Error('CHOOSE_EVENT_STEAL: invalid steal target');
+      let next = stealResource(state, pending.playerId, targetPlayerId, rng);
+      next = { ...next, tbPendingEventSteal: null };
+      return tbContinueAfterEvent(next);
+    }
+
+    // 地震(EARTHQUAKE): 各自が損傷させる自分の道1本を選ぶ（多人数解決）。
+    case 'CHOOSE_EVENT_DAMAGE': {
+      if (state.turnPhase !== 'EVENT_DAMAGE') throw new Error('CHOOSE_EVENT_DAMAGE: not in EVENT_DAMAGE phase');
+      const { playerId, edgeId } = action;
+      if (!(state.tbPendingEventDamage ?? []).includes(playerId))
+        throw new Error('CHOOSE_EVENT_DAMAGE: no pending damage for this player');
+      const edge = state.edges[edgeId];
+      if (!edge?.road || edge.road.playerId !== playerId)
+        throw new Error('CHOOSE_EVENT_DAMAGE: not your road');
+      if (edge.road.damaged) throw new Error('CHOOSE_EVENT_DAMAGE: road already damaged');
+
+      const pending = (state.tbPendingEventDamage ?? []).filter(p => p !== playerId);
+      let next: GameState = {
+        ...state,
+        edges: { ...state.edges, [edgeId]: { ...edge, road: { ...edge.road, damaged: true } } },
+        tbPendingEventDamage: pending,
+      };
+      if (pending.length === 0) next = tbContinueAfterEvent({ ...next, tbPendingEventDamage: [] });
+      return next;
+    }
+
+    // 損傷した道の修理（レンガ1木1・自分のターンの交易/建設フェーズ・CN3089 p5）。
+    case 'REPAIR_ROAD': {
+      if (state.phase !== 'MAIN' || state.turnPhase !== 'TRADE_BUILD')
+        throw new Error('REPAIR_ROAD: not in TRADE_BUILD phase');
+      const { edgeId } = action;
+      const edge = state.edges[edgeId];
+      if (!edge?.road || edge.road.playerId !== pid) throw new Error('REPAIR_ROAD: not your road');
+      if (!edge.road.damaged) throw new Error('REPAIR_ROAD: road is not damaged');
+      const player = state.players[pid]!;
+      if (!hasEnoughResources(player.hand, TB_ROAD_REPAIR_COST))
+        throw new Error('REPAIR_ROAD: not enough resources');
+
+      const newHand = { ...player.hand };
+      const newBank = { ...state.bank };
+      for (const r of RESOURCE_TYPES) {
+        newHand[r] -= TB_ROAD_REPAIR_COST[r];
+        newBank[r] += TB_ROAD_REPAIR_COST[r];
+      }
+      return {
+        ...state,
+        bank: newBank,
+        players: { ...state.players, [pid]: { ...player, hand: newHand } },
+        edges: { ...state.edges, [edgeId]: { ...edge, road: { playerId: pid } } },
+      };
+    }
+
+    // ----------------------------------------------------------
+    // 交易と蛮族「Catan for Two（2人用）」: 中立コマの無償配置＋trade token 経済（CN3089 p7）
+    // ----------------------------------------------------------
+
+    // 中立の道を無償配置（手番プレイヤーが「どちらの中立か＋位置」を選ぶ。自分の道1本につき1本）。
+    case 'TB_NEUTRAL_ROAD': {
+      if (state.phase !== 'MAIN' || state.turnPhase !== 'TB_NEUTRAL')
+        throw new Error('TB_NEUTRAL_ROAD: not in TB_NEUTRAL phase');
+      if (state.tbNeutralPending !== 'road')
+        throw new Error('TB_NEUTRAL_ROAD: a neutral settlement is pending, not a road');
+      const { owner, edgeId } = action;
+      if (!isTbNeutral(state, owner)) throw new Error('TB_NEUTRAL_ROAD: owner is not a neutral player');
+      if (!canBuildRoad(state, owner, edgeId)) throw new Error('TB_NEUTRAL_ROAD: invalid placement');
+
+      let next = buildRoad(state, owner, edgeId);
+      next = { ...next, turnPhase: 'TRADE_BUILD', tbNeutralPending: null };
+      next = updateLongestRoad(next); // 中立も最長交易路タイルの保持候補（CN3089 p7）
+      // タイル移動で手番プレイヤーが目標到達する可能性に備える（自分の手番中のみ勝利が確定する）。
+      return checkVictory(next, pid);
+    }
+
+    // 中立の開拓地を無償配置（自分の開拓地1つにつき1つ。通常配置ルール＝中立自身の道網接続が必要）。
+    case 'TB_NEUTRAL_SETTLEMENT': {
+      if (state.phase !== 'MAIN' || state.turnPhase !== 'TB_NEUTRAL')
+        throw new Error('TB_NEUTRAL_SETTLEMENT: not in TB_NEUTRAL phase');
+      if (state.tbNeutralPending !== 'settlement')
+        throw new Error('TB_NEUTRAL_SETTLEMENT: a neutral road is pending, not a settlement');
+      const { owner, vertexId } = action;
+      if (!isTbNeutral(state, owner)) throw new Error('TB_NEUTRAL_SETTLEMENT: owner is not a neutral player');
+      if (!canBuildSettlement(state, owner, vertexId)) throw new Error('TB_NEUTRAL_SETTLEMENT: invalid placement');
+
+      let next = buildSettlement(state, owner, vertexId);
+      next = { ...next, turnPhase: 'TRADE_BUILD', tbNeutralPending: null };
+      // 中立の開拓地は相手の交易路を分断しうる → 分断の結果、手番プレイヤーが最長交易路タイルを
+      // 得て目標到達する可能性がある（相手が得た場合は相手の手番開始時に勝利宣言される）。
+      next = updateLongestRoad(next);
+      return checkVictory(next, pid);
+    }
+
+    // 表向き騎士カード1枚を捨てて trade token 2（1ターン1回・最大騎士力タイルを失いうる）。
+    case 'TB_DISCARD_KNIGHT': {
+      if (!state.tbCatanForTwo) throw new Error('TB_DISCARD_KNIGHT: not a Catan for Two game');
+      if (!tbCanSpendWindow(state))
+        throw new Error('TB_DISCARD_KNIGHT: only before rolling or during the action phase');
+      if (state.tbKnightTokenThisTurn) throw new Error('TB_DISCARD_KNIGHT: already used this turn');
+      const player = state.players[pid]!;
+      if (player.knightsPlayed < 1) throw new Error('TB_DISCARD_KNIGHT: no faceup knight card');
+      if ((state.tbTradeTokenBank ?? 0) < 1) throw new Error('TB_DISCARD_KNIGHT: trade token supply is empty');
+
+      let next: GameState = {
+        ...state,
+        players: { ...state.players, [pid]: { ...player, knightsPlayed: player.knightsPlayed - 1 } },
+        tbKnightTokenThisTurn: true,
+      };
+      next = tbGrantTokens(next, pid, TB2_TOKENS_KNIGHT_DISCARD);
+      // 捨てた結果、最大騎士力タイルを失いうる（CN3089 p7）。奪取側の3枚下限は updateLargestArmy が担保。
+      return updateLargestArmy(next);
+    }
+
+    // trade token 消費: 強制交易（相手の手札から無作為2枚⇄自分の任意2枚。1ターン1回）。
+    case 'TB_FORCED_TRADE': {
+      if (!state.tbCatanForTwo) throw new Error('TB_FORCED_TRADE: not a Catan for Two game');
+      if (!tbCanSpendWindow(state))
+        throw new Error('TB_FORCED_TRADE: only before rolling or during the action phase');
+      if (state.tbTradeTokenSpentThisTurn) throw new Error('TB_FORCED_TRADE: already spent tokens this turn');
+      const opp = tbTwoOpponent(state, pid);
+      if (!opp) throw new Error('TB_FORCED_TRADE: no opponent');
+      const me = state.players[pid]!;
+      const other = state.players[opp]!;
+      const cost = tbSpendCost(state, pid);
+      if (((state.tbTradeTokens ?? {})[pid] ?? 0) < cost)
+        throw new Error('TB_FORCED_TRADE: not enough trade tokens');
+      // 渡す2枚の検証（既知資源のみ集計＝LAN不正ペイロードで NaN を作らせない）。
+      const give = action.give as Partial<Record<ResourceType, number>>;
+      const giveSum = RESOURCE_TYPES.reduce((s, r) => s + (give[r] ?? 0), 0);
+      const withinHand = RESOURCE_TYPES.every(r => (give[r] ?? 0) >= 0 && (give[r] ?? 0) <= me.hand[r]);
+      if (giveSum !== TB2_FORCED_TRADE_GIVE || !withinHand)
+        throw new Error('TB_FORCED_TRADE: must give exactly 2 cards from your hand');
+      const oppTotal = RESOURCE_TYPES.reduce((s, r) => s + other.hand[r], 0);
+      // 相手の手札が0枚なら使用不可（"take" の対象が無い。仕様書§2-4 実装解釈）。
+      if (oppTotal < 1) throw new Error('TB_FORCED_TRADE: opponent has no cards to take');
+
+      // 無作為に取る枚数は2（相手が1枚なら1）。交換前の相手の手札から非復元抽選する。
+      const takeCount = Math.min(TB2_FORCED_TRADE_TAKE, oppTotal);
+      const pool: ResourceType[] = [];
+      for (const r of RESOURCE_TYPES) for (let i = 0; i < other.hand[r]; i++) pool.push(r);
+      const taken: ResourceType[] = [];
+      for (let i = 0; i < takeCount; i++) {
+        const idx = Math.floor(rng() * pool.length);
+        taken.push(pool[idx]!);
+        pool.splice(idx, 1);
+      }
+
+      const myHand = { ...me.hand };
+      const oppHand = { ...other.hand };
+      for (const r of RESOURCE_TYPES) {
+        myHand[r] -= give[r] ?? 0;
+        oppHand[r] += give[r] ?? 0;
+      }
+      for (const r of taken) {
+        myHand[r] += 1;
+        oppHand[r] -= 1;
+      }
+      return {
+        ...state,
+        players: {
+          ...state.players,
+          [pid]: { ...me, hand: myHand },
+          [opp]: { ...other, hand: oppHand },
+        },
+        tbTradeTokens: { ...(state.tbTradeTokens ?? {}), [pid]: ((state.tbTradeTokens ?? {})[pid] ?? 0) - cost },
+        tbTradeTokenBank: (state.tbTradeTokenBank ?? 0) + cost, // 消費トークンは供給へ戻す
+        tbTradeTokenSpentThisTurn: true,
+      };
+    }
+
+    // trade token 消費: 盗賊を砂漠へ（誰からも奪わない。1ターン1回）。
+    case 'TB_MOVE_ROBBER': {
+      if (!state.tbCatanForTwo) throw new Error('TB_MOVE_ROBBER: not a Catan for Two game');
+      if (!tbCanSpendWindow(state))
+        throw new Error('TB_MOVE_ROBBER: only before rolling or during the action phase');
+      if (state.tbTradeTokenSpentThisTurn) throw new Error('TB_MOVE_ROBBER: already spent tokens this turn');
+      if (state.useRobber === false) throw new Error('TB_MOVE_ROBBER: robber is not used in this scenario');
+      const cost = tbSpendCost(state, pid);
+      if (((state.tbTradeTokens ?? {})[pid] ?? 0) < cost)
+        throw new Error('TB_MOVE_ROBBER: not enough trade tokens');
+      const deserts = Object.values(state.tiles).filter(t => t.type === 'desert');
+      if (deserts.length === 0) throw new Error('TB_MOVE_ROBBER: no desert on this board');
+      // 盗賊が既にいずれかの砂漠に居るなら移動先が無い＝使用不可（仕様書§2-4 実装解釈）。
+      if (deserts.some(d => d.hasRobber)) throw new Error('TB_MOVE_ROBBER: robber is already on the desert');
+
+      const next = moveRobber(state, deserts[0]!.id);
+      return {
+        ...next,
+        tbTradeTokens: { ...(next.tbTradeTokens ?? {}), [pid]: ((next.tbTradeTokens ?? {})[pid] ?? 0) - cost },
+        tbTradeTokenBank: (next.tbTradeTokenBank ?? 0) + cost, // 消費トークンは供給へ戻す
+        tbTradeTokenSpentThisTurn: true,
+      };
     }
 
     // ----------------------------------------------------------
@@ -291,6 +637,9 @@ export function applyAction(
         // 盗賊凍結: CKは初回襲来前、S7（useRobber=false）は常に盗賊不使用 → 捨て後は TRADE_BUILD。
         const robberFrozen = (isCk(next) && (next.barbarianAttacks ?? 0) < 1) || next.useRobber === false;
         next = { ...next, turnPhase: robberFrozen ? 'TRADE_BUILD' : 'ROBBER', discardedThisRound: [] };
+        // Catan for Two × 盗賊不使用の保険: 捨て札で出目の解決が完結するなら2回目の生産へ
+        // （通常は ROBBER → MOVE_ROBBER 側のフックが担う。TRADE_BUILD 以外では no-op）。
+        next = tbTwoAfterRollResolved(next);
       }
 
       return next;
@@ -340,23 +689,40 @@ export function applyAction(
       if (state.turnPhase !== 'ROBBER') throw new Error('MOVE_ROBBER: not in ROBBER phase');
       const { tileId, stealFromPlayerId } = action;
 
+      // 交易と蛮族「Catan for Two」: 中立プレイヤーからは奪えない（手札を持たない盤上だけの存在）。
+      if (stealFromPlayerId != null && state.players[stealFromPlayerId]?.type === 'neutral')
+        throw new Error('MOVE_ROBBER: cannot steal from a neutral player');
+
       // 強盗は陸タイルのみ（海は海賊の領分）。これが無いと盗賊が海上で空振りになる。
       if (state.tiles[tileId]?.type === 'sea') throw new Error('MOVE_ROBBER: robber cannot move onto a sea tile (use the pirate)');
       // S5 忘れられた部族: 盗賊は数字ディスクのあるヘクスにしか動かせない（砂漠等の無数字ヘックス不可）。
       if (state.numberHexOnly && state.tiles[tileId]?.number == null) throw new Error('MOVE_ROBBER: robber can only move to a numbered hex in this scenario');
-      // 強盗は必ず現在地とは別ヘクスへ移動する（標準ルール）。
       const currentRobberTileId = Object.keys(state.tiles).find(tid => state.tiles[tid]!.hasRobber);
-      if (currentRobberTileId === tileId) throw new Error('MOVE_ROBBER: must move to a different tile');
+      // 交易と蛮族「親切な盗賊」(CN3089 p3): 公開VP2以下のプレイヤーの建物があるヘックスへは移動不可。
+      // 合法ヘックスが無ければ砂漠のみ許可（getRobberMoveTargets が砂漠フォールバックまで解決する）。
+      const friendlyTargets = state.friendlyRobber ? getRobberMoveTargets(state) : null;
+      if (friendlyTargets && !friendlyTargets.includes(tileId))
+        throw new Error('MOVE_ROBBER: the friendly robber cannot move to a hex with a building of a player with only 2 VP');
+      // 強盗は必ず現在地とは別ヘクスへ移動する（標準ルール）。
+      // 例外: 親切な盗賊の砂漠フォールバックで盗賊が既に砂漠に居る場合のみ「その場に留まる」を許す。
+      if (currentRobberTileId === tileId && !friendlyTargets?.includes(tileId))
+        throw new Error('MOVE_ROBBER: must move to a different tile');
 
       let next = moveRobber(state, tileId);
 
       // 強奪は必須: 移動先タイルに隣接し手札を持つ相手がいるなら、必ずその中の1人から盗む
       // （『盗まない』選択は不可。標準ルール）。隣接相手が全員0枚 or 不在なら盗まずに済む。
-      const robbable = getRobbablePlayerIds(next, tileId, pid).filter(p => robbableCardCount(next, p) > 0);
+      // 親切な盗賊: 公開VP2以下の相手は強奪対象外（公式: "more than 2 VPs" からのみ。砂漠フォールバック時に効く）。
+      const robbable = getRobbablePlayerIds(next, tileId, pid)
+        .filter(p => robbableCardCount(next, p) > 0)
+        .filter(p => !state.friendlyRobber || !isFriendlyRobberProtected(next, p));
       if (stealFromPlayerId != null) {
         // 盗む相手は「移動先タイルに隣接する建物を持つ相手」に限る（盤面と無関係な強奪を防ぐ）。
         if (!getRobbablePlayerIds(next, tileId, pid).includes(stealFromPlayerId))
           throw new Error('MOVE_ROBBER: steal target is not adjacent to the robber tile');
+        // 親切な盗賊: 保護対象（公開VP2以下）を指定した強奪は不可。
+        if (state.friendlyRobber && isFriendlyRobberProtected(next, stealFromPlayerId))
+          throw new Error('MOVE_ROBBER: the friendly robber does not steal from a player with only 2 VP');
         // 手札持ちの相手がいるなら、手札0枚の相手を指定して強奪を踏み倒すことはできない。
         if (robbable.length > 0 && !robbable.includes(stealFromPlayerId))
           throw new Error('MOVE_ROBBER: must steal from an adjacent opponent who holds cards');
@@ -366,8 +732,9 @@ export function applyAction(
       }
 
       // 騎士カードをダイス前に使った場合はPRE_ROLLへ戻る（ダイスをまだ振っていない）
+      // Catan for Two: 1回目の7の解決がここで完結したら、2回目の生産フェーズ（PRE_ROLL）へ。
       const nextPhase = state.diceRolledThisTurn ? 'TRADE_BUILD' : 'PRE_ROLL';
-      return { ...next, turnPhase: nextPhase };
+      return tbTwoAfterRollResolved({ ...next, turnPhase: nextPhase });
     }
 
     // ----------------------------------------------------------
@@ -420,6 +787,10 @@ export function applyAction(
       const { edgeId } = action;
       const _isSetup = state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD';
       const _isRoadBuilding = state.roadBuildingRoadsRemaining > 0;
+      // Catan for Two: 中立コマの配置待ち中は自分の建設を差し込めない（街道建設カードの
+      // 無料道が残っていても、先に TB_NEUTRAL_ROAD/SETTLEMENT で中立の配置を解決する）。
+      if (state.turnPhase === 'TB_NEUTRAL')
+        throw new Error('BUILD_ROAD: resolve the pending neutral placement first');
       if (!_isSetup && !_isRoadBuilding && state.turnPhase !== 'TRADE_BUILD')
         throw new Error('BUILD_ROAD: must be in TRADE_BUILD, setup, or road building phase');
       if (!canBuildRoad(state, pid, edgeId)) throw new Error('BUILD_ROAD: invalid');
@@ -445,6 +816,13 @@ export function applyAction(
         next = advanceSetup({ ...next, setupRoadAnchor: null });
       }
 
+      // 交易と蛮族「Catan for Two」: MAIN で道を建てるたび、中立の道1本を無償配置（CN3089 p7）。
+      // どちらの中立にも合法位置が無ければスキップ。勝利確定（GAME_OVER）後は発動しない。
+      if (state.phase === 'MAIN' && next.phase === 'MAIN' && next.tbCatanForTwo) {
+        const pendingNeutral = tbNeutralPendingAfterRoad(next);
+        if (pendingNeutral) next = { ...next, turnPhase: 'TB_NEUTRAL', tbNeutralPending: pendingNeutral };
+      }
+
       return next;
     }
 
@@ -454,6 +832,9 @@ export function applyAction(
     case 'BUILD_SHIP': {
       const { edgeId } = action;
       const _isSetupSh = state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD';
+      // Catan for Two: 中立コマの配置待ち中は自分の建設を差し込めない（防御的。基本盤に船は無い）。
+      if (state.turnPhase === 'TB_NEUTRAL')
+        throw new Error('BUILD_SHIP: resolve the pending neutral placement first');
       if (!_isSetupSh && state.turnPhase !== 'TRADE_BUILD')
         throw new Error('BUILD_SHIP: must be in TRADE_BUILD or setup phase');
       if (!canBuildShip(state, pid, edgeId)) throw new Error('BUILD_SHIP: invalid');
@@ -530,6 +911,11 @@ export function applyAction(
       // S5 忘れられた部族: 港トークンを保留していれば、この沿岸開拓地に設置（無ければ no-op）。
       next = placeHeldHarborAt(next, pid, vertexId);
 
+      // 交易と蛮族「Catan for Two」: 砂漠に隣接する開拓地=trade token 2・沿岸=1（両方なら3）。
+      // 初期配置の開拓地も対象（CN3089 p7 CHANGES TO SETUP）。供給残で頭打ち。
+      // 中立の開拓地は TB_NEUTRAL_SETTLEMENT 経由でここを通らない（トークンは実プレイヤーのみ）。
+      if (next.tbCatanForTwo) next = tbGrantTokens(next, pid, tbTokensForSettlement(next, vertexId));
+
       // SETUP の「最後の開拓地」で初期資源を配る。標準/航海者は2軒目、S6 織物は3軒目。
       // 公式: 最後の1軒の隣接タイルから資源を取得（それ以前の軒は資源なし）。
       // 配置数は全建物で数える（CK は2軒目を都市へ昇格させるため）。
@@ -593,7 +979,15 @@ export function applyAction(
       // 開拓地が相手の道路を分断した場合に最長道路ボーナスを再計算する。
       // SETUP では道が短く no-op、MAIN でのみ意味を持つ（BUILD_ROAD と同順序）。
       next = updateLongestRoad(next);
+      next = updateStrongestPorts(next); // 交易と蛮族「強き港」: 港上の建物が増えたので再計算（無効シナリオでは no-op）
       next = checkVictory(next, pid);
+
+      // 交易と蛮族「Catan for Two」: MAIN で開拓地を建てるたび、中立の開拓地1つを無償配置。
+      // 両中立とも合法位置が無ければ中立の道1本で代替、それも無ければスキップ（CN3089 p7）。
+      if (state.phase === 'MAIN' && next.phase === 'MAIN' && next.tbCatanForTwo) {
+        const pendingNeutral = tbNeutralPendingAfterSettlement(next);
+        if (pendingNeutral) next = { ...next, turnPhase: 'TB_NEUTRAL', tbNeutralPending: pendingNeutral };
+      }
 
       if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
         // 直後の道はこの開拓地に接続する必要がある（標準ルール）
@@ -613,6 +1007,7 @@ export function applyAction(
       if (!canBuildCity(state, pid, vertexId)) throw new Error('BUILD_CITY: invalid');
 
       let next = buildCity(state, pid, vertexId);
+      next = updateStrongestPorts(next); // 交易と蛮族「強き港」: 港上の開拓地→都市で港VPが増えるので再計算（無効シナリオでは no-op）
       next = checkVictory(next, pid);
       return next;
     }
@@ -693,6 +1088,10 @@ export function applyAction(
       // 「7の捨て札待ちで騎士→ROBBERへ遷移」で全員の捨て札を踏み倒せてしまう（不正クライアント対策）。
       if (state.phase !== 'MAIN' || (state.turnPhase !== 'PRE_ROLL' && state.turnPhase !== 'TRADE_BUILD'))
         throw new Error('PLAY_KNIGHT: must be in MAIN PRE_ROLL or TRADE_BUILD phase');
+      // 交易と蛮族「Catan for Two」: 2つの生産フェーズの間（1回目解決後の PRE_ROLL）では
+      // 騎士カードを使えない（公式: 生産フェーズは "one after the other" で続けて行う）。
+      if (state.tbCatanForTwo && state.turnPhase === 'PRE_ROLL' && (state.tbRollsDone ?? 0) > 0)
+        throw new Error('PLAY_KNIGHT: cannot play between the two production phases');
       if (state.devCardPlayedThisTurn) throw new Error('PLAY_KNIGHT: already played a dev card this turn');
       const player = state.players[pid]!;
       const cardIdx = player.devCards.findIndex(
@@ -966,6 +1365,9 @@ export function applyAction(
       for (const tid of action.targetPlayerIds) {
         if (!state.players[tid])
           throw new Error(`OFFER_TRADE: player ${tid} does not exist`);
+        // Catan for Two: 中立プレイヤーとは交易できない（手札も応答手段も持たない）。
+        if (state.players[tid]!.type === 'neutral')
+          throw new Error('OFFER_TRADE: cannot trade with a neutral player');
       }
       const initiator = state.players[pid]!;
       const hasEnoughGive = RESOURCE_TYPES.every(r => initiator.hand[r] >= (action.offer.give[r] ?? 0));
@@ -1047,6 +1449,12 @@ export function applyAction(
         shipsBuiltThisTurn: [],
         // 騎士と商人専用フラグは CK でのみリセット（非CK状態を汚さない）。
         ...(isCk(state) ? { knightMovedThisTurn: false, knightChasedThisTurn: false } : {}),
+        // T&B イベントカード「疫病」はそのターンの生産のみ（非対象シナリオの状態を汚さない）。
+        ...(state.tbEpidemic ? { tbEpidemic: false } : {}),
+        // T&B「Catan for Two」: 生産2回制・トークン1ターン1回のフラグをリセット（非対象シナリオを汚さない）。
+        ...(state.tbCatanForTwo
+          ? { tbRollsDone: 0, tbFirstRollTotal: null, tbTradeTokenSpentThisTurn: false, tbKnightTokenThisTurn: false }
+          : {}),
         pendingTrade: null,
       };
     }

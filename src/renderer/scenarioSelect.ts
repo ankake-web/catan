@@ -9,12 +9,13 @@ import { listVisibleScenarios, getScenario, DEFAULT_RECOMMENDED_PLAYERS, type Sc
 import { buildBoardGeometry, axialToPixel } from '../engine/board';
 import { createRng } from '../engine/setup';
 
-const CATEGORY_LABEL: Record<'basic' | 'seafarers' | 'cities_knights', string> = {
+const CATEGORY_LABEL: Record<'basic' | 'seafarers' | 'cities_knights' | 'traders_barbarians', string> = {
   basic: '基本',
   seafarers: '航海者（船で島へ）',
   cities_knights: '都市と騎士（拡張）',
+  traders_barbarians: '交易と蛮族（拡張）',
 };
-const CATEGORY_ORDER = ['basic', 'seafarers', 'cities_knights'] as const;
+const CATEGORY_ORDER = ['basic', 'seafarers', 'cities_knights', 'traders_barbarians'] as const;
 
 // 盤面の実色に合わせたミニプレビュー用タイル色。
 const TYPE_COLOR: Record<string, string> = {

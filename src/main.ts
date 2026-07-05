@@ -3,14 +3,17 @@
 // ============================================================
 
 import './style.css';
-import type { GameState, Action, PlayerId, AiDifficulty, ResourceType, TradeOffer, ResourceHand } from './types';
+import type { GameState, Action, PlayerId, AiDifficulty, ResourceType, TradeOffer, ResourceHand, TbEventCard } from './types';
 import type { PlayerOrderMode } from './engine/setup';
-import { makeHand, RESOURCE_TYPES, COMMODITY_TYPES, VP_TABLE, TILE_RESOURCE_MAP, TILE_COMMODITY_MAP, CK_BARBARIAN_MAX, CK_TRACK_NAME, PROGRESS_CARD_NAME } from './constants';
+import { makeHand, RESOURCE_TYPES, COMMODITY_TYPES, VP_TABLE, TILE_RESOURCE_MAP, TILE_COMMODITY_MAP, CK_BARBARIAN_MAX, CK_TRACK_NAME, PROGRESS_CARD_NAME, TB_EVENT_NAME, TB_ROAD_REPAIR_COST } from './constants';
 import { createInitialGameState } from './engine/createState';
+import { getScenario } from './engine/scenarios';
 import type { ScenarioId } from './engine/scenarios';
 import type { PlayerSpec } from './engine/createState';
 import { applyAction, setupGainFor } from './engine/game';
-import { findPendingDiscarder, discardCount } from './engine/robber';
+import { findPendingDiscarder, discardCount, getRobberMoveTargets } from './engine/robber';
+import { tbEventPendingIds, tbHasDamagedRoad, tbDamagedRoadEdges } from './engine/tbEvents';
+import { tbNeutralRoadTargets, tbNeutralSettlementTargets, tbSpendCost, tbCanSpendWindow } from './engine/tbTwo';
 import {
   playSE, bgmStart, bgmStop, bgmSetVolume, setBgmTrack, BGM_TRACKS,
   isBgmEnabled, setBgmEnabled, getBgmVolume, getBgmTrack, isSeEnabled, setSeEnabled,
@@ -24,7 +27,7 @@ import { attachNameField, savePlayerName } from './net/nameField';
 import { saveResume, loadResume, clearResume } from './net/resume';
 import type { ResumeInfo } from './net/resume';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from './engine/actions';
-import { isKnightMovable, canMoveKnight, robberAdjacentChasableVertexIds, isCk, computeCkProduction, canBuildKnight, canActivateKnight, canUpgradeKnight, plainCityVertexIds, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, improvementTakesMetropolis, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from './engine/citiesKnights';
+import { isKnightMovable, canMoveKnight, robberAdjacentChasableVertexIds, isCk, computeCkProduction, canBuildKnight, canActivateKnight, canUpgradeKnight, plainCityVertexIds, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, improvementTakesMetropolis, craneEligibleTracks, craneTrack, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from './engine/citiesKnights';
 import type { CkTrack, CommodityType } from './types';
 import type { RollSpec, DiceGLController } from './renderer/diceGL';
 import { renderBoard } from './renderer/board';
@@ -218,7 +221,10 @@ function renderHome(
   const scenarioLabel = document.createElement('label');
   scenarioLabel.className = 'home-label';
   scenarioLabel.textContent = '盤面（ルール）';
-  const scenarioSelect = buildScenarioSelect({ current: lastConfig?.scenario ?? 'classic' });
+  const scenarioSelect = buildScenarioSelect({
+    current: lastConfig?.scenario ?? 'classic',
+    onChange: (id) => applyScenarioPlayerLimit(id),
+  });
   scenarioField.appendChild(scenarioLabel);
   scenarioField.appendChild(scenarioSelect);
   cpuForm.appendChild(scenarioField);
@@ -321,6 +327,20 @@ function renderHome(
   countGroup.addEventListener('change', () => { rebuildSpec(); });
   orderGroup.addEventListener('change', () => { updateSpecVisibility(); });
 
+  // 交易と蛮族「Catan for Two（2人用）」は実プレイヤー2人専用 → CPU数を1に固定し他を無効化。
+  // 他のシナリオに戻したら解除する。
+  const applyScenarioPlayerLimit = (id: ScenarioId): void => {
+    const twoOnly = getScenario(id).rules?.catanForTwo === true;
+    const radios = Array.from(countGroup.querySelectorAll<HTMLInputElement>('input[name="cpuCount"]'));
+    for (const r of radios) {
+      r.disabled = twoOnly && r.value !== '1';
+      if (twoOnly && r.value === '1') r.checked = true;
+      r.closest('label')?.classList.toggle('radio-disabled', r.disabled);
+    }
+    if (twoOnly) rebuildSpec(); // 3〜4人の指定順が残らないよう作り直す
+  };
+  applyScenarioPlayerLimit(lastConfig?.scenario ?? 'classic');
+
   const startBtn = document.createElement('button');
   startBtn.className = 'home-start-btn';
   startBtn.textContent = 'ゲーム開始';
@@ -371,7 +391,9 @@ function renderHome(
     savePlayerName(name);
 
     const countVal = (countGroup.querySelector('input[name="cpuCount"]:checked') as HTMLInputElement | null)?.value ?? '1';
-    const cpuCount = (parseInt(countVal, 10) as 1 | 2 | 3) || 1;
+    let cpuCount = (parseInt(countVal, 10) as 1 | 2 | 3) || 1;
+    // 2人用カタンは実プレイヤー2人専用（UI で固定済みだが、開始時にも最終クランプ）。
+    if (getScenario(getScenarioSelectValue(scenarioSelect)).rules?.catanForTwo) cpuCount = 1;
 
     const diffVal = (diffGroup.querySelector('input[name="cpuDiff"]:checked') as HTMLInputElement | null)?.value ?? '普通';
     const diffMap: Record<string, AiDifficulty> = { '弱': 'normal', '普通': 'strong', '強': 'elite' };
@@ -588,7 +610,12 @@ function createRadioGroup(name: string, options: string[], defaultVal: string): 
 // ============================================================
 
 function initGameState(cfg: HomeConfig): GameState {
-  const totalPlayers = cfg.cpuCount + 1;
+  // 盤面シナリオ: cfg 優先。未指定なら URL の ?scenario=（開発/動作確認用フック）。
+  const urlScenario0 = new URLSearchParams(window.location.search).get('scenario') as ScenarioId | null;
+  const scenarioId = cfg.scenario ?? urlScenario0 ?? 'classic';
+  // 2人用カタン（catanForTwo）は実プレイヤー2人専用。?scenario= 直指定などで人数が合わない
+  // 場合もここで 2人（人間1+CPU1）に丸める（createInitialGameState は不一致を例外にする）。
+  const totalPlayers = getScenario(scenarioId).rules?.catanForTwo ? 2 : cfg.cpuCount + 1;
   // CPU 名はランダムな3文字名を重複なく割り当て（人間名とも重複回避）。state に保存され
   // 以降は固定（render 毎の再抽選はしない）。表示名のみでCPUロジックには関与しない。
   const cpuNames = pickCpuNames(cfg.cpuCount, [cfg.playerName]);
@@ -604,12 +631,9 @@ function initGameState(cfg: HomeConfig): GameState {
       ...(isHuman ? {} : { aiDifficulty: cfg.cpuDifficulty }),
     });
   }
-  // 盤面シナリオ: cfg 優先。未指定なら URL の ?scenario=（開発/動作確認用フック）。
   // 既定 'classic' は従来と同一。未知IDは createInitialGameState 側で classic にフォールバック。
-  const urlScenario = new URLSearchParams(window.location.search).get('scenario') as ScenarioId | null;
-  const scenario = cfg.scenario ?? urlScenario ?? undefined;
   // 手番順: ランダム=毎回シャッフル / 指定=spec を検証して採用（不整合なら元順）。
-  return createInitialGameState(specs, cfg.orderMode, cfg.playerOrderSpec, undefined, scenario ?? undefined);
+  return createInitialGameState(specs, cfg.orderMode, cfg.playerOrderSpec, undefined, scenarioId);
 }
 
 // ============================================================
@@ -642,18 +666,37 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
 
   if (state.phase === 'MAIN') {
     if (state.turnPhase === 'ROBBER') {
-      // 盗賊(陸)＋海賊(海)の移動先。現在地（盗賊タイル/海賊タイル）は除外。
-      // S5 忘れられた部族: 盗賊は数字ヘックスのみ（無数字の陸＝海賊用の海は別途タップで海賊移動）。
-      const robberTile = Object.values(state.tiles).find(t => t.hasRobber)?.id;
+      // 盗賊(陸)＋海賊(海)の移動先。陸側の合法集合は getRobberMoveTargets に一元化
+      // （現在地除外・S5 の数字ヘックス限定・T&B 親切な盗賊の2VP保護と砂漠フォールバック）。
+      const landTargets = new Set(getRobberMoveTargets(state));
+      // 航海者: 盗賊も海賊も動かせる時は、先に選んだ方(robberPiece)のタイルだけ光らせる。
+      // 未選択(null)なら何も光らせず、picker で選ばせる。片方しか無い盤は従来どおり両方判定。
+      const avail = robberPieceAvail(state);
+      const both = avail.robber && avail.pirate;
+      const showLand = both ? robberPiece === 'robber' : avail.robber;
+      const showSea = both ? robberPiece === 'pirate' : avail.pirate;
       opts.validTileIds = new Set(
         Object.keys(state.tiles).filter(tid => {
-          if (tid === robberTile || tid === state.piratePosition) return false;
           const t = state.tiles[tid]!;
-          // numberHexOnly のとき、陸タイルは数字付きのみ強盗可（海タイルは海賊用なので常に候補）。
-          if (state.numberHexOnly && t.type !== 'sea' && t.number == null) return false;
-          return true;
+          // 海タイルは海賊の移動先（現在地は除外）。
+          if (t.type === 'sea') return showSea && tid !== state.piratePosition;
+          return showLand && landTargets.has(tid);
         }),
       );
+      return opts;
+    }
+
+    // 交易と蛮族「Catan for Two」: 中立コマの配置待ち。置く中立(色)が決まっている時だけ
+    // その中立の合法位置を光らせる（両中立に置ける間はバーで選ぶまで光らせない）。
+    if (state.turnPhase === 'TB_NEUTRAL') {
+      const owner = tbNeutralActingOwner(state);
+      if (owner) {
+        if (state.tbNeutralPending === 'settlement') {
+          opts.validVertexIds = new Set(tbNeutralSettlementTargets(state, owner));
+        } else {
+          opts.validEdgeIds = new Set(tbNeutralRoadTargets(state, owner));
+        }
+      }
       return opts;
     }
 
@@ -663,6 +706,20 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
       const me = selfPlayerId();
       const acting = me && pending.includes(me) ? me : pending.find(p => state.players[p]?.type === 'human');
       if (acting) opts.downgradeVertexIds = new Set(plainCityVertexIds(state, acting));
+      return opts;
+    }
+
+    // 交易と蛮族イベント「地震」: 対象（LAN=viewer/ローカル=人間）の未損傷の道を光らせて盤面でタップ選択。
+    if (state.turnPhase === 'EVENT_DAMAGE') {
+      const pending = state.tbPendingEventDamage ?? [];
+      const me = selfPlayerId();
+      const acting = me && pending.includes(me) ? me : pending.find(p => state.players[p]?.type === 'human');
+      if (acting) {
+        opts.validEdgeIds = new Set(Object.keys(state.edges).filter(eid => {
+          const r = state.edges[eid]!.road;
+          return r?.playerId === acting && !r.damaged;
+        }));
+      }
       return opts;
     }
 
@@ -752,6 +809,9 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
       } else if (mode === 'selectIntrigueKnight') {
         // 騎士と商人・陰謀: 退去させられる敵騎士（自分の道/船に隣接）を光らせる。
         opts.validVertexIds = new Set(intrigueKnightTargets(state, pid));
+      } else if (mode === 'idle' && state.tbEventCards && tbHasDamagedRoad(state, pid)) {
+        // 交易と蛮族イベント「地震」: 自分の損傷した道を光らせる（タップで修理・レンガ1木1）。
+        opts.validEdgeIds = new Set(tbDamagedRoadEdges(state, pid));
       }
     }
   }
@@ -794,12 +854,45 @@ function setSmithFirst(vid: string | null): void { smithFirstKnight = vid; redra
 // 脱走兵: 1手目に選んだ「消す相手の騎士」頂点（非null＝2手目＝獲得騎士の設置先選択中）。
 let deserterRemoveVid: string | null = null;
 function setDeserterRemove(vid: string | null): void { deserterRemoveVid = vid; redraw(); }
-// メトロポリス手動選択中に「今+1する都市改善ツリー」を控える（候補2つ以上で盤面タップさせる時）。
-let pendingMetropolisTrack: CkTrack | null = null;
+// メトロポリス手動選択中に「今+1する都市改善ツリー」と、その改善の発生源（改善ボタン or クレーンカード）を控える。
+// 候補（自分の平の都市）が2つ以上ある時に盤面タップで化ける都市を選ばせる。
+//   via==='improvement': 都市タップで BUILD_IMPROVEMENT を再送。
+//   via==='crane':       都市タップで PLAY_PROGRESS(crane) を craneMetropolisVertexId 付きで再送。
+let pendingMetropolis: { track: CkTrack; via: 'improvement' } | { track: CkTrack; via: 'crane'; cardId: string } | null = null;
 let uiPhase: UIPhase = { type: 'idle' };
 // 強盗/海賊を「先に移動」してから相手選択させる時、移動先をプレビュー描画したタイル。
 // 相手確定(MOVE_ROBBER/MOVE_PIRATE)時の二重スライドを抑止するためにも使う。
 let robberPreviewedTile: string | null = null;
+// 航海者: 7/騎士でコマを動かす時、盗賊(陸)と海賊(海)のどちらを動かすか先に選ばせる。
+// null=未選択（両方動かせる時は先に選ぶまで盤面は光らせない）。ROBBER フェーズ外では常に null に戻す。
+let robberPiece: 'robber' | 'pirate' | null = null;
+function setRobberPiece(p: 'robber' | 'pirate' | null): void { robberPiece = p; redraw(); }
+// 盗賊(陸)・海賊(海)がそれぞれ「動かせる先があるか」。両方 true の時だけ先に選ばせる。
+function robberPieceAvail(s: GameState): { robber: boolean; pirate: boolean } {
+  const robber = getRobberMoveTargets(s).length > 0;
+  const pirate = s.piratePosition != null
+    && Object.values(s.tiles).some(t => t.type === 'sea' && t.id !== s.piratePosition);
+  return { robber, pirate };
+}
+
+// 交易と蛮族「Catan for Two」: TB_NEUTRAL でどちらの中立に置くかの事前選択。
+// null=未選択（両中立に置ける時は選ぶまで盤面を光らせない）。TB_NEUTRAL 外では常に null に戻す。
+let tbNeutralChoice: PlayerId | null = null;
+function setTbNeutralChoice(p: PlayerId | null): void { tbNeutralChoice = p; redraw(); }
+// 配置できる中立の一覧（現在の pending 種別で合法位置を持つ中立のみ）。
+function tbNeutralAvail(s: GameState): PlayerId[] {
+  return (s.tbNeutralPlayerIds ?? []).filter(n => s.tbNeutralPending === 'settlement'
+    ? tbNeutralSettlementTargets(s, n).length > 0
+    : tbNeutralRoadTargets(s, n).length > 0);
+}
+// いま配置操作の対象になっている中立。片方しか置けなければ自動でその中立、両方なら選択済みのもの。
+function tbNeutralActingOwner(s: GameState): PlayerId | null {
+  if (s.turnPhase !== 'TB_NEUTRAL') return null;
+  const avail = tbNeutralAvail(s);
+  if (avail.length === 1) return avail[0]!;
+  if (tbNeutralChoice && avail.includes(tbNeutralChoice)) return tbNeutralChoice;
+  return null;
+}
 let lastConfig: HomeConfig | null = null;
 
 // ---- LAN対戦（サーバ権威）----
@@ -947,6 +1040,12 @@ function redraw(skipBoard = false): void {
   // ゲーム進行中は three(WebGL ダイス) を裏で先読み（初回ロールまでに用意。多重ロードは内部ガード）。
   if (state.phase === 'MAIN') preloadDiceGL();
 
+  // 航海者: 盗賊/海賊の事前選択は ROBBER フェーズ限定。フェーズを抜けたら選択をリセットする。
+  if (!(state.phase === 'MAIN' && state.turnPhase === 'ROBBER') && robberPiece !== null) robberPiece = null;
+
+  // 交易と蛮族「Catan for Two」: 中立(色)の事前選択は TB_NEUTRAL 限定。抜けたらリセット。
+  if (!(state.phase === 'MAIN' && state.turnPhase === 'TB_NEUTRAL') && tbNeutralChoice !== null) tbNeutralChoice = null;
+
   // DISCARD フェーズの uiPhase 自動同期。
   // LAN ではマスク済み state のため discardPid は「自分（8枚以上の場合）」に
   // 自然解決し、捨て札UIが各端末で自分の分だけ出る。
@@ -976,13 +1075,18 @@ function redraw(skipBoard = false): void {
     robberPreviewedTile = null;
   }
 
-  // 仮置きプレビュー(placePreview)は、配置できない局面/GAME_OVER では破棄する。
-  if (uiPhase.type === 'placePreview' && !isPlaceablePhase(state)) {
+  // 仮置きプレビュー(placePreview)/道船選択(edgePieceChoice)は、配置できない局面/GAME_OVER では破棄する。
+  if ((uiPhase.type === 'placePreview' || uiPhase.type === 'edgePieceChoice') && !isPlaceablePhase(state)) {
     uiPhase = { type: 'idle' };
   }
 
   // 仮置きプレビューのゴーストを board へ渡す（computeHighlights の結果へ付加）。
   const withPreview = (opts: BoardRenderOptions): BoardRenderOptions => {
+    // 航海者: 道/船どちらを置くか選択中は、その辺に道と船の両方のゴーストを重ねて「ここに置く」と示す。
+    if (uiPhase.type === 'edgePieceChoice') {
+      opts.previewEdgeId = uiPhase.edgeId;
+      opts.previewShipEdgeId = uiPhase.edgeId;
+    }
     if (uiPhase.type === 'placePreview') {
       if (uiPhase.kind === 'road') opts.previewEdgeId = uiPhase.targetId;
       else if (uiPhase.kind === 'ship') opts.previewShipEdgeId = uiPhase.targetId;
@@ -1078,7 +1182,19 @@ function computeSheetStatus(): { text: string; alert: boolean } {
   // 航海者: 自分が金タイル産出の選択待ちなら案内（手番でなくても出す）。
   if (viewer && state.phase === 'MAIN' && state.turnPhase === 'GOLD'
       && ((state.pendingGoldChoice ?? {})[viewer] ?? 0) > 0) {
-    return { text: '✨ 金を選択！', alert: true };
+    // T&B イベント（豊作の年など）でも GOLD を流用しているため文言を出し分ける。
+    return { text: state.tbPendingEventNumber != null ? '✨ 資源を選択！' : '✨ 金を選択！', alert: true };
+  }
+  // 交易と蛮族イベント: 自分が選択待ちなら案内（手番でなくても出す）。
+  if (viewer && state.phase === 'MAIN') {
+    if (state.turnPhase === 'EVENT_GIVE' && (state.tbPendingEventGive ?? {})[viewer])
+      return { text: '🎁 左隣へ渡す資源を選択！', alert: true };
+    if (state.turnPhase === 'EVENT_HELPFUL' && (state.tbPendingEventHelpful ?? []).includes(viewer))
+      return { text: '🎁 渡す相手と資源を選択！', alert: true };
+    if (state.turnPhase === 'EVENT_STEAL' && state.tbPendingEventSteal?.playerId === viewer)
+      return { text: '⚔ 奪う相手を選択！', alert: true };
+    if (state.turnPhase === 'EVENT_DAMAGE' && (state.tbPendingEventDamage ?? []).includes(viewer))
+      return { text: '🚧 損傷させる自分の道をタップ', alert: true };
   }
   if (viewer && cur === viewer) {
     if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
@@ -1089,7 +1205,7 @@ function computeSheetStatus(): { text: string; alert: boolean } {
       }
       return { text: '🏠 開拓地を配置', alert: false };
     }
-    if (state.turnPhase === 'PRE_ROLL') return { text: '🎲 ダイス', alert: false };
+    if (state.turnPhase === 'PRE_ROLL') return { text: state.tbEventCards ? '🃏 イベントカードをめくる' : '🎲 ダイス', alert: false };
     if (state.turnPhase === 'ROBBER')   return { text: '🦹 盗賊を移動するタイルをタップ', alert: true };
     if (state.turnPhase === 'CITY_DOWNGRADE') return { text: '⚔ 格下げする自分の都市をタップ', alert: true };
     if (state.turnPhase === 'PROGRESS_DISCARD') return { text: '📜 進歩カードが5枚 — 捨てる1枚を選択', alert: true };
@@ -1411,6 +1527,9 @@ const RESET_UIPHASE_ACTIONS = new Set([
   'PLAY_KNIGHT', 'PLAY_YEAR_OF_PLENTY', 'PLAY_MONOPOLY', 'PLAY_ROAD_BUILDING',
   'FINISH_ROAD_BUILDING', 'END_TURN', 'DECLARE_VICTORY',
   'OFFER_TRADE', 'CONFIRM_TRADE', 'CANCEL_TRADE',
+  // 交易と蛮族「Catan for Two」: 強制交易の成立後は tbForcedTrade モーダルを閉じる
+  // （閉じないと give 選択が残り、確定を再送してエンジンが 'already spent tokens' を投げる）。
+  'TB_FORCED_TRADE',
 ]);
 
 // CPU行動の待ち時間(ms)。初見でもCPUの動きを追える速度を基準に再調整。
@@ -1573,6 +1692,18 @@ function scheduleAiTurn(): void {
     return;
   }
 
+  // 交易と蛮族イベント: 選択待ち（良き隣人/親切な隣人/衝突・交易優位/地震）。対象 CPU を1人ずつ自動解決。
+  if (state.phase === 'MAIN' && tbEventPendingIds(state).length > 0) {
+    const epid = tbEventPendingIds(state).find(p => state.players[p]?.type === 'ai');
+    if (epid) {
+      setTimeout(() => {
+        if (gen !== gameGeneration) return;
+        runCpuStep(epid, {});
+      }, aiDelayMs());
+    }
+    return;
+  }
+
   const pid = state.playerOrder[state.currentPlayerIndex]!;
   if (state.players[pid]?.type === 'ai') {
     const aiOpts: AiOpts = { skipPlayerTrade: cpuPlayerTradeOfferedThisTurn };
@@ -1637,6 +1768,10 @@ function cpuIsResponsible(): boolean {
   }
   if (state.phase === 'MAIN' && state.turnPhase === 'PROGRESS_DISCARD') {
     return (state.pendingProgressDiscard ?? []).some(p => state.players[p]?.type === 'ai');
+  }
+  // 交易と蛮族イベント: 選択待ちの対象に CPU がいる時だけ CPU 責任（GOLD 等と同方針）。
+  if (state.phase === 'MAIN' && tbEventPendingIds(state).length > 0) {
+    return tbEventPendingIds(state).some(p => state.players[p]?.type === 'ai');
   }
   const cur = state.playerOrder[state.currentPlayerIndex];
   return !!cur && state.players[cur]?.type === 'ai';
@@ -1726,13 +1861,34 @@ function safeFallbackAction(): Action | null {
     if (cpid) return chooseAction(state, cpid);
     return null;
   }
+  // 交易と蛮族イベント: 選択待ち（対象 CPU の選択を chooseAction で生成）。
+  if (state.phase === 'MAIN' && tbEventPendingIds(state).length > 0) {
+    const epid = tbEventPendingIds(state).find(p => state.players[p]?.type === 'ai');
+    if (epid) return chooseAction(state, epid);
+    return null;
+  }
   const cur = state.playerOrder[state.currentPlayerIndex];
   if (!cur || state.players[cur]?.type !== 'ai') return null; // 人間の番は強制しない
+  // 交易と蛮族「Catan for Two」: 中立コマの配置待ち（chooseAction=chooseTbNeutral が第一候補。
+  // 保険として最初の合法配置も直接探す。エンジンは合法手がある時だけこのフェーズに入る）。
+  if (state.turnPhase === 'TB_NEUTRAL') {
+    const a = chooseAction(state, cur);
+    if (a) return a;
+    for (const n of state.tbNeutralPlayerIds ?? []) {
+      if (state.tbNeutralPending === 'settlement') {
+        const v = Object.keys(state.vertices).find(vid => canBuildSettlement(state, n, vid));
+        if (v) return { type: 'TB_NEUTRAL_SETTLEMENT', owner: n, vertexId: v };
+      } else {
+        const eid = Object.keys(state.edges).find(x => canBuildRoad(state, n, x));
+        if (eid) return { type: 'TB_NEUTRAL_ROAD', owner: n, edgeId: eid };
+      }
+    }
+    return null;
+  }
   if (state.turnPhase === 'ROBBER') {
-    const robberTile = Object.values(state.tiles).find(t => t.hasRobber)?.id;
-    // 強盗は陸タイルのみ（海を除外しないと MOVE_ROBBER が弾かれ進行が止まりうる）。
-    const tileId = Object.keys(state.tiles).find(t => t !== robberTile && state.tiles[t]?.type !== 'sea');
-    // 強奪は必須: 手札持ちの相手がいれば選ぶ（chooseStealTarget が 0枚除外・不在なら null）。
+    // 合法な移動先から選ぶ（海・数字限定・親切な盗賊の保護ヘックスを避けないと MOVE_ROBBER が弾かれ進行が止まりうる）。
+    const tileId = getRobberMoveTargets(state)[0];
+    // 強奪は必須: 手札持ちの相手がいれば選ぶ（chooseStealTarget が 0枚・保護対象を除外・不在なら null）。
     if (tileId) return { type: 'MOVE_ROBBER', tileId, stealFromPlayerId: chooseStealTarget(state, tileId, cur) };
     return null;
   }
@@ -2427,13 +2583,20 @@ function triggerResourceAnimation(
   // ロールでこれらの保留フェーズに入った時はまだ資源が配られていないので生産アニメを出さない
   // （出すと「幻の資源」が飛び、さらに分配アニメ用ゲートで進行が約2秒固まる＝手前の処理が
   //   終わっていないように見える原因になっていた）。生産は保留が解けた時に出す。
+  // T&B イベントカード: イベント効果の選択待ち（EVENT_* / イベント由来のGOLD）中も生産は「保留」。
   const rollDeferred = action?.type === 'ROLL_DICE'
-    && (newState.turnPhase === 'CITY_DOWNGRADE' || newState.turnPhase === 'PROGRESS_DISCARD');
+    && (newState.turnPhase === 'CITY_DOWNGRADE' || newState.turnPhase === 'PROGRESS_DISCARD'
+      || newState.tbPendingEventNumber != null);
   // 保留が全て解決して生産が確定した瞬間（DOWNGRADE_CITY / DISCARD_PROGRESS でフェーズが抜けた）。
-  const deferredResolved = ck
+  const ckDeferredResolved = ck
     && (action?.type === 'DOWNGRADE_CITY' || action?.type === 'DISCARD_PROGRESS')
     && (oldState.turnPhase === 'CITY_DOWNGRADE' || oldState.turnPhase === 'PROGRESS_DISCARD')
     && newState.turnPhase !== 'CITY_DOWNGRADE' && newState.turnPhase !== 'PROGRESS_DISCARD';
+  // T&B: イベント選択の最後の1手（CHOOSE_EVENT_* / CHOOSE_GOLD）で保留数字が消えた＝生産が走った瞬間。
+  const tbDeferredResolved = (action?.type === 'CHOOSE_EVENT_GIVE' || action?.type === 'CHOOSE_EVENT_HELPFUL'
+      || action?.type === 'CHOOSE_EVENT_STEAL' || action?.type === 'CHOOSE_EVENT_DAMAGE' || action?.type === 'CHOOSE_GOLD')
+    && oldState.tbPendingEventNumber != null && newState.tbPendingEventNumber == null;
+  const deferredResolved = ckDeferredResolved || tbDeferredResolved;
   // ダイス生産アニメを出す総数。通常ロール（保留なし）か、保留解決時。盤面は確定後の newState 基準
   //（保留中に格下げされた都市を反映＝実際に配られた量と一致）。
   const prodTotal = isDice ? diceTotal
@@ -2533,6 +2696,26 @@ function triggerProgressCardAnimation(oldState: GameState, newState: GameState):
   // 「解決操作」なので待たせる必要がなく、待たせると解決が固まって見える原因になる。
   const pendingPhase = newState.turnPhase === 'CITY_DOWNGRADE' || newState.turnPhase === 'PROGRESS_DISCARD';
   if (any && !pendingPhase) holdResourceAnimating(delay + RES_FLY_MS + 120);
+}
+
+// 騎士と商人: 誰かが進歩カードを手に入れたら「○○がカードを手に入れた」と盤面へ全体通知する。
+// カードの種類は伏せる（公開情報の枚数差分だけを使う）。色イベント抽選・撃退同点・スパイ強奪など
+// カードが増える全経路をカバーする。飛行アニメ（triggerProgressCardAnimation）は reduced-motion で
+// 出ないため、情報としての告知はこちらで別に出す（reduced-motion でも表示）。蛮族襲来の全画面演出が
+// 出ている間は、それが消えてから告知する（被り防止）。
+function maybeNoticeProgressCardGain(prevState: GameState, newState: GameState): void {
+  if (!isCk(newState)) return;
+  const gainers: string[] = [];
+  for (const pid of newState.playerOrder) {
+    const before = prevState.players[pid]?.progressCardCount ?? prevState.players[pid]?.progressCards?.length ?? 0;
+    const after = newState.players[pid]?.progressCardCount ?? newState.players[pid]?.progressCards?.length ?? 0;
+    if (after > before) gainers.push(newState.players[pid]?.name ?? pid);
+  }
+  if (gainers.length === 0) return;
+  const msg = `🎴 ${gainers.join('・')} がカードを手に入れた`;
+  const delay = pendingOverlayDelay();
+  if (delay > 0) window.setTimeout(() => showBoardNotice(msg, '#c9a227'), delay + 120);
+  else showBoardNotice(msg, '#c9a227');
 }
 
 // 進歩カードを使用した瞬間、盤面中央へそのカードを大きく短時間表示する（何を使ったか分かりやすく）。
@@ -3149,6 +3332,7 @@ function runTransitionFx(
   }
   triggerResourceAnimation(prevState, state, action, diceTotal);
   triggerProgressCardAnimation(prevState, state);
+  maybeNoticeProgressCardGain(prevState, state);
   showPlayedProgressCard(prevState, state, action);
   animateBuildPlacement(action);
   triggerVpGainEffects(prevState, state);
@@ -3209,8 +3393,13 @@ function animateBuildPlacement(action: Action | undefined): void {
 }
 
 // ROLL_DICE ならダイス演出（赤・黄・イベントの3個＋CKの抽選/蛮族パネル）を見せてから finish。
+// 交易と蛮族「イベントカード」ではダイスは箱に戻っている＝カードめくり演出に差し替える。
 function runWithDiceAnim(action: Action | undefined, prevState: GameState, finish: () => void): void {
-  if (action?.type === 'ROLL_DICE' && state.lastDiceRoll) {
+  if (action?.type === 'ROLL_DICE' && state.tbEventCards && state.tbLastEventCard) {
+    diceAnimating = true;
+    _diceAnimStart = (typeof performance !== 'undefined' ? performance.now() : 0);
+    playTbEventCardReveal(state.tbLastEventCard, state.tbNewYearRebuilt === true, finish);
+  } else if (action?.type === 'ROLL_DICE' && state.lastDiceRoll) {
     diceAnimating = true;
     _diceAnimStart = (typeof performance !== 'undefined' ? performance.now() : 0);
     const [d1, d2] = state.lastDiceRoll;
@@ -3218,6 +3407,73 @@ function runWithDiceAnim(action: Action | undefined, prevState: GameState, finis
   } else {
     finish();
   }
+}
+
+// 交易と蛮族「イベントカード」: カードの1行説明（めくり演出用のUI文言）。
+const TB_EVENT_SUMMARY: Record<TbEventCard['event'], string> = {
+  beautiful_day:    '事件なし。数字のヘックスが通常どおり生産',
+  calm_seas:        '港に建物が最も多い人が、好きな資源1枚を獲得',
+  conflict:         '最大騎士力（無ければ騎士カード最多の1人）が誰かから1枚奪う',
+  earthquake:       '全員が自分の道1本を損傷。修理するまで道を建てられない',
+  epidemic:         'この生産では都市も資源1枚だけ',
+  good_neighbors:   '全員が左隣へ好きな資源1枚を渡す',
+  helpful_neighbor: '点数トップが、点数の低い人へ資源1枚を渡す',
+  new_year:         'イベントデッキを作り直す',
+  plentiful_year:   '全員が好きな資源1枚を獲得',
+  robber_attacks:   '「7」として解決！ 8枚以上は捨て札→盗賊が動く',
+  robber_flees:     '盗賊が砂漠へ帰る（誰からも奪わない）',
+  tournament:       '表向きの騎士カード最多の人が、好きな資源1枚を獲得',
+  trade_advantage:  '最長交易路の人が誰かから1枚奪う',
+};
+
+// カードめくり演出: ダイスの代わりに、めくったイベントカード（名前・数字・効果）を短時間見せる。
+function playTbEventCardReveal(card: TbEventCard, rebuilt: boolean, onDone: () => void): void {
+  const reduced = prefersReducedMotion();
+  const mode = diceFxMode();
+  const instant = reduced || mode === 'off';
+
+  const host = document.getElementById('board-area') ?? document.body;
+  const dim = showBoardDim(instant);
+  const overlay = document.createElement('div');
+  overlay.className = 'dice-roll-overlay';
+  const panel = document.createElement('div');
+  panel.className = 'dice-result-card tb-event-reveal';
+
+  if (rebuilt) {
+    const ny = document.createElement('div');
+    ny.textContent = '🔄 新年！ イベントデッキを作り直しました';
+    ny.style.cssText = 'font-size:14px;opacity:.9;margin-bottom:6px;';
+    panel.appendChild(ny);
+  }
+  const title = document.createElement('div');
+  title.textContent = `🃏 ${TB_EVENT_NAME[card.event]}`;
+  title.style.cssText = 'font-size:22px;font-weight:700;';
+  panel.appendChild(title);
+  if (card.number != null) {
+    // ダイス合計と同じ見た目の数字強調を流用（.dice-sum-total の黄色い大数字）。
+    const sum = document.createElement('div');
+    sum.className = 'dice-sum show';
+    const label = document.createElement('span');
+    label.className = 'dice-sum-label';
+    label.textContent = '生産数字';
+    const total = document.createElement('span');
+    total.className = 'dice-sum-total';
+    total.textContent = String(card.number);
+    sum.append(label, total);
+    panel.appendChild(sum);
+  }
+  const desc = document.createElement('div');
+  desc.textContent = TB_EVENT_SUMMARY[card.event];
+  desc.style.cssText = 'font-size:13px;opacity:.92;margin-top:6px;max-width:280px;';
+  panel.appendChild(desc);
+
+  overlay.appendChild(panel);
+  host.appendChild(overlay);
+  // 7(盗賊の襲撃)の不穏SEは演出後の runTransitionFx が鳴らす（ここで鳴らすと二重になる）。
+
+  const k = mode === 'fast' ? 0.6 : mode === 'slow' ? 1.5 : 1;
+  const hold = instant ? 900 : Math.round(2100 * k);
+  setTimeout(() => { overlay.remove(); hideBoardDim(dim); onDone(); }, hold);
 }
 
 // ターン終了時など、盤面を画面内に出す（スマホで操作パネルまでスクロールしている状態から戻す）。
@@ -3323,6 +3579,20 @@ function dispatch(action: Action): void {
       showBoardNotice('🗡 退去させる敵騎士をタップ（自分の道に隣接）');
       return;
     }
+    // クレーン: 割引改善が Lv4到達（=メトロポリス化）で、化ける都市の候補が2つ以上ある時は
+    //   改善ボタンと同じく盤面で都市を選ばせる（従来は先頭都市へ自動配置され選べなかった回帰の修正）。
+    if (pcard?.type === 'crane' && pHuman && action.choice?.craneMetropolisVertexId == null
+        && state.turnPhase === 'TRADE_BUILD') {
+      const chosen = action.choice?.craneTrack;
+      const track = (chosen && craneEligibleTracks(state, ppid).includes(chosen)) ? chosen : craneTrack(state, ppid);
+      if (track && improvementTakesMetropolis(state, ppid, track) && metropolisCityChoices(state, ppid).length > 1) {
+        pendingMetropolis = { track, via: 'crane', cardId: action.cardId };
+        document.querySelector('.help-overlay')?.remove();
+        setBuildMode('selectMetropolis');
+        showBoardNotice('🏛 メトロポリスにする自分の都市をタップ（+2点）');
+        return;
+      }
+    }
   }
   // 騎士と商人: 都市改善でメトロポリスを新規獲得し、化ける都市の候補が2つ以上ある時は
   // 自動でなく盤面で都市を選ばせる（候補1つ以下ならエンジンが自動配置）。
@@ -3332,7 +3602,7 @@ function dispatch(action: Action): void {
     if (iHuman && state.turnPhase === 'TRADE_BUILD'
         && improvementTakesMetropolis(state, ipid, action.track)
         && metropolisCityChoices(state, ipid).length > 1) {
-      pendingMetropolisTrack = action.track;
+      pendingMetropolis = { track: action.track, via: 'improvement' };
       document.querySelector('.help-overlay')?.remove();
       setBuildMode('selectMetropolis');
       showBoardNotice('🏛 メトロポリスにする自分の都市をタップ（+2点）');
@@ -3357,6 +3627,10 @@ function dispatch(action: Action): void {
         : action.type === 'CHOOSE_GOLD' ? action.playerId
         : action.type === 'DOWNGRADE_CITY' ? action.playerId
         : action.type === 'DISCARD_PROGRESS' ? action.playerId
+        : action.type === 'CHOOSE_EVENT_GIVE' ? action.playerId
+        : action.type === 'CHOOSE_EVENT_HELPFUL' ? action.playerId
+        : action.type === 'CHOOSE_EVENT_DAMAGE' ? action.playerId
+        : action.type === 'CHOOSE_EVENT_STEAL' ? prevState.tbPendingEventSteal?.playerId
         : action.type === 'RESPOND_TRADE' ? action.response.playerId
         : prevState.playerOrder[prevState.currentPlayerIndex];
       if (actorPid === selfPlayerId()) vibrateForAction(action);
@@ -3400,7 +3674,7 @@ function dispatch(action: Action): void {
       action.type === 'BUILD_IMPROVEMENT'
     ) {
       buildMode = 'idle';
-      pendingMetropolisTrack = null;
+      pendingMetropolis = null;
     }
 
     if (action.type === 'PLAY_ROAD_BUILDING') {
@@ -3409,8 +3683,9 @@ function dispatch(action: Action): void {
       if (currentPid(state) === selfPlayerId()) scrollToBoard();
     }
 
-    // 街道建設カード使用中は引き続き道建設モードを維持（2本目以降は同じ盤面なので再スクロールしない）
-    if (state.roadBuildingRoadsRemaining > 0) {
+    // 街道建設カード使用中は引き続き建設モードを維持（2本目以降は同じ盤面なので再スクロールしない）。
+    // 航海者: プレイヤーが「船を置く」を選んでいれば船モードを保持し、それ以外は道モードへ。
+    if (state.roadBuildingRoadsRemaining > 0 && buildMode !== 'ship') {
       buildMode = 'road';
     }
 
@@ -3511,8 +3786,133 @@ function isPlaceablePhase(s: GameState): boolean {
   return s.phase === 'MAIN' && s.turnPhase === 'TRADE_BUILD';
 }
 
+// バーを辺の画面位置（無ければ盤面下端中央）に合わせて配置する。
+function positionBarAtBoard(bar: HTMLElement, edgeId?: string): void {
+  const margin = 8;
+  const maxTop = window.innerHeight - bar.offsetHeight - margin;
+  // 辺が指定されていれば、その辺の実DOM位置の少し下に出す（「その場に」選ばせる）。
+  if (edgeId) {
+    const line = document.querySelector(`#board [data-edge-id="${edgeId}"]`) as SVGGraphicsElement | null;
+    if (line) {
+      const r = line.getBoundingClientRect();
+      bar.style.top = `${Math.round(Math.min(r.bottom + margin, Math.max(margin, maxTop)))}px`;
+      bar.style.left = `${Math.round(r.left + r.width / 2)}px`;
+      return;
+    }
+  }
+  const boardEl = document.getElementById('board');
+  if (boardEl) {
+    const r = boardEl.getBoundingClientRect();
+    bar.style.top = `${Math.round(Math.min(r.bottom + margin, Math.max(margin, maxTop)))}px`;
+    bar.style.left = `${Math.round(r.left + r.width / 2)}px`;
+  }
+}
+
+// 航海者: 海岸の辺で「道/船どちらを置くか」をその場に選ばせるバー。
+function updateEdgePieceChoiceBar(): void {
+  document.getElementById('edge-piece-choice')?.remove();
+  if (!state || uiPhase.type !== 'edgePieceChoice') return;
+  const edgeId = uiPhase.edgeId;
+
+  const bar = document.createElement('div');
+  bar.id = 'edge-piece-choice';
+  const text = document.createElement('span');
+  text.className = 'place-confirm-text';
+  text.textContent = 'ここに置くのは？';
+
+  const mkBtn = (label: string, kind: 'road' | 'ship'): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.className = `place-confirm-ok epc-${kind}`;
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      if (uiPhase.type !== 'edgePieceChoice') return;
+      const act = resolvePlacePreviewAction(state, currentPid(state), kind, edgeId);
+      uiPhase = { type: 'idle' };
+      if (act) dispatch(act);
+      redraw();
+    });
+    return b;
+  };
+  const cancel = document.createElement('button');
+  cancel.className = 'place-confirm-cancel';
+  cancel.textContent = '✕';
+  cancel.addEventListener('click', () => { uiPhase = { type: 'idle' }; redraw(); });
+
+  const actions = document.createElement('div');
+  actions.className = 'place-confirm-actions';
+  actions.append(mkBtn('🛤 道', 'road'), mkBtn('🚢 船', 'ship'), cancel);
+  bar.append(text, actions);
+  document.body.appendChild(bar);
+  positionBarAtBoard(bar, edgeId);
+}
+
+// 航海者: 盗賊(陸)と海賊(海)のどちらを動かすか、先に選ばせるバー。両方動かせる時だけ出す。
+function updateRobberPieceBar(): void {
+  document.getElementById('robber-piece-choice')?.remove();
+  if (!state || state.phase !== 'MAIN' || state.turnPhase !== 'ROBBER') return;
+  if (!boardCanAct()) return;                       // 自分が動かす場面のみ
+  if (uiPhase.type === 'robberTarget') return;      // 既にコマを置いて略奪相手を選ぶ最中は出さない
+  const avail = robberPieceAvail(state);
+  if (!(avail.robber && avail.pirate)) return;      // 片方だけなら選ぶ必要なし（従来どおり）
+
+  const bar = document.createElement('div');
+  bar.id = 'robber-piece-choice';
+  const text = document.createElement('span');
+  text.className = 'place-confirm-text';
+  text.textContent = robberPiece === null ? '⚔ どちらを動かす？' : '動かすコマ（切替できます）';
+
+  const mk = (label: string, piece: 'robber' | 'pirate'): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.className = 'place-confirm-ok' + (robberPiece === piece ? ' rpc-active' : '');
+    b.textContent = label;
+    b.addEventListener('click', () => setRobberPiece(piece));
+    return b;
+  };
+  const actions = document.createElement('div');
+  actions.className = 'place-confirm-actions';
+  actions.append(mk('🦹 盗賊', 'robber'), mk('🏴‍☠️ 海賊', 'pirate'));
+  bar.append(text, actions);
+  document.body.appendChild(bar);
+  positionBarAtBoard(bar);
+}
+
+// 交易と蛮族「Catan for Two」: どちらの中立に置くか先に選ばせるバー。両中立に置ける時だけ出す。
+function updateTbNeutralBar(): void {
+  document.getElementById('tb-neutral-choice')?.remove();
+  if (!state || state.phase !== 'MAIN' || state.turnPhase !== 'TB_NEUTRAL') return;
+  if (!boardCanAct()) return; // 自分が置く場面のみ
+  const avail = tbNeutralAvail(state);
+  if (avail.length < 2) return; // 片方しか置けなければ選ぶ必要なし（自動でその中立）
+
+  const bar = document.createElement('div');
+  bar.id = 'tb-neutral-choice';
+  const text = document.createElement('span');
+  text.className = 'place-confirm-text';
+  const pieceName = state.tbNeutralPending === 'settlement' ? '開拓地' : '道';
+  text.textContent = tbNeutralChoice === null
+    ? `🏳 どちらの中立に${pieceName}を置く？`
+    : '置く中立（切替できます）';
+
+  const mk = (nid: PlayerId): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.className = 'place-confirm-ok' + (tbNeutralChoice === nid ? ' rpc-active' : '');
+    b.textContent = state!.players[nid]?.name ?? nid;
+    b.addEventListener('click', () => setTbNeutralChoice(nid));
+    return b;
+  };
+  const actions = document.createElement('div');
+  actions.className = 'place-confirm-actions';
+  actions.append(...avail.map(mk));
+  bar.append(text, actions);
+  document.body.appendChild(bar);
+  positionBarAtBoard(bar);
+}
+
 // 仮置きプレビュー中の確認バー（盤面に被らない固定位置）。確定で建設、やめるで取消。
 function updatePlaceConfirmBar(): void {
+  updateEdgePieceChoiceBar();
+  updateRobberPieceBar();
+  updateTbNeutralBar();
   document.getElementById('place-confirm')?.remove();
   if (!state || uiPhase.type !== 'placePreview') return;
   // 騎士と商人の即時系（起動/昇格/商人）は「建てる？」でなく動作に合わせた文言にする。
@@ -3569,7 +3969,10 @@ function setUIPhase(phase: UIPhase): void {
   // 仮置きプレビューの出し入れ以外の uiPhase 変更（モーダルの +/− 等）では盤面再構築を省く。
   // 例外: robberTarget は盗賊/海賊コマを移動先へプレビュー描画するため盤面を再構築する。
   const robberPhaseChange = phase.type === 'robberTarget' || uiPhase.type === 'robberTarget';
-  const skipBoard = !robberPhaseChange && uiPhase.type !== 'placePreview' && phase.type !== 'placePreview';
+  // placePreview と edgePieceChoice はゴースト/選択の出し入れで盤面SVGを作り直す必要がある。
+  const boardPreviewChange = uiPhase.type === 'placePreview' || phase.type === 'placePreview'
+    || uiPhase.type === 'edgePieceChoice' || phase.type === 'edgePieceChoice';
+  const skipBoard = !robberPhaseChange && !boardPreviewChange;
   // 複数相手の選択に入る瞬間（または開いたまま別タイルへ選び直した時）、まずコマを移動先タイルへ
   // 動かす（「駒移動→相手選択」の順序）。海賊はスライド演出が無いのでプレビュー描画でジャンプ。
   if (phase.type === 'robberTarget' && state
@@ -3609,6 +4012,17 @@ let boardEventsAttached = false;
 // 盤面クリック/ジェスチャの登録は一度だけ（ローカル/LAN 共通の単一経路）。
 // ※ startGame と startLanGame で別々に attachBoardEvents を呼ぶと引数の渡し忘れ（発明家の
 //   getter/setter 欠落で inventorSwap が無反応になった回帰）が起きるため、必ずこの関数に集約する。
+// メトロポリス手動選択で都市をタップした時に投げるアクション（改善ボタン or クレーンカード経由）。
+// 候補外の頂点は events.ts 側で弾かれるため、ここでは pendingMetropolis の発生源だけで分岐する。
+function metropolisPickAction(vid: string): Action | null {
+  if (!pendingMetropolis) return null;
+  if (pendingMetropolis.via === 'crane') {
+    return { type: 'PLAY_PROGRESS', cardId: pendingMetropolis.cardId,
+      choice: { craneTrack: pendingMetropolis.track, craneMetropolisVertexId: vid } };
+  }
+  return { type: 'BUILD_IMPROVEMENT', track: pendingMetropolis.track, metropolisVertexId: vid };
+}
+
 function attachBoardEventsOnce(): void {
   if (boardEventsAttached) return;
   attachBoardEvents(
@@ -3616,9 +4030,11 @@ function attachBoardEventsOnce(): void {
     () => moveShipFrom, setMoveShipFrom,
     () => moveKnightFrom, setMoveKnightFrom,
     () => inventorFirstTile, setInventorFirst,
-    () => pendingMetropolisTrack,
+    metropolisPickAction,
     () => smithFirstKnight, setSmithFirst,
     () => deserterRemoveVid, setDeserterRemove,
+    () => robberPiece,
+    () => (state ? tbNeutralActingOwner(state) : null),
   );
   attachBoardGestures(svgBoard, () => boardViewport, setBoardViewport);
   installHexTooltip(svgBoard, () => state);
@@ -3799,6 +4215,12 @@ function boardCanAct(): boolean {
   // 騎士と商人: 都市格下げは多人数解決。対象（LAN=viewer/ローカル=人間）は手番外でも盤面操作可。
   if (state.turnPhase === 'CITY_DOWNGRADE') {
     const pending = state.pendingCityDowngrade ?? [];
+    if (netMode) return viewerPlayerId != null && pending.includes(viewerPlayerId);
+    return pending.some(p => state.players[p]?.type === 'human');
+  }
+  // 交易と蛮族イベント「地震」: 対象は手番外でも盤面（自分の道）をタップして解決する。
+  if (state.turnPhase === 'EVENT_DAMAGE') {
+    const pending = state.tbPendingEventDamage ?? [];
     if (netMode) return viewerPlayerId != null && pending.includes(viewerPlayerId);
     return pending.some(p => state.players[p]?.type === 'human');
   }
@@ -4018,6 +4440,12 @@ function playActionSE(action: Action): void {
     case 'DECLARE_VICTORY':   playSE('victory'); break;
     case 'DISCARD_RESOURCES': playSE('discardLose'); break;
     case 'CHOOSE_GOLD':       playSE('build'); break;
+    // 交易と蛮族「イベントカード」: 選択解決のSE（既存音の流用）。
+    case 'CHOOSE_EVENT_GIVE':
+    case 'CHOOSE_EVENT_HELPFUL': playSE('tradeOk'); break;
+    case 'CHOOSE_EVENT_STEAL':   if (action.targetPlayerId != null) playSE('robber'); break;
+    case 'CHOOSE_EVENT_DAMAGE':  playSE('discardLose'); break;
+    case 'REPAIR_ROAD':          playSE('build'); break;
   }
 }
 
@@ -4060,7 +4488,7 @@ function applyNetState(action: Action | undefined, newState: GameState): void {
   if (action && (action.type === 'BUILD_ROAD' || action.type === 'BUILD_SETTLEMENT' || action.type === 'BUILD_CITY'
       || action.type === 'PLAY_PROGRESS' || action.type === 'BUILD_IMPROVEMENT')) {
     buildMode = 'idle';
-    pendingMetropolisTrack = null;
+    pendingMetropolis = null;
     inventorFirstTile = null;
     smithFirstKnight = null;
     deserterRemoveVid = null;
@@ -4112,6 +4540,10 @@ function netDispatch(action: Action): void {
     action.type === 'CHOOSE_GOLD'       ? action.playerId :
     action.type === 'DOWNGRADE_CITY'    ? action.playerId :
     action.type === 'DISCARD_PROGRESS'  ? action.playerId :
+    action.type === 'CHOOSE_EVENT_GIVE'    ? action.playerId :
+    action.type === 'CHOOSE_EVENT_HELPFUL' ? action.playerId :
+    action.type === 'CHOOSE_EVENT_DAMAGE'  ? action.playerId :
+    action.type === 'CHOOSE_EVENT_STEAL'   ? (state.tbPendingEventSteal?.playerId ?? currentPid(state)) :
     action.type === 'RESPOND_TRADE'     ? action.response.playerId :
     currentPid(state);
   if (actor !== viewerPlayerId) return; // 自分の操作できる場面のみ送信
