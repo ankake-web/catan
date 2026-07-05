@@ -160,6 +160,8 @@ export type UIPhase =
   | { type: 'monopoly'; resource: ResourceType | null }
   | { type: 'robberTarget'; tileId: string; opponents: PlayerId[]; kind?: 'robber' | 'pirate' }
   | { type: 'placePreview'; kind: 'settlement' | 'city' | 'road' | 'ship' | 'activateKnight' | 'upgradeKnight' | 'placeMerchant'; targetId: string }
+  // 航海者: 海岸の辺は道も船も置ける。タップ時にどちらを置くか盤面でその場に選ばせる。
+  | { type: 'edgePieceChoice'; edgeId: string }
   | { type: 'playerTradeOffer'; give: ResourceHand; receive: ResourceHand; targetPids: PlayerId[] };
 
 // ============================================================
@@ -2034,10 +2036,18 @@ function buildActionButtons(
 
   // ---- 街道建設カード使用中 ----
   if (state.roadBuildingRoadsRemaining > 0) {
+    // 航海者: 街道建設は道だけでなく船も無料配置できる（道2／船2／道1+船1）。
+    // 海のある盤では「船を置く」ボタンも出す（基本盤・オアシスは船が無いので道だけ）。
+    const rbHasSea = !state.noShips && Object.values(state.tiles).some(t => t.type === 'sea');
     const info = el('div', 'turn-phase-text');
-    info.textContent = `🛤 街道建設カード使用中（残り ${state.roadBuildingRoadsRemaining} 本）`;
+    info.textContent = rbHasSea
+      ? `🛤 街道建設カード使用中（残り ${state.roadBuildingRoadsRemaining} 本・道でも船でもOK）`
+      : `🛤 街道建設カード使用中（残り ${state.roadBuildingRoadsRemaining} 本）`;
     div.appendChild(info);
     div.appendChild(modeBtn('🛤 道を置く', 'road', player.remainingRoads > 0, buildMode, setBuildMode));
+    if (rbHasSea) {
+      div.appendChild(modeBtn('🚢 船を置く', 'ship', (player.remainingShips ?? 0) > 0, buildMode, setBuildMode));
+    }
     div.appendChild(makeBtn('✓ 道路建設を完了', 'btn-end', false, () => dispatch({ type: 'FINISH_ROAD_BUILDING' })));
     return div;
   }

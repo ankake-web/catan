@@ -430,6 +430,8 @@ export function attachBoardEvents(
   //   非nullなら2手目＝獲得騎士の設置先選択へ切替。
   getDeserterRemove: () => string | null = () => null,
   setDeserterRemove: (vid: string | null) => void = () => {},
+  // 航海者・盗賊/海賊の事前選択: 'robber'=盗賊(陸)のみ / 'pirate'=海賊(海)のみ / null=未選択（両方動かせる盤で先に選ぶ）。
+  getRobberPiece: () => 'robber' | 'pirate' | null = () => null,
 ): void {
   svg.addEventListener('click', (e) => {
     // 直前のパン/ピンチで動いた指のクリックは配置に使わない（誤配置防止）。
@@ -450,7 +452,7 @@ export function attachBoardEvents(
         const pt = clickToBoardPixel(svg, e.clientX, e.clientY);
         if (pt) tileId = nearestTileId(state, pt.x, pt.y);
       }
-      if (tileId) handleTileClick(tileId, state, pid, setUIPhase, dispatch);
+      if (tileId) handleTileClick(tileId, state, pid, setUIPhase, dispatch, getRobberPiece());
       return;
     }
 
@@ -739,17 +741,12 @@ export function attachBoardEvents(
       const eid = nearestValidEdgeId(state, pid, mode, pt.x, pt.y);
       const sid = nearestValidShipEdgeId(state, pid, mode, pt.x, pt.y);
       // 道と船の両方が候補になる場面（航海者の初期配置＝海岸の開拓地／街道建設カード）では、
-      // タップ位置に近い方を選ぶ（道を先に決め打ちすると沿岸で船を選べない）。
-      if (eid && sid) {
-        if (edgeDist2(state, sid, pt.x, pt.y) < edgeDist2(state, eid, pt.x, pt.y)) {
-          placeShipEdge(sid, state, pid, setUIPhase, dispatch);
-        } else {
-          placeEdge(eid, state, pid, mode, setUIPhase, dispatch);
-        }
-        return;
-      }
-      if (eid) { placeEdge(eid, state, pid, mode, setUIPhase, dispatch); return; }
-      if (sid) { placeShipEdge(sid, state, pid, setUIPhase, dispatch); return; }
+      // タップ位置に近い方の辺を採用。その辺が道も船も置けるなら placeEdgeSmart が
+      // その場に「道/船」の選択を出す（片方だけなら即配置）。
+      const near = (eid && sid)
+        ? (edgeDist2(state, sid, pt.x, pt.y) < edgeDist2(state, eid, pt.x, pt.y) ? sid : eid)
+        : (eid ?? sid);
+      if (near) { placeEdgeSmart(near, state, pid, mode, setUIPhase, dispatch); return; }
     }
 
     // ---- フォールバック: 直接ヒットした要素（マウスの精密クリック等）----
@@ -762,13 +759,13 @@ export function attachBoardEvents(
     const shipEl = target.closest('[data-ship-edge-id]');
     if (shipEl) {
       const sid = shipEl.getAttribute('data-ship-edge-id');
-      if (sid) placeShipEdge(sid, state, pid, setUIPhase, dispatch);
+      if (sid) placeEdgeSmart(sid, state, pid, mode, setUIPhase, dispatch);
       return;
     }
     const edgeEl = target.closest('[data-edge-id]');
     if (edgeEl) {
       const edgeId = edgeEl.getAttribute('data-edge-id');
-      if (edgeId) placeEdge(edgeId, state, pid, mode, setUIPhase, dispatch);
+      if (edgeId) placeEdgeSmart(edgeId, state, pid, mode, setUIPhase, dispatch);
     }
   });
 }
@@ -819,6 +816,33 @@ function placeShipEdge(
   } else {
     dispatch({ type: 'BUILD_SHIP', edgeId: eid });
   }
+}
+
+// 航海者: いまの局面で「道も船も」置ける状況か（＝辺タップ時に道/船を選ばせるべきか）。
+//   - 初期配置(SETUP)の2個目: 海岸の開拓地なら道か船。
+//   - 街道建設カード使用中（道モード）: 道2/船2/道1+船1。
+//   - 通常の道モード・船モードは単一なので選択は出さない（船モードは船だけ）。
+function bothPiecesOffered(state: GameState, mode: BuildMode): boolean {
+  const isSetup = state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD';
+  if (isSetup) return state.setupSubPhase === 'PLACE_ROAD';
+  if (mode === 'ship') return false;
+  return state.turnPhase === 'TRADE_BUILD' && state.roadBuildingRoadsRemaining > 0;
+}
+
+// 辺への配置（道/船どちらもありうる場面の入口）。海岸の辺で道も船も置けるなら
+// その場で「道/船」を選ばせ、片方だけなら従来どおり即配置（＝迷いなく置ける）。
+export function placeEdgeSmart(
+  eid: string, state: GameState, pid: PlayerId, mode: BuildMode,
+  setUIPhase: (p: UIPhase) => void, dispatch: (a: Action) => void,
+): void {
+  if (bothPiecesOffered(state, mode) && canBuildRoad(state, pid, eid) && canBuildShip(state, pid, eid)) {
+    setUIPhase({ type: 'edgePieceChoice', edgeId: eid });
+    return;
+  }
+  // 単一可: 船モードは船、それ以外は置ける方（道優先→船）。
+  if (mode === 'ship') { placeShipEdge(eid, state, pid, setUIPhase, dispatch); return; }
+  if (canBuildRoad(state, pid, eid)) { placeEdge(eid, state, pid, mode, setUIPhase, dispatch); return; }
+  placeShipEdge(eid, state, pid, setUIPhase, dispatch);
 }
 
 // 仮置きプレビューを確定して実アクションへ変換する（main.ts の確認バーから呼ぶ）。
@@ -1022,16 +1046,28 @@ export function attachBoardGestures(
 // 個別ハンドラ
 // ============================================================
 
-function handleTileClick(
+export function handleTileClick(
   tileId: string,
   state: GameState,
   pid: PlayerId,
   setUIPhase: (p: UIPhase) => void,
   dispatch: (a: Action) => void,
+  // 航海者: 先に選んだコマ（'robber'=盗賊/'pirate'=海賊）。両方動かせる盤で選択前(null)はタップを無視する。
+  piece: 'robber' | 'pirate' | null = null,
 ): void {
   if (state.phase !== 'MAIN' || state.turnPhase !== 'ROBBER') return;
   const tile = state.tiles[tileId];
   if (!tile) return;
+
+  // 航海者: 盗賊も海賊も動かせる盤では、先に選んだコマ以外のタイルは無視する（選択前は両方無視）。
+  const robberAvail = getRobberMoveTargets(state).length > 0;
+  const pirateAvail = state.piratePosition != null
+    && Object.values(state.tiles).some(t => t.type === 'sea' && t.id !== state.piratePosition);
+  if (robberAvail && pirateAvail) {
+    if (piece == null) return;                       // 先に盗賊/海賊を選ぶ
+    if (tile.type === 'sea' && piece !== 'pirate') return;
+    if (tile.type !== 'sea' && piece !== 'robber') return;
+  }
 
   // ---- 海タイル: 海賊を移動（隣接船の所有者から奪う）----
   if (tile.type === 'sea') {

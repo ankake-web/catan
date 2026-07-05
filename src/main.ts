@@ -646,12 +646,18 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
       // 盗賊(陸)＋海賊(海)の移動先。陸側の合法集合は getRobberMoveTargets に一元化
       // （現在地除外・S5 の数字ヘックス限定・T&B 親切な盗賊の2VP保護と砂漠フォールバック）。
       const landTargets = new Set(getRobberMoveTargets(state));
+      // 航海者: 盗賊も海賊も動かせる時は、先に選んだ方(robberPiece)のタイルだけ光らせる。
+      // 未選択(null)なら何も光らせず、picker で選ばせる。片方しか無い盤は従来どおり両方判定。
+      const avail = robberPieceAvail(state);
+      const both = avail.robber && avail.pirate;
+      const showLand = both ? robberPiece === 'robber' : avail.robber;
+      const showSea = both ? robberPiece === 'pirate' : avail.pirate;
       opts.validTileIds = new Set(
         Object.keys(state.tiles).filter(tid => {
           const t = state.tiles[tid]!;
           // 海タイルは海賊の移動先（現在地は除外）。
-          if (t.type === 'sea') return tid !== state.piratePosition;
-          return landTargets.has(tid);
+          if (t.type === 'sea') return showSea && tid !== state.piratePosition;
+          return showLand && landTargets.has(tid);
         }),
       );
       return opts;
@@ -820,6 +826,17 @@ let uiPhase: UIPhase = { type: 'idle' };
 // 強盗/海賊を「先に移動」してから相手選択させる時、移動先をプレビュー描画したタイル。
 // 相手確定(MOVE_ROBBER/MOVE_PIRATE)時の二重スライドを抑止するためにも使う。
 let robberPreviewedTile: string | null = null;
+// 航海者: 7/騎士でコマを動かす時、盗賊(陸)と海賊(海)のどちらを動かすか先に選ばせる。
+// null=未選択（両方動かせる時は先に選ぶまで盤面は光らせない）。ROBBER フェーズ外では常に null に戻す。
+let robberPiece: 'robber' | 'pirate' | null = null;
+function setRobberPiece(p: 'robber' | 'pirate' | null): void { robberPiece = p; redraw(); }
+// 盗賊(陸)・海賊(海)がそれぞれ「動かせる先があるか」。両方 true の時だけ先に選ばせる。
+function robberPieceAvail(s: GameState): { robber: boolean; pirate: boolean } {
+  const robber = getRobberMoveTargets(s).length > 0;
+  const pirate = s.piratePosition != null
+    && Object.values(s.tiles).some(t => t.type === 'sea' && t.id !== s.piratePosition);
+  return { robber, pirate };
+}
 let lastConfig: HomeConfig | null = null;
 
 // ---- LAN対戦（サーバ権威）----
@@ -967,6 +984,9 @@ function redraw(skipBoard = false): void {
   // ゲーム進行中は three(WebGL ダイス) を裏で先読み（初回ロールまでに用意。多重ロードは内部ガード）。
   if (state.phase === 'MAIN') preloadDiceGL();
 
+  // 航海者: 盗賊/海賊の事前選択は ROBBER フェーズ限定。フェーズを抜けたら選択をリセットする。
+  if (!(state.phase === 'MAIN' && state.turnPhase === 'ROBBER') && robberPiece !== null) robberPiece = null;
+
   // DISCARD フェーズの uiPhase 自動同期。
   // LAN ではマスク済み state のため discardPid は「自分（8枚以上の場合）」に
   // 自然解決し、捨て札UIが各端末で自分の分だけ出る。
@@ -996,13 +1016,18 @@ function redraw(skipBoard = false): void {
     robberPreviewedTile = null;
   }
 
-  // 仮置きプレビュー(placePreview)は、配置できない局面/GAME_OVER では破棄する。
-  if (uiPhase.type === 'placePreview' && !isPlaceablePhase(state)) {
+  // 仮置きプレビュー(placePreview)/道船選択(edgePieceChoice)は、配置できない局面/GAME_OVER では破棄する。
+  if ((uiPhase.type === 'placePreview' || uiPhase.type === 'edgePieceChoice') && !isPlaceablePhase(state)) {
     uiPhase = { type: 'idle' };
   }
 
   // 仮置きプレビューのゴーストを board へ渡す（computeHighlights の結果へ付加）。
   const withPreview = (opts: BoardRenderOptions): BoardRenderOptions => {
+    // 航海者: 道/船どちらを置くか選択中は、その辺に道と船の両方のゴーストを重ねて「ここに置く」と示す。
+    if (uiPhase.type === 'edgePieceChoice') {
+      opts.previewEdgeId = uiPhase.edgeId;
+      opts.previewShipEdgeId = uiPhase.edgeId;
+    }
     if (uiPhase.type === 'placePreview') {
       if (uiPhase.kind === 'road') opts.previewEdgeId = uiPhase.targetId;
       else if (uiPhase.kind === 'ship') opts.previewShipEdgeId = uiPhase.targetId;
@@ -3683,8 +3708,100 @@ function isPlaceablePhase(s: GameState): boolean {
   return s.phase === 'MAIN' && s.turnPhase === 'TRADE_BUILD';
 }
 
+// バーを辺の画面位置（無ければ盤面下端中央）に合わせて配置する。
+function positionBarAtBoard(bar: HTMLElement, edgeId?: string): void {
+  const margin = 8;
+  const maxTop = window.innerHeight - bar.offsetHeight - margin;
+  // 辺が指定されていれば、その辺の実DOM位置の少し下に出す（「その場に」選ばせる）。
+  if (edgeId) {
+    const line = document.querySelector(`#board [data-edge-id="${edgeId}"]`) as SVGGraphicsElement | null;
+    if (line) {
+      const r = line.getBoundingClientRect();
+      bar.style.top = `${Math.round(Math.min(r.bottom + margin, Math.max(margin, maxTop)))}px`;
+      bar.style.left = `${Math.round(r.left + r.width / 2)}px`;
+      return;
+    }
+  }
+  const boardEl = document.getElementById('board');
+  if (boardEl) {
+    const r = boardEl.getBoundingClientRect();
+    bar.style.top = `${Math.round(Math.min(r.bottom + margin, Math.max(margin, maxTop)))}px`;
+    bar.style.left = `${Math.round(r.left + r.width / 2)}px`;
+  }
+}
+
+// 航海者: 海岸の辺で「道/船どちらを置くか」をその場に選ばせるバー。
+function updateEdgePieceChoiceBar(): void {
+  document.getElementById('edge-piece-choice')?.remove();
+  if (!state || uiPhase.type !== 'edgePieceChoice') return;
+  const edgeId = uiPhase.edgeId;
+
+  const bar = document.createElement('div');
+  bar.id = 'edge-piece-choice';
+  const text = document.createElement('span');
+  text.className = 'place-confirm-text';
+  text.textContent = 'ここに置くのは？';
+
+  const mkBtn = (label: string, kind: 'road' | 'ship'): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.className = `place-confirm-ok epc-${kind}`;
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      if (uiPhase.type !== 'edgePieceChoice') return;
+      const act = resolvePlacePreviewAction(state, currentPid(state), kind, edgeId);
+      uiPhase = { type: 'idle' };
+      if (act) dispatch(act);
+      redraw();
+    });
+    return b;
+  };
+  const cancel = document.createElement('button');
+  cancel.className = 'place-confirm-cancel';
+  cancel.textContent = '✕';
+  cancel.addEventListener('click', () => { uiPhase = { type: 'idle' }; redraw(); });
+
+  const actions = document.createElement('div');
+  actions.className = 'place-confirm-actions';
+  actions.append(mkBtn('🛤 道', 'road'), mkBtn('🚢 船', 'ship'), cancel);
+  bar.append(text, actions);
+  document.body.appendChild(bar);
+  positionBarAtBoard(bar, edgeId);
+}
+
+// 航海者: 盗賊(陸)と海賊(海)のどちらを動かすか、先に選ばせるバー。両方動かせる時だけ出す。
+function updateRobberPieceBar(): void {
+  document.getElementById('robber-piece-choice')?.remove();
+  if (!state || state.phase !== 'MAIN' || state.turnPhase !== 'ROBBER') return;
+  if (!boardCanAct()) return;                       // 自分が動かす場面のみ
+  if (uiPhase.type === 'robberTarget') return;      // 既にコマを置いて略奪相手を選ぶ最中は出さない
+  const avail = robberPieceAvail(state);
+  if (!(avail.robber && avail.pirate)) return;      // 片方だけなら選ぶ必要なし（従来どおり）
+
+  const bar = document.createElement('div');
+  bar.id = 'robber-piece-choice';
+  const text = document.createElement('span');
+  text.className = 'place-confirm-text';
+  text.textContent = robberPiece === null ? '⚔ どちらを動かす？' : '動かすコマ（切替できます）';
+
+  const mk = (label: string, piece: 'robber' | 'pirate'): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.className = 'place-confirm-ok' + (robberPiece === piece ? ' rpc-active' : '');
+    b.textContent = label;
+    b.addEventListener('click', () => setRobberPiece(piece));
+    return b;
+  };
+  const actions = document.createElement('div');
+  actions.className = 'place-confirm-actions';
+  actions.append(mk('🦹 盗賊', 'robber'), mk('🏴‍☠️ 海賊', 'pirate'));
+  bar.append(text, actions);
+  document.body.appendChild(bar);
+  positionBarAtBoard(bar);
+}
+
 // 仮置きプレビュー中の確認バー（盤面に被らない固定位置）。確定で建設、やめるで取消。
 function updatePlaceConfirmBar(): void {
+  updateEdgePieceChoiceBar();
+  updateRobberPieceBar();
   document.getElementById('place-confirm')?.remove();
   if (!state || uiPhase.type !== 'placePreview') return;
   // 騎士と商人の即時系（起動/昇格/商人）は「建てる？」でなく動作に合わせた文言にする。
@@ -3741,7 +3858,10 @@ function setUIPhase(phase: UIPhase): void {
   // 仮置きプレビューの出し入れ以外の uiPhase 変更（モーダルの +/− 等）では盤面再構築を省く。
   // 例外: robberTarget は盗賊/海賊コマを移動先へプレビュー描画するため盤面を再構築する。
   const robberPhaseChange = phase.type === 'robberTarget' || uiPhase.type === 'robberTarget';
-  const skipBoard = !robberPhaseChange && uiPhase.type !== 'placePreview' && phase.type !== 'placePreview';
+  // placePreview と edgePieceChoice はゴースト/選択の出し入れで盤面SVGを作り直す必要がある。
+  const boardPreviewChange = uiPhase.type === 'placePreview' || phase.type === 'placePreview'
+    || uiPhase.type === 'edgePieceChoice' || phase.type === 'edgePieceChoice';
+  const skipBoard = !robberPhaseChange && !boardPreviewChange;
   // 複数相手の選択に入る瞬間（または開いたまま別タイルへ選び直した時）、まずコマを移動先タイルへ
   // 動かす（「駒移動→相手選択」の順序）。海賊はスライド演出が無いのでプレビュー描画でジャンプ。
   if (phase.type === 'robberTarget' && state
@@ -3802,6 +3922,7 @@ function attachBoardEventsOnce(): void {
     metropolisPickAction,
     () => smithFirstKnight, setSmithFirst,
     () => deserterRemoveVid, setDeserterRemove,
+    () => robberPiece,
   );
   attachBoardGestures(svgBoard, () => boardViewport, setBoardViewport);
   installHexTooltip(svgBoard, () => state);
