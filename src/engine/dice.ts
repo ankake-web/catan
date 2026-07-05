@@ -53,6 +53,10 @@ export function computeDiceProduction(
       const vertex = state.vertices[vid];
       if (!vertex?.building) continue;
       const { playerId, type } = vertex.building;
+      // 交易と蛮族「Catan for Two」: 中立プレイヤーの開拓地は資源を受け取らない（CN3089 p7）。
+      // 需要にも算入しない——算入すると affectedPids/totalDemand が中立の「幻の需要」で膨らみ、
+      // バンク枯渇判定（複数人不足で全没収／単独例外の消失）が誤発動して実プレイヤーの配布がズレる。
+      if (state.players[playerId]?.type === 'neutral') continue;
       // 交易と蛮族イベント「疫病(EPIDEMIC)」: このターンの生産は都市も資源1枚のみ（CN3089 p5）。
       const amount = type === 'city' && !state.tbEpidemic ? 2 : 1;
       demand[resource][playerId] = (demand[resource][playerId] ?? 0) + amount;

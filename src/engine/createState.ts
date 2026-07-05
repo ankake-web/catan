@@ -15,9 +15,13 @@ import type { PlayerOrderMode } from './setup';
 import { getScenario } from './scenarios';
 import type { ScenarioId } from './scenarios';
 import { buildDevDeck } from './game';
-import { makeHand, makeCommodities, BANK_INITIAL, COMMODITY_BANK_INITIAL, TB_EVENT_CARDS_36 } from '../constants';
+import {
+  makeHand, makeCommodities, BANK_INITIAL, COMMODITY_BANK_INITIAL, TB_EVENT_CARDS_36,
+  TB2_TRADE_TOKEN_TOTAL, TB2_TRADE_TOKEN_START,
+} from '../constants';
 import { buildProgressDecks } from './citiesKnights';
 import { buildTbEventDeck } from './tbEvents';
+import { tbTwoNeutralStartVertices } from './tbTwo';
 
 export interface PlayerSpec {
   readonly id: PlayerId;
@@ -101,6 +105,51 @@ export function createInitialGameState(
 
   const playerOrder = resolvePlayerOrder(allIds, orderMode, orderSpec, rng);
 
+  // ---- 交易と蛮族「Catan for Two（2人用）」: 中立プレイヤー2人（残り2色）＋初期開拓地＋trade token ----
+  const tb2 = scenario.rules?.catanForTwo === true;
+  // 実プレイヤーは厳密に2人（公式 p7）。UI/LAN 側で2人に制限するが、エンジンでも不変条件として守る。
+  if (tb2 && specs.length !== 2) {
+    throw new Error(`createInitialGameState: Catan for Two requires exactly 2 players (got ${specs.length})`);
+  }
+  const TB2_COLOR_NAME: Record<PlayerColor, string> = { red: '赤', blue: '青', purple: '紫', orange: '橙' };
+  let tb2NeutralIds: PlayerId[] = [];
+  if (tb2) {
+    const usedIds = new Set<PlayerId>(allIds);
+    const usedColors = new Set(specs.map(s => s.color));
+    tb2NeutralIds = (['player1', 'player2', 'player3', 'player4'] as PlayerId[]).filter(id => !usedIds.has(id));
+    const freeColors = (['red', 'blue', 'purple', 'orange'] as PlayerColor[]).filter(c => !usedColors.has(c));
+    tb2NeutralIds.forEach((nid, i) => {
+      const color = freeColors[i] ?? 'purple';
+      players[nid] = {
+        id: nid,
+        name: `中立(${TB2_COLOR_NAME[color]})`,
+        color,
+        type: 'neutral',
+        hand: makeHand(),
+        devCards: [],
+        remainingRoads: 15,
+        remainingShips: 0,   // 中立は道と開拓地のみ（船・都市は持たない・CN3089 p7）
+        remainingSettlements: 5,
+        remainingCities: 0,
+        knightsPlayed: 0,
+        longestRoadLength: 0,
+        hasLongestRoad: false,
+        hasLargestArmy: false,
+      };
+    });
+    // 各中立に開拓地1（道なし）を図示位置へ（p7 図版確定＝盤中心から水平±2ヘックスの2交点）。
+    // geo は本ゲーム専用の新規オブジェクトなので直接更新してよい（createHarbors と同じ扱い）。
+    const startVerts = tbTwoNeutralStartVertices(geo);
+    if (startVerts.length !== 2) {
+      throw new Error('createInitialGameState: Catan for Two requires the standard 19-hex board');
+    }
+    startVerts.forEach((vid, i) => {
+      const nid = tb2NeutralIds[i]!;
+      geo.vertices[vid] = { ...geo.vertices[vid]!, building: { type: 'settlement', playerId: nid } };
+      players[nid] = { ...players[nid]!, remainingSettlements: players[nid]!.remainingSettlements - 1 };
+    });
+  }
+
   // S7 海賊の島々: 要塞を手番順でプレイヤーへ割り当てる（各自が自色の要塞を攻略）。
   const fortresses: GameState['fortresses'] | undefined = fortressVertices
     ? Object.fromEntries(
@@ -154,6 +203,20 @@ export function createInitialGameState(
     // 交易と蛮族「イベントカード」: 有効時はイベントデッキを作成して配線（赤黄ダイスの置換）。
     ...(scenario.rules?.eventCards
       ? { tbEventCards: true, tbEventDeck: buildTbEventDeck(TB_EVENT_CARDS_36, rng), tbLastEventCard: null }
+      : {}),
+    // 交易と蛮族「Catan for Two」: 中立2人・trade token（各5・供給10）・生産2回制の状態を配線。
+    ...(tb2
+      ? {
+          tbCatanForTwo: true,
+          tbNeutralPlayerIds: tb2NeutralIds,
+          tbTradeTokens: Object.fromEntries(allIds.map(id => [id, TB2_TRADE_TOKEN_START])),
+          tbTradeTokenBank: TB2_TRADE_TOKEN_TOTAL - TB2_TRADE_TOKEN_START * specs.length,
+          tbNeutralPending: null,
+          tbRollsDone: 0,
+          tbFirstRollTotal: null,
+          tbTradeTokenSpentThisTurn: false,
+          tbKnightTokenThisTurn: false,
+        }
       : {}),
     ...(scenario.rules?.maxCities != null ? { maxCities: scenario.rules.maxCities } : {}),
     ...(scenario.rules?.missingNumberTokens ? { numberTokenSupply: scenario.rules.numberTokenSupply ?? 5 } : {}),

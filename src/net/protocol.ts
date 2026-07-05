@@ -33,6 +33,8 @@ export const LAN_SYNCED_ACTIONS: ReadonlyArray<Action['type']> = [
   'BUILD_CITY_WALL', 'MOVE_KNIGHT', 'CHASE_ROBBER', 'PLAY_PROGRESS',
   // 交易と蛮族「イベントカード」
   'CHOOSE_EVENT_GIVE', 'CHOOSE_EVENT_HELPFUL', 'CHOOSE_EVENT_STEAL', 'CHOOSE_EVENT_DAMAGE', 'REPAIR_ROAD',
+  // 交易と蛮族「Catan for Two（2人用）」
+  'TB_NEUTRAL_ROAD', 'TB_NEUTRAL_SETTLEMENT', 'TB_FORCED_TRADE', 'TB_MOVE_ROBBER', 'TB_DISCARD_KNIGHT',
 ];
 
 // LAN の手番順モード（ホストが設定）。random=毎回シャッフル / joined=入室順。

@@ -40,6 +40,7 @@ export type ScenarioId =
   | 'tb_friendly_robber'       // 交易と蛮族「親切な盗賊(The Friendly Robber)」変種（基本盤＋盗賊の移動制限・10点）
   | 'tb_harbors'               // 交易と蛮族「強き港(Harbors of Catan / Strongest Ports)」変種（基本盤＋2VPタイル・11点）
   | 'tb_event_cards'           // 交易と蛮族「イベントカード(Catan Event Cards)」変種（基本盤＋ダイス→カード置換・10点）
+  | 'tb_catan_for_two'         // 交易と蛮族「Catan for Two（2人用）」変種（基本盤＋中立2人＋trade token・10点）
   | 'cities_knights';
 
 export interface ScenarioBoard {
@@ -1456,6 +1457,23 @@ const tbEventCards: Scenario = {
   rules: { eventCards: true },
 };
 
+// ---- 交易と蛮族「Catan for Two（2人用）」変種（第6版 CN3089 p7） ----
+// 基本19タイル盤の2人専用戦。残り2色は「中立プレイヤー」となり、図示位置（盤中心から水平±2ヘックス
+// の2交点・仕様書§2-4）に開拓地1つずつを持って開始。生産フェーズは毎ターン続けて2回（2回目は
+// 1回目と異なる合計まで振り直し）。自分が道/開拓地を建てるたびに中立の道/開拓地を無償配置。
+// trade token（総数20・各自5）で「強制交易」か「盗賊を砂漠へ」が1ターン1回使える。勝利目標は基本の10点。
+const tbCatanForTwo: Scenario = {
+  id: 'tb_catan_for_two',
+  name: '交易と蛮族：2人用カタン',
+  description: '基本19タイルの2人専用戦。中立2色の開拓地と道が盤を締め、生産は毎ターン2回。交易トークンで強制交易や盗賊対策（10点で勝利）。',
+  category: 'traders_barbarians',
+  recommendedPlayers: '2人',
+  coords: () => getAllTileCoords(),
+  build: (geo, rng) => createRandomBoard(geo, rng),
+  victoryTarget: 10,
+  rules: { catanForTwo: true },
+};
+
 const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
   // 公式航海者シナリオ
@@ -1485,6 +1503,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   tb_friendly_robber: tbFriendlyRobber,
   tb_harbors: tbHarbors,
   tb_event_cards: tbEventCards,
+  tb_catan_for_two: tbCatanForTwo,
   cities_knights: citiesKnights,
 };
 
@@ -1615,6 +1634,13 @@ const SCENARIO_RULES: Record<ScenarioId, string[]> = {
     '港（2:1/3:1）の上に建てた建物のVP合計（開拓地1・都市2）が最も多い人が「強き港」タイル（+2点）を得る。',
     '最初に港建物の合計3点に達した人が獲得。以後は他の人がそれを上回ると即その人へ移る。',
   ],
+  tb_catan_for_two: [
+    '10点で勝ち。2人専用。残り2色は「中立プレイヤー」として盤上に開拓地と道だけを持つ（資源は受け取らず、手番も無い）。',
+    '毎ターン生産フェーズを続けて2回行う（2回目のダイスが1回目と同じ合計なら振り直し）。7もそのつど普通に解決する。',
+    '自分が道を建てるたびに中立の道1本を、開拓地を建てるたびに中立の開拓地1つを、好きな方の中立に無償で建てる（通常の配置ルール準拠。開拓地を置ける場所が無ければ道で代替）。中立も最長交易路タイルを取りうる。',
+    '交易トークン: 砂漠に面した開拓地で2枚・海沿いの開拓地で1枚。ターン1回、表向きの騎士カード1枚を捨てて2枚（最大騎士力を失うことも）。',
+    'ターン1回、トークンを払って「強制交易（相手の手札から無作為2枚⇄自分の好きな2枚）」か「盗賊を砂漠へ動かす（奪わない）」。費用は自分の点数が相手以下なら1枚・上回っていれば2枚。',
+  ],
   tb_event_cards: [
     '10点で勝ち。ダイスの代わりに、毎ターン イベントカードの山札を1枚めくる。',
     'カードの事件（地震・疫病・盗賊の襲撃など13種）を先に解決し、その後カードの数字で通常どおり生産する。数字の出方はダイスと同じ確率分布（7が6枚など全36枚）。',
@@ -1671,6 +1697,7 @@ const VISIBLE_SCENARIO_IDS: ReadonlySet<ScenarioId> = new Set<ScenarioId>([
   'tb_friendly_robber',
   'tb_harbors',
   'tb_event_cards',
+  'tb_catan_for_two',
 ]);
 /** 盤面選択UIに表示するシナリオ一覧（listScenarios のうち VISIBLE のみ）。 */
 export function listVisibleScenarios(): ReadonlyArray<ScenarioInfo> {

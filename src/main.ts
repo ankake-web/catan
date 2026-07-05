@@ -7,11 +7,13 @@ import type { GameState, Action, PlayerId, AiDifficulty, ResourceType, TradeOffe
 import type { PlayerOrderMode } from './engine/setup';
 import { makeHand, RESOURCE_TYPES, COMMODITY_TYPES, VP_TABLE, TILE_RESOURCE_MAP, TILE_COMMODITY_MAP, CK_BARBARIAN_MAX, CK_TRACK_NAME, PROGRESS_CARD_NAME, TB_EVENT_NAME, TB_ROAD_REPAIR_COST } from './constants';
 import { createInitialGameState } from './engine/createState';
+import { getScenario } from './engine/scenarios';
 import type { ScenarioId } from './engine/scenarios';
 import type { PlayerSpec } from './engine/createState';
 import { applyAction, setupGainFor } from './engine/game';
 import { findPendingDiscarder, discardCount, getRobberMoveTargets } from './engine/robber';
 import { tbEventPendingIds, tbHasDamagedRoad, tbDamagedRoadEdges } from './engine/tbEvents';
+import { tbNeutralRoadTargets, tbNeutralSettlementTargets, tbSpendCost, tbCanSpendWindow } from './engine/tbTwo';
 import {
   playSE, bgmStart, bgmStop, bgmSetVolume, setBgmTrack, BGM_TRACKS,
   isBgmEnabled, setBgmEnabled, getBgmVolume, getBgmTrack, isSeEnabled, setSeEnabled,
@@ -219,7 +221,10 @@ function renderHome(
   const scenarioLabel = document.createElement('label');
   scenarioLabel.className = 'home-label';
   scenarioLabel.textContent = '盤面（ルール）';
-  const scenarioSelect = buildScenarioSelect({ current: lastConfig?.scenario ?? 'classic' });
+  const scenarioSelect = buildScenarioSelect({
+    current: lastConfig?.scenario ?? 'classic',
+    onChange: (id) => applyScenarioPlayerLimit(id),
+  });
   scenarioField.appendChild(scenarioLabel);
   scenarioField.appendChild(scenarioSelect);
   cpuForm.appendChild(scenarioField);
@@ -322,6 +327,20 @@ function renderHome(
   countGroup.addEventListener('change', () => { rebuildSpec(); });
   orderGroup.addEventListener('change', () => { updateSpecVisibility(); });
 
+  // 交易と蛮族「Catan for Two（2人用）」は実プレイヤー2人専用 → CPU数を1に固定し他を無効化。
+  // 他のシナリオに戻したら解除する。
+  const applyScenarioPlayerLimit = (id: ScenarioId): void => {
+    const twoOnly = getScenario(id).rules?.catanForTwo === true;
+    const radios = Array.from(countGroup.querySelectorAll<HTMLInputElement>('input[name="cpuCount"]'));
+    for (const r of radios) {
+      r.disabled = twoOnly && r.value !== '1';
+      if (twoOnly && r.value === '1') r.checked = true;
+      r.closest('label')?.classList.toggle('radio-disabled', r.disabled);
+    }
+    if (twoOnly) rebuildSpec(); // 3〜4人の指定順が残らないよう作り直す
+  };
+  applyScenarioPlayerLimit(lastConfig?.scenario ?? 'classic');
+
   const startBtn = document.createElement('button');
   startBtn.className = 'home-start-btn';
   startBtn.textContent = 'ゲーム開始';
@@ -372,7 +391,9 @@ function renderHome(
     savePlayerName(name);
 
     const countVal = (countGroup.querySelector('input[name="cpuCount"]:checked') as HTMLInputElement | null)?.value ?? '1';
-    const cpuCount = (parseInt(countVal, 10) as 1 | 2 | 3) || 1;
+    let cpuCount = (parseInt(countVal, 10) as 1 | 2 | 3) || 1;
+    // 2人用カタンは実プレイヤー2人専用（UI で固定済みだが、開始時にも最終クランプ）。
+    if (getScenario(getScenarioSelectValue(scenarioSelect)).rules?.catanForTwo) cpuCount = 1;
 
     const diffVal = (diffGroup.querySelector('input[name="cpuDiff"]:checked') as HTMLInputElement | null)?.value ?? '普通';
     const diffMap: Record<string, AiDifficulty> = { '弱': 'normal', '普通': 'strong', '強': 'elite' };
@@ -589,7 +610,12 @@ function createRadioGroup(name: string, options: string[], defaultVal: string): 
 // ============================================================
 
 function initGameState(cfg: HomeConfig): GameState {
-  const totalPlayers = cfg.cpuCount + 1;
+  // 盤面シナリオ: cfg 優先。未指定なら URL の ?scenario=（開発/動作確認用フック）。
+  const urlScenario0 = new URLSearchParams(window.location.search).get('scenario') as ScenarioId | null;
+  const scenarioId = cfg.scenario ?? urlScenario0 ?? 'classic';
+  // 2人用カタン（catanForTwo）は実プレイヤー2人専用。?scenario= 直指定などで人数が合わない
+  // 場合もここで 2人（人間1+CPU1）に丸める（createInitialGameState は不一致を例外にする）。
+  const totalPlayers = getScenario(scenarioId).rules?.catanForTwo ? 2 : cfg.cpuCount + 1;
   // CPU 名はランダムな3文字名を重複なく割り当て（人間名とも重複回避）。state に保存され
   // 以降は固定（render 毎の再抽選はしない）。表示名のみでCPUロジックには関与しない。
   const cpuNames = pickCpuNames(cfg.cpuCount, [cfg.playerName]);
@@ -605,12 +631,9 @@ function initGameState(cfg: HomeConfig): GameState {
       ...(isHuman ? {} : { aiDifficulty: cfg.cpuDifficulty }),
     });
   }
-  // 盤面シナリオ: cfg 優先。未指定なら URL の ?scenario=（開発/動作確認用フック）。
   // 既定 'classic' は従来と同一。未知IDは createInitialGameState 側で classic にフォールバック。
-  const urlScenario = new URLSearchParams(window.location.search).get('scenario') as ScenarioId | null;
-  const scenario = cfg.scenario ?? urlScenario ?? undefined;
   // 手番順: ランダム=毎回シャッフル / 指定=spec を検証して採用（不整合なら元順）。
-  return createInitialGameState(specs, cfg.orderMode, cfg.playerOrderSpec, undefined, scenario ?? undefined);
+  return createInitialGameState(specs, cfg.orderMode, cfg.playerOrderSpec, undefined, scenarioId);
 }
 
 // ============================================================
@@ -660,6 +683,20 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
           return showLand && landTargets.has(tid);
         }),
       );
+      return opts;
+    }
+
+    // 交易と蛮族「Catan for Two」: 中立コマの配置待ち。置く中立(色)が決まっている時だけ
+    // その中立の合法位置を光らせる（両中立に置ける間はバーで選ぶまで光らせない）。
+    if (state.turnPhase === 'TB_NEUTRAL') {
+      const owner = tbNeutralActingOwner(state);
+      if (owner) {
+        if (state.tbNeutralPending === 'settlement') {
+          opts.validVertexIds = new Set(tbNeutralSettlementTargets(state, owner));
+        } else {
+          opts.validEdgeIds = new Set(tbNeutralRoadTargets(state, owner));
+        }
+      }
       return opts;
     }
 
@@ -837,6 +874,25 @@ function robberPieceAvail(s: GameState): { robber: boolean; pirate: boolean } {
     && Object.values(s.tiles).some(t => t.type === 'sea' && t.id !== s.piratePosition);
   return { robber, pirate };
 }
+
+// 交易と蛮族「Catan for Two」: TB_NEUTRAL でどちらの中立に置くかの事前選択。
+// null=未選択（両中立に置ける時は選ぶまで盤面を光らせない）。TB_NEUTRAL 外では常に null に戻す。
+let tbNeutralChoice: PlayerId | null = null;
+function setTbNeutralChoice(p: PlayerId | null): void { tbNeutralChoice = p; redraw(); }
+// 配置できる中立の一覧（現在の pending 種別で合法位置を持つ中立のみ）。
+function tbNeutralAvail(s: GameState): PlayerId[] {
+  return (s.tbNeutralPlayerIds ?? []).filter(n => s.tbNeutralPending === 'settlement'
+    ? tbNeutralSettlementTargets(s, n).length > 0
+    : tbNeutralRoadTargets(s, n).length > 0);
+}
+// いま配置操作の対象になっている中立。片方しか置けなければ自動でその中立、両方なら選択済みのもの。
+function tbNeutralActingOwner(s: GameState): PlayerId | null {
+  if (s.turnPhase !== 'TB_NEUTRAL') return null;
+  const avail = tbNeutralAvail(s);
+  if (avail.length === 1) return avail[0]!;
+  if (tbNeutralChoice && avail.includes(tbNeutralChoice)) return tbNeutralChoice;
+  return null;
+}
 let lastConfig: HomeConfig | null = null;
 
 // ---- LAN対戦（サーバ権威）----
@@ -986,6 +1042,9 @@ function redraw(skipBoard = false): void {
 
   // 航海者: 盗賊/海賊の事前選択は ROBBER フェーズ限定。フェーズを抜けたら選択をリセットする。
   if (!(state.phase === 'MAIN' && state.turnPhase === 'ROBBER') && robberPiece !== null) robberPiece = null;
+
+  // 交易と蛮族「Catan for Two」: 中立(色)の事前選択は TB_NEUTRAL 限定。抜けたらリセット。
+  if (!(state.phase === 'MAIN' && state.turnPhase === 'TB_NEUTRAL') && tbNeutralChoice !== null) tbNeutralChoice = null;
 
   // DISCARD フェーズの uiPhase 自動同期。
   // LAN ではマスク済み state のため discardPid は「自分（8枚以上の場合）」に
@@ -1468,6 +1527,9 @@ const RESET_UIPHASE_ACTIONS = new Set([
   'PLAY_KNIGHT', 'PLAY_YEAR_OF_PLENTY', 'PLAY_MONOPOLY', 'PLAY_ROAD_BUILDING',
   'FINISH_ROAD_BUILDING', 'END_TURN', 'DECLARE_VICTORY',
   'OFFER_TRADE', 'CONFIRM_TRADE', 'CANCEL_TRADE',
+  // 交易と蛮族「Catan for Two」: 強制交易の成立後は tbForcedTrade モーダルを閉じる
+  // （閉じないと give 選択が残り、確定を再送してエンジンが 'already spent tokens' を投げる）。
+  'TB_FORCED_TRADE',
 ]);
 
 // CPU行動の待ち時間(ms)。初見でもCPUの動きを追える速度を基準に再調整。
@@ -1807,6 +1869,22 @@ function safeFallbackAction(): Action | null {
   }
   const cur = state.playerOrder[state.currentPlayerIndex];
   if (!cur || state.players[cur]?.type !== 'ai') return null; // 人間の番は強制しない
+  // 交易と蛮族「Catan for Two」: 中立コマの配置待ち（chooseAction=chooseTbNeutral が第一候補。
+  // 保険として最初の合法配置も直接探す。エンジンは合法手がある時だけこのフェーズに入る）。
+  if (state.turnPhase === 'TB_NEUTRAL') {
+    const a = chooseAction(state, cur);
+    if (a) return a;
+    for (const n of state.tbNeutralPlayerIds ?? []) {
+      if (state.tbNeutralPending === 'settlement') {
+        const v = Object.keys(state.vertices).find(vid => canBuildSettlement(state, n, vid));
+        if (v) return { type: 'TB_NEUTRAL_SETTLEMENT', owner: n, vertexId: v };
+      } else {
+        const eid = Object.keys(state.edges).find(x => canBuildRoad(state, n, x));
+        if (eid) return { type: 'TB_NEUTRAL_ROAD', owner: n, edgeId: eid };
+      }
+    }
+    return null;
+  }
   if (state.turnPhase === 'ROBBER') {
     // 合法な移動先から選ぶ（海・数字限定・親切な盗賊の保護ヘックスを避けないと MOVE_ROBBER が弾かれ進行が止まりうる）。
     const tileId = getRobberMoveTargets(state)[0];
@@ -3798,10 +3876,43 @@ function updateRobberPieceBar(): void {
   positionBarAtBoard(bar);
 }
 
+// 交易と蛮族「Catan for Two」: どちらの中立に置くか先に選ばせるバー。両中立に置ける時だけ出す。
+function updateTbNeutralBar(): void {
+  document.getElementById('tb-neutral-choice')?.remove();
+  if (!state || state.phase !== 'MAIN' || state.turnPhase !== 'TB_NEUTRAL') return;
+  if (!boardCanAct()) return; // 自分が置く場面のみ
+  const avail = tbNeutralAvail(state);
+  if (avail.length < 2) return; // 片方しか置けなければ選ぶ必要なし（自動でその中立）
+
+  const bar = document.createElement('div');
+  bar.id = 'tb-neutral-choice';
+  const text = document.createElement('span');
+  text.className = 'place-confirm-text';
+  const pieceName = state.tbNeutralPending === 'settlement' ? '開拓地' : '道';
+  text.textContent = tbNeutralChoice === null
+    ? `🏳 どちらの中立に${pieceName}を置く？`
+    : '置く中立（切替できます）';
+
+  const mk = (nid: PlayerId): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.className = 'place-confirm-ok' + (tbNeutralChoice === nid ? ' rpc-active' : '');
+    b.textContent = state!.players[nid]?.name ?? nid;
+    b.addEventListener('click', () => setTbNeutralChoice(nid));
+    return b;
+  };
+  const actions = document.createElement('div');
+  actions.className = 'place-confirm-actions';
+  actions.append(...avail.map(mk));
+  bar.append(text, actions);
+  document.body.appendChild(bar);
+  positionBarAtBoard(bar);
+}
+
 // 仮置きプレビュー中の確認バー（盤面に被らない固定位置）。確定で建設、やめるで取消。
 function updatePlaceConfirmBar(): void {
   updateEdgePieceChoiceBar();
   updateRobberPieceBar();
+  updateTbNeutralBar();
   document.getElementById('place-confirm')?.remove();
   if (!state || uiPhase.type !== 'placePreview') return;
   // 騎士と商人の即時系（起動/昇格/商人）は「建てる？」でなく動作に合わせた文言にする。
@@ -3923,6 +4034,7 @@ function attachBoardEventsOnce(): void {
     () => smithFirstKnight, setSmithFirst,
     () => deserterRemoveVid, setDeserterRemove,
     () => robberPiece,
+    () => (state ? tbNeutralActingOwner(state) : null),
   );
   attachBoardGestures(svgBoard, () => boardViewport, setBoardViewport);
   installHexTooltip(svgBoard, () => state);

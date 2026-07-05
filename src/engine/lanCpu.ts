@@ -183,5 +183,19 @@ export function cpuFallbackAction(state: GameState, pid: PlayerId): Action {
       ? { type: 'CHOOSE_EVENT_STEAL', targetPlayerId: targets[0]! }
       : { type: 'CHOOSE_EVENT_STEAL', targetPlayerId: null };
   }
+  // 交易と蛮族「Catan for Two」: 中立コマの配置待ち（エンジンは合法手がある時だけこのフェーズに入る）。
+  if (state.turnPhase === 'TB_NEUTRAL') {
+    const a = chooseAction(state, pid);
+    if (a) return a;
+    for (const n of state.tbNeutralPlayerIds ?? []) {
+      if (state.tbNeutralPending === 'settlement') {
+        const v = Object.keys(state.vertices).find(vid => canBuildSettlement(state, n, vid));
+        if (v) return { type: 'TB_NEUTRAL_SETTLEMENT', owner: n, vertexId: v };
+      } else {
+        const e = Object.keys(state.edges).find(eid => canBuildRoad(state, n, eid));
+        if (e) return { type: 'TB_NEUTRAL_ROAD', owner: n, edgeId: e };
+      }
+    }
+  }
   return { type: 'END_TURN' };
 }

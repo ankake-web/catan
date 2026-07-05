@@ -18,6 +18,7 @@ import { canBankTrade, getEffectiveTradeRate } from './trade';
 import { calcVP, calcPublicVP, victoryTarget, calcLongestRoad } from './scoring';
 import { applyAction } from './game';
 import { tbEventStealTargets } from './tbEvents';
+import { tbSpendCost } from './tbTwo';
 
 // ============================================================
 // 確率テーブル（数字トークンの出目確率 /36）
@@ -495,6 +496,7 @@ export function chooseAction(state: GameState, pid: PlayerId, opts?: AiOpts): Ac
   switch (state.turnPhase) {
     case 'PRE_ROLL':    return choosePreRollAction(state, pid);
     case 'ROBBER':      return chooseRobberAction(state, pid, rng);
+    case 'TB_NEUTRAL':  return chooseTbNeutral(state, pid, rng); // 交易と蛮族「Catan for Two」: 中立コマの配置（手番プレイヤーが解決）
     case 'TRADE_BUILD': return chooseTradeBuildAction(state, pid, opts?.skipPlayerTrade ?? false, rng);
     default:            return null;
   }
@@ -562,8 +564,24 @@ function choosePreRollAction(state: GameState, pid: PlayerId): Action {
     if (alch) return { type: 'PLAY_PROGRESS', cardId: alch.id };
   }
 
+  // 交易と蛮族「Catan for Two」: 盗賊が自分の産出ヘックスを止めているなら、1回目の生産前に
+  // トークンで盗賊を砂漠へ（このターン未消費・残数が足りる時。生産2回制なので効果が大きい）。
+  if (state.tbCatanForTwo && difficulty !== 'weak'
+      && (state.tbRollsDone ?? 0) === 0 && !state.tbTradeTokenSpentThisTurn
+      && state.useRobber !== false) {
+    const cost = tbSpendCost(state, pid);
+    const tokens = (state.tbTradeTokens ?? {})[pid] ?? 0;
+    const robberTid = Object.keys(state.tiles).find(t => state.tiles[t]!.hasRobber);
+    const robberHurtsMe = robberTid != null && state.tiles[robberTid]!.number != null
+      && (state.tileToVertices[robberTid] ?? []).some(v => state.vertices[v]?.building?.playerId === pid);
+    const desertFree = Object.values(state.tiles).some(t => t.type === 'desert' && !t.hasRobber);
+    if (robberHurtsMe && desertFree && tokens >= cost) return { type: 'TB_MOVE_ROBBER' };
+  }
+
   // 1ターン1枚制限を尊重（devCardPlayedThisTurn を見ないと2枚目で例外→停止する）。
-  if (difficulty !== 'weak' && !state.devCardPlayedThisTurn) {
+  // Catan for Two: 2つの生産フェーズの間（1回目解決後の PRE_ROLL）は騎士を使えない（エンジンが拒否）。
+  const tb2BetweenRolls = state.tbCatanForTwo === true && (state.tbRollsDone ?? 0) > 0;
+  if (difficulty !== 'weak' && !state.devCardPlayedThisTurn && !tb2BetweenRolls) {
     const knight = player.devCards.find(
       c => c.type === 'knight' && c.purchasedOnTurn < state.globalTurnNumber,
     );
@@ -772,11 +790,12 @@ function chooseEventDamage(state: GameState, pid: PlayerId): Action | null {
 // ============================================================
 
 // タイルに建物を持つ相手プレイヤー（自分は除く・重複なし）。
+// Catan for Two の中立プレイヤーは除外（資源を受け取らないため盗賊で止める価値が無く、奪えもしない）。
 function opponentsOnTile(state: GameState, tileId: string, pid: PlayerId): PlayerId[] {
   const vids = state.tileToVertices[tileId] ?? [];
   return [...new Set(
     vids.map(v => state.vertices[v]?.building?.playerId)
-      .filter((p): p is PlayerId => p != null && p !== pid),
+      .filter((p): p is PlayerId => p != null && p !== pid && state.players[p]?.type !== 'neutral'),
   )];
 }
 
@@ -839,6 +858,68 @@ export function chooseStealTarget(
   return pickByScore(opps, o => robbableCardCount(state, o) + calcVP(state, o) * 2, rng);
 }
 
+// ============================================================
+// 交易と蛮族「Catan for Two」: 中立コマの配置（TB_NEUTRAL・手番CPUが解決）
+// ============================================================
+
+/**
+ * 中立の開拓地/道の配置先を選ぶ。方針は「相手の拡張を最も邪魔する」:
+ *   - 開拓地: 相手の道が直接届く頂点（相手の次の建設候補）を最優先で潰し、
+ *     次いで距離ルールで相手の候補頂点を塞げる位置・高pip位置。
+ *   - 道: 相手の建物・道網に近い方向へ伸ばす（将来の相手の建設地を塞ぎやすい）。
+ * どちらの中立に置くかも同じスコアで一括評価する。
+ */
+function chooseTbNeutral(state: GameState, pid: PlayerId, rng: () => number): Action | null {
+  const neutrals = state.tbNeutralPlayerIds ?? [];
+  const opp = state.playerOrder.find(p => p !== pid);
+
+  if (state.tbNeutralPending === 'settlement') {
+    const cands: { owner: PlayerId; vertexId: string }[] = [];
+    for (const n of neutrals) {
+      for (const vid of Object.keys(state.vertices)) {
+        if (canBuildSettlement(state, n, vid)) cands.push({ owner: n, vertexId: vid });
+      }
+    }
+    if (cands.length === 0) return null; // エンジンは合法手がある時だけ TB_NEUTRAL に入る（保険）
+    const score = (vid: string): number => {
+      const v = state.vertices[vid]!;
+      const touchesOpp = v.adjacentEdgeIds.some(e => state.edges[e]!.road?.playerId === opp) ? 4 : 0;
+      const blocksOpp = v.adjacentVertexIds.filter(nv =>
+        state.vertices[nv]!.adjacentEdgeIds.some(e => state.edges[e]!.road?.playerId === opp)).length * 2;
+      return touchesOpp + blocksOpp + vertexProductionScore(state, vid) / 10;
+    };
+    const best = pickByScore(cands, c => score(c.vertexId), rng);
+    return { type: 'TB_NEUTRAL_SETTLEMENT', owner: best.owner, vertexId: best.vertexId };
+  }
+
+  if (state.tbNeutralPending === 'road') {
+    const cands: { owner: PlayerId; edgeId: string }[] = [];
+    for (const n of neutrals) {
+      for (const eid of Object.keys(state.edges)) {
+        if (canBuildRoad(state, n, eid)) cands.push({ owner: n, edgeId: eid });
+      }
+    }
+    if (cands.length === 0) return null;
+    // 相手の建物/道への近さ（ピクセル距離）で「相手側へ伸びる」辺を選ぶ。
+    const oppPoints: { x: number; y: number }[] = [];
+    for (const v of Object.values(state.vertices)) {
+      if (v.building?.playerId === opp) oppPoints.push(v.pixel);
+    }
+    for (const e of Object.values(state.edges)) {
+      if (e.road?.playerId === opp) oppPoints.push(e.midpoint);
+    }
+    const score = (eid: string): number => {
+      const m = state.edges[eid]!.midpoint;
+      if (oppPoints.length === 0) return 0;
+      return -Math.min(...oppPoints.map(p => Math.hypot(p.x - m.x, p.y - m.y)));
+    };
+    const best = pickByScore(cands, c => score(c.edgeId), rng);
+    return { type: 'TB_NEUTRAL_ROAD', owner: best.owner, edgeId: best.edgeId };
+  }
+
+  return null;
+}
+
 function chooseRobberAction(state: GameState, pid: PlayerId, rng: () => number): Action {
   const difficulty = getDifficulty(state, pid);
 
@@ -888,6 +969,24 @@ function chooseTradeBuildAction(state: GameState, pid: PlayerId, skipPlayerTrade
   }
 
   const difficulty = getDifficulty(state, pid);
+
+  // 交易と蛮族「Catan for Two」: 強制交易（1ターン1回）。相手の手札が厚い時に、
+  // 自分の余剰2枚（chooseDiscards が建設目標に不要な札を選ぶ）と相手の無作為2枚を交換する。
+  if (state.tbCatanForTwo && !state.tbTradeTokenSpentThisTurn && difficulty !== 'weak') {
+    const opp = state.playerOrder.find(p => p !== pid);
+    const cost = tbSpendCost(state, pid);
+    const tokens = (state.tbTradeTokens ?? {})[pid] ?? 0;
+    if (opp && tokens >= cost) {
+      const oppCards = RESOURCE_TYPES.reduce((s, r) => s + state.players[opp]!.hand[r], 0);
+      const myCards = RESOURCE_TYPES.reduce((s, r) => s + state.players[pid]!.hand[r], 0);
+      if (oppCards >= 5 && myCards >= 2) {
+        const give = chooseDiscards(state, pid, 2, rng);
+        if (RESOURCE_TYPES.reduce((s, r) => s + (give[r] ?? 0), 0) === 2) {
+          return { type: 'TB_FORCED_TRADE', give };
+        }
+      }
+    }
+  }
 
   // 航海者 S8 七不思議: 建設可能なら不思議を最優先（クレーム→レベル建設で完成＝勝利へ直行）。
   // 要件未達のうちは bestWonderAction が null を返すため、通常の都市/開拓地建設で要件(2都市/6VP等)を満たす。

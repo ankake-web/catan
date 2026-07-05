@@ -23,10 +23,17 @@ const SPECS3: PlayerSpec[] = [
   { id: 'player3', name: 'C', color: 'purple', type: 'ai', aiDifficulty: 'strong' },
 ];
 
+// 交易と蛮族「Catan for Two」は実プレイヤー2人専用（3人だと createInitialGameState がエラー）。
+const SPECS2: PlayerSpec[] = SPECS3.slice(0, 2);
+function specsFor(scenario: ScenarioId): PlayerSpec[] {
+  return getScenario(scenario).rules?.catanForTwo ? SPECS2 : SPECS3;
+}
+
 // 1ゲームを GAME_OVER まで回す（DISCARD/GOLD は対象プレイヤーを選んで解決）。
 function playToEnd(scenario: ScenarioId, seed: number): GameState {
   const rng = createRng(seed);
-  let s = createInitialGameState(SPECS3, 'fixed', ['player1', 'player2', 'player3'], rng, scenario);
+  const specs = specsFor(scenario);
+  let s = createInitialGameState(specs, 'fixed', specs.map(p => p.id), rng, scenario);
   for (let i = 0; i < 120_000 && s.phase !== 'GAME_OVER'; i++) {
     let pid = s.playerOrder[s.currentPlayerIndex]!;
     if (s.phase === 'MAIN' && s.turnPhase === 'DISCARD') {

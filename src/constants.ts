@@ -266,6 +266,22 @@ export const TB_EVENT_CARDS_36: readonly TbEventCard[] = [
   { event: 'calm_seas',        number: 12 },
 ];
 
+// ---- 交易と蛮族「Catan for Two（2人用）」変種（CN3089 p7） ----
+
+// trade token: 総数20・各プレイヤー初期5（残り10が供給）。
+export const TB2_TRADE_TOKEN_TOTAL = 20;
+export const TB2_TRADE_TOKEN_START = 5;
+// 取得: 砂漠に開拓地=2 ／ 沿岸に開拓地=1 ／ ターン1回・表向き騎士カード1枚を捨てて=2。
+export const TB2_TOKENS_DESERT = 2;
+export const TB2_TOKENS_COAST  = 1;
+export const TB2_TOKENS_KNIGHT_DISCARD = 2;
+// 消費（Forced Trade / Move Robber・1ターン1回）: 自分の公開VP ≤ 相手なら1、上回っていれば2。
+export const TB2_SPEND_COST_BEHIND = 1;
+export const TB2_SPEND_COST_AHEAD  = 2;
+// Forced Trade: 相手の手札から無作為2枚（相手が1枚なら1枚）を取り、自分の任意2枚を渡す。
+export const TB2_FORCED_TRADE_TAKE = 2;
+export const TB2_FORCED_TRADE_GIVE = 2;
+
 // ---- 交易タイムアウト ----
 
 export const TRADE_TIMEOUT_HUMAN_MS = 60_000;

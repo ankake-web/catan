@@ -198,25 +198,30 @@ export function calcLongestRoad(state: GameState, playerId: PlayerId): number {
  *   D) maxLen < LONGEST_ROAD_MIN → 場外（null）。
  */
 export function updateLongestRoad(state: GameState): GameState {
+  // 交易と蛮族「Catan for Two」: 中立プレイヤーも最長交易路タイルの保持候補（CN3089 p7:
+  // "It is possible for a neutral player to receive the Longest Route tile."）。
+  // 判定・遷移則は実プレイヤーと同一で、候補集合に中立2人を加えるだけ（他変種では空）。
+  const candidates: PlayerId[] = [...state.playerOrder, ...(state.tbNeutralPlayerIds ?? [])];
+
   // 航海者: 最長交易路タイルを使わないシナリオ（S6 織物 / S7 海賊の島々）では誰も保持しない。
   // 長さ自体は表示用に保持しつつ、ボーナス保持者は常に null・全員 hasLongestRoad=false。
   if (state.useLongestRoute === false) {
     let ns = state;
-    for (const pid of state.playerOrder) {
+    for (const pid of candidates) {
       ns = {
         ...ns,
-        players: { ...ns.players, [pid]: { ...ns.players[pid]!, longestRoadLength: calcLongestRoad(state, pid as PlayerId), hasLongestRoad: false } },
+        players: { ...ns.players, [pid]: { ...ns.players[pid]!, longestRoadLength: calcLongestRoad(state, pid), hasLongestRoad: false } },
       };
     }
     return { ...ns, longestRoadHolder: null };
   }
 
-  // 全プレイヤーの実際の最長道路長を計算
+  // 全プレイヤー（＋中立）の実際の最長道路長を計算
   const lengths: Record<string, number> = {};
   let newState = state;
 
-  for (const pid of state.playerOrder) {
-    const length = calcLongestRoad(state, pid as PlayerId);
+  for (const pid of candidates) {
+    const length = calcLongestRoad(state, pid);
     lengths[pid] = length;
     newState = {
       ...newState,
@@ -228,7 +233,7 @@ export function updateLongestRoad(state: GameState): GameState {
   }
 
   const currentHolder = state.longestRoadHolder;
-  const maxLen = state.playerOrder.reduce((m, pid) => Math.max(m, lengths[pid] ?? 0), 0);
+  const maxLen = candidates.reduce((m, pid) => Math.max(m, lengths[pid] ?? 0), 0);
 
   let newHolder: PlayerId | null;
 
@@ -240,10 +245,10 @@ export function updateLongestRoad(state: GameState): GameState {
     newHolder = currentHolder;
   } else {
     // 最長者を特定: maxLen を持つプレイヤー一覧
-    const topPlayers = state.playerOrder.filter(pid => (lengths[pid] ?? 0) === maxLen);
+    const topPlayers = candidates.filter(pid => (lengths[pid] ?? 0) === maxLen);
     if (topPlayers.length === 1) {
       // 単独最長 → 獲得（保持者が更新されるか保持者がいなかった場合）
-      newHolder = topPlayers[0] as PlayerId;
+      newHolder = topPlayers[0]!;
     } else {
       // 複数同点 → 場外
       newHolder = null;
@@ -251,7 +256,7 @@ export function updateLongestRoad(state: GameState): GameState {
   }
 
   // ボーナスフラグを更新
-  for (const pid of state.playerOrder) {
+  for (const pid of candidates) {
     newState = {
       ...newState,
       players: {
@@ -302,7 +307,11 @@ export function updateLargestArmy(state: GameState): GameState {
     for (const pid of state.playerOrder) {
       if (pid === currentHolder) continue;
       const k = state.players[pid]?.knightsPlayed ?? 0;
-      if (k > maxKnights) { maxKnights = k; newHolder = pid as PlayerId; }
+      // 奪取側は常に LARGEST_ARMY_MIN(3) 以上が必要。通常は保持者≥3のため自明に満たすが、
+      // 交易と蛮族「Catan for Two」の騎士カード捨て（トークン化）で保持者が3枚未満に減った
+      // 場合でも、2枚以下の相手がタイルを受け取れないようにする（タイルの原文は
+      // 「最初に3枚出した人が獲得／他の人がより多く出したら移動」）。
+      if (k > maxKnights && k >= LARGEST_ARMY_MIN) { maxKnights = k; newHolder = pid as PlayerId; }
     }
   }
 

@@ -40,6 +40,7 @@ describe('scenarios: registry', () => {
         'tb_friendly_robber',
         'tb_harbors',
         'tb_event_cards',
+        'tb_catan_for_two',
       ].sort(),
     );
     // 非表示シナリオも実装（getScenario）とフル一覧（listScenarios）には残る。

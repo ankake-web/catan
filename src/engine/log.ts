@@ -202,6 +202,25 @@ export function buildActionLog(
     case 'REPAIR_ROAD':
       push(actor, 'BUILD', `🔧 ${nm(actor)} が損傷した道を修理した`);
       break;
+    // 交易と蛮族「Catan for Two（2人用）」
+    case 'TB_NEUTRAL_ROAD':
+      push(actor, 'BUILD', `🏳 ${nm(actor)} が ${nm(action.owner)} の道を配置`);
+      break;
+    case 'TB_NEUTRAL_SETTLEMENT':
+      push(actor, 'BUILD', `🏳 ${nm(actor)} が ${nm(action.owner)} の開拓地を配置`);
+      break;
+    case 'TB_FORCED_TRADE': {
+      const opp2 = prev.playerOrder.find(p => p !== actor);
+      push(actor, 'TRADE_PLAYER',
+        `🤝 ${nm(actor)} が強制交易（${opp2 ? nm(opp2) : '相手'}の無作為カード⇄自分の2枚・🪙消費）`);
+      break;
+    }
+    case 'TB_MOVE_ROBBER':
+      push(actor, 'ROBBER', `🦹 ${nm(actor)} が🪙で盗賊を砂漠へ動かした（奪わない）`);
+      break;
+    case 'TB_DISCARD_KNIGHT':
+      push(actor, 'DEV_CARD', `♞ ${nm(actor)} が騎士カード1枚を捨てて🪙2を得た`);
+      break;
     case 'OFFER_TRADE': {
       push(actor, 'TRADE_PLAYER', isMe(actor) ? `🤝 あなたが交易を提案` : `🤝 ${nm(actor)} が交易を提案`);
       break;

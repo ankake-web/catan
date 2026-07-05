@@ -17,6 +17,8 @@ import {
 } from '../engine/citiesKnights';
 import { CK_TRACK_NAME, CK_TRACK_COMMODITY, CK_BARBARIAN_MAX, COMMODITY_TYPES, improvementCost, PROGRESS_CARD_NAME, PROGRESS_CARD_DESC, PROGRESS_DECK_CARDS, TILE_RESOURCE_MAP, TB_EVENT_NAME } from '../constants';
 import { tbEventStealTargets } from '../engine/tbEvents';
+import { tbSpendCost, tbCanSpendWindow } from '../engine/tbTwo';
+import { makeHand, TB2_TOKENS_KNIGHT_DISCARD } from '../constants';
 import type { CkTrack, CommodityType, CommodityHand, TradeKind, ProgressCard, ProgressChoice } from '../types';
 import type { BuildMode } from './events';
 
@@ -162,6 +164,8 @@ export type UIPhase =
   | { type: 'placePreview'; kind: 'settlement' | 'city' | 'road' | 'ship' | 'activateKnight' | 'upgradeKnight' | 'placeMerchant'; targetId: string }
   // 航海者: 海岸の辺は道も船も置ける。タップ時にどちらを置くか盤面でその場に選ばせる。
   | { type: 'edgePieceChoice'; edgeId: string }
+  // 交易と蛮族「Catan for Two」: 強制交易で渡す2枚の選択中。
+  | { type: 'tbForcedTrade'; give: ResourceHand }
   | { type: 'playerTradeOffer'; give: ResourceHand; receive: ResourceHand; targetPids: PlayerId[] };
 
 // ============================================================
@@ -266,8 +270,17 @@ function phaseText(state: GameState): string {
   }
 
   switch (state.turnPhase) {
-    case 'PRE_ROLL':
+    case 'PRE_ROLL': {
+      // 交易と蛮族「Catan for Two」: 生産フェーズ2回制の2回目であることを明示。
+      if (state.tbCatanForTwo && (state.tbRollsDone ?? 0) === 1) {
+        return isCpuTurn ? '手番中…（2回目の生産）' : '2回目の生産：ダイスを振る';
+      }
       return isCpuTurn ? '手番中…' : 'ダイスを振る';
+    }
+    case 'TB_NEUTRAL': {
+      const piece = state.tbNeutralPending === 'settlement' ? '開拓地' : '道';
+      return isCpuTurn ? `中立の${piece}を配置中…` : `中立の${piece}を置く場所をタップ`;
+    }
     case 'ROBBER':
       return isCpuTurn ? '盗賊を移動中…' : '盗賊を動かすタイルをクリック';
     case 'DISCARD': {
@@ -807,6 +820,105 @@ function buildTbEventHelpfulUI(state: GameState, me: PlayerId, dispatch: (a: Act
     div.appendChild(row);
   }
   return div;
+}
+
+// ============================================================
+// 交易と蛮族「Catan for Two」: trade token の使用UI
+// ============================================================
+
+// 強制交易: 渡す2枚を選ぶモーダル（相手の無作為2枚⇄自分の任意2枚）。
+function buildTbForcedTradeUI(
+  state: GameState,
+  pid: PlayerId,
+  player: Player,
+  uiPhase: Extract<UIPhase, { type: 'tbForcedTrade' }>,
+  setUIPhase: (p: UIPhase) => void,
+  dispatch: (a: Action) => void,
+): HTMLDivElement {
+  const div = el('div', 'modal-panel');
+  const opp = state.playerOrder.find(p => p !== pid);
+  const oppName = opp ? state.players[opp]?.name ?? '' : '';
+  const cost = tbSpendCost(state, pid);
+  const selected = uiPhase.give;
+  const selCount = RESOURCE_TYPES.reduce((s, r) => s + selected[r], 0);
+
+  const header = el('div', 'modal-header');
+  header.textContent = `🤝 強制交易（🪙${cost}）: ${oppName} の手札から無作為に2枚もらい、自分の2枚を渡す`;
+  div.appendChild(header);
+
+  const label = el('div', 'modal-section-label');
+  label.textContent = `渡す資源を2枚選んでください（${selCount}/2）`;
+  div.appendChild(label);
+
+  const row = el('div', 'modal-res-row');
+  for (const r of RESOURCE_TYPES) {
+    const have = player.hand[r];
+    if (have < 1) continue;
+    const picked = selected[r];
+    const canAdd = selCount < 2 && picked < have;
+    const btn = makeImgBtn(
+      RESOURCE_IMG[r],
+      picked > 0 ? `${RESOURCE_NAMES[r]} ×${picked}` : `${RESOURCE_NAMES[r]}（${have}）`,
+      picked > 0 ? 'btn-active' : 'btn-build',
+      !canAdd && picked === 0,
+      () => {
+        // タップで1枚追加。選択済みをタップすると1枚戻す（トグル的に調整できるように）。
+        const next = { ...selected };
+        if (picked > 0 && !canAdd) next[r] = picked - 1;
+        else if (canAdd) next[r] = picked + 1;
+        else next[r] = Math.max(0, picked - 1);
+        setUIPhase({ type: 'tbForcedTrade', give: next });
+      },
+    );
+    row.appendChild(btn);
+  }
+  div.appendChild(row);
+
+  div.appendChild(makeBtn(
+    '✓ 強制交易する',
+    selCount === 2 ? 'btn-primary' : 'btn-disabled',
+    selCount !== 2,
+    () => dispatch({ type: 'TB_FORCED_TRADE', give: selected }),
+  ));
+  div.appendChild(makeBtn('✕ キャンセル', 'btn-end', false, () => setUIPhase({ type: 'idle' })));
+  return div;
+}
+
+// trade token の取得/使用ボタン群（PRE_ROLL=1回目の生産前 と TRADE_BUILD に出す）。
+function appendTb2TokenButtons(
+  div: HTMLDivElement,
+  state: GameState,
+  pid: PlayerId,
+  player: Player,
+  setUIPhase: (p: UIPhase) => void,
+  dispatch: (a: Action) => void,
+): void {
+  if (!state.tbCatanForTwo || !tbCanSpendWindow(state)) return;
+  const tokens = (state.tbTradeTokens ?? {})[pid] ?? 0;
+  const cost = tbSpendCost(state, pid);
+  const opp = state.playerOrder.find(p => p !== pid);
+  const spent = state.tbTradeTokenSpentThisTurn === true;
+
+  if (!spent && tokens >= cost) {
+    // 強制交易: 相手に手札が1枚以上・自分が2枚以上のときだけ有効。
+    const oppCards = opp ? robbableCardCount(state, opp) : 0;
+    const myCards = RESOURCE_TYPES.reduce((s, r) => s + player.hand[r], 0);
+    const canForced = oppCards >= 1 && myCards >= 2;
+    div.appendChild(makeBtn(`🤝 強制交易 🪙${cost}`, canForced ? 'btn-build' : 'btn-disabled', !canForced,
+      () => setUIPhase({ type: 'tbForcedTrade', give: makeHand() })));
+
+    // 盗賊を砂漠へ（奪わない）: 盗賊が砂漠以外に居るときだけ有効。
+    const deserts = Object.values(state.tiles).filter(t => t.type === 'desert');
+    const canFlee = state.useRobber !== false && deserts.length > 0 && !deserts.some(d => d.hasRobber);
+    div.appendChild(makeBtn(`🦹→🏜 盗賊を砂漠へ 🪙${cost}`, canFlee ? 'btn-build' : 'btn-disabled', !canFlee,
+      () => dispatch({ type: 'TB_MOVE_ROBBER' })));
+  }
+
+  // 騎士カード1枚を捨てて trade token 2（1ターン1回・最大騎士力を失いうる）。
+  if (!state.tbKnightTokenThisTurn && player.knightsPlayed >= 1 && (state.tbTradeTokenBank ?? 0) >= 1) {
+    div.appendChild(makeBtn(`♞→🪙 騎士1枚を🪙${TB2_TOKENS_KNIGHT_DISCARD}に`, 'btn-build', false,
+      () => dispatch({ type: 'TB_DISCARD_KNIGHT' })));
+  }
 }
 
 // 衝突(CONFLICT)/交易優位(TRADE ADVANTAGE): 奪う相手を選ぶ。騎士カード最多（タイル無し）の場合のみ見送り可。
@@ -1994,6 +2106,10 @@ function buildActionButtons(
     div.appendChild(buildMonopolyUI(uiPhase, setUIPhase, dispatch));
     return div;
   }
+  if (uiPhase.type === 'tbForcedTrade') {
+    div.appendChild(buildTbForcedTradeUI(state, pid, player, uiPhase, setUIPhase, dispatch));
+    return div;
+  }
   if (uiPhase.type === 'playerTradeOffer') {
     div.appendChild(buildPlayerTradeOfferUI(player, pid, state, uiPhase, setUIPhase, dispatch));
     return div;
@@ -2006,12 +2122,32 @@ function buildActionButtons(
   // LAN: 自分の手番でない端末には操作ボタンを出さない（サーバでも検証）。
   if (lanMode && viewerId != null && viewerId !== pid) return null;
 
+  // ---- 交易と蛮族「Catan for Two」: 中立コマの配置（盤面タップで解決。ここは案内のみ）----
+  if (state.turnPhase === 'TB_NEUTRAL') {
+    const panel = el('div', 'modal-panel');
+    const header = el('div', 'modal-header');
+    header.textContent = '🏳 中立プレイヤーの建設';
+    panel.appendChild(header);
+    const piece = state.tbNeutralPending === 'settlement' ? '開拓地' : '道';
+    panel.appendChild(Object.assign(el('div', 'modal-section-label'), {
+      textContent: `自分の建設に伴い、どちらかの中立の${piece}を1つ無償で置きます。盤面で光っている場所をタップしてください（両方に置ける時は盤面上のバーで中立を選択/切替）`,
+    }));
+    div.appendChild(panel);
+    return div;
+  }
+
   // ---- PRE_ROLL ----
   if (state.turnPhase === 'PRE_ROLL') {
-    // 交易と蛮族「イベントカード」: ダイスは箱へ戻っている＝カードをめくる文言に差し替え。
-    div.appendChild(makeBtn(state.tbEventCards ? '🃏 カードをめくる' : '🎲 ダイスを振る', 'btn-primary', false, () => dispatch({ type: 'ROLL_DICE' })));
+    // 交易と蛮族: イベントカード=めくる文言 / Catan for Two の2回目の生産=2回目と明示。
+    const tb2Second = state.tbCatanForTwo === true && (state.tbRollsDone ?? 0) === 1;
+    const rollLabel = state.tbEventCards ? '🃏 カードをめくる'
+      : tb2Second ? '🎲 2回目のダイスを振る' : '🎲 ダイスを振る';
+    div.appendChild(makeBtn(rollLabel, 'btn-primary', false, () => dispatch({ type: 'ROLL_DICE' })));
+    // Catan for Two: 1回目の生産前ならトークンを使える（盗賊を砂漠へ 等）。
+    appendTb2TokenButtons(div, state, pid, player, setUIPhase, dispatch);
     // ダイス前は騎士のみ使用可（appendDevCardButtons 内で制御）。LANも対応。
-    appendDevCardButtons(div, state, player, setUIPhase, dispatch);
+    // Catan for Two の「2つの生産フェーズの間」は騎士も使えない（エンジンが拒否）ため出さない。
+    if (!tb2Second) appendDevCardButtons(div, state, player, setUIPhase, dispatch);
     if (calcVP(state, pid) >= victoryTarget(state)) {
       div.appendChild(makeBtn('🏆 勝利宣言！', 'btn-primary', false, () => dispatch({ type: 'DECLARE_VICTORY' })));
     }
@@ -2053,6 +2189,9 @@ function buildActionButtons(
   }
 
   // ---- TRADE_BUILD ----
+  // 交易と蛮族「Catan for Two」: trade token の使用/取得ボタン（1ターン1回）。
+  appendTb2TokenButtons(div, state, pid, player, setUIPhase, dispatch);
+
   const canRoad  = player.remainingRoads > 0 && hasEnoughResources(player.hand, BUILD_COSTS.road);
   const canSettl = player.remainingSettlements > 0 && hasEnoughResources(player.hand, BUILD_COSTS.settlement);
   const canCity  = player.remainingCities > 0 && hasEnoughResources(player.hand, BUILD_COSTS.city);
@@ -2503,6 +2642,13 @@ function buildPlayerPanel(
   const cChip = statChip(cityImg(ckey), bd.cities); cChip.title = '都市';
   const hChip = statChip(null, handTotal, 'stat-hand', 'ic-cards'); hChip.title = isCk(state) ? '手札（資源＋商品の枚数）' : '手札（枚数）';
   counts.append(sChip, cChip, hChip);
+  // 交易と蛮族「Catan for Two」: trade token 保有数（公開情報）。
+  if (state.tbCatanForTwo && player.type !== 'neutral') {
+    const tk = el('span', 'stat-count');
+    tk.textContent = `🪙${(state.tbTradeTokens ?? {})[pId] ?? 0}`;
+    tk.title = '交易トークン（ターン1回、強制交易 か 盗賊を砂漠へ に使える）';
+    counts.appendChild(tk);
+  }
   statRow.appendChild(counts);
   h3.appendChild(statRow);
   div.appendChild(h3);

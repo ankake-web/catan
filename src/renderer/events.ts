@@ -386,6 +386,38 @@ export function nearestValidShipEdgeId(
   return best;
 }
 
+/** 交易と蛮族「Catan for Two」: 点(x,y)に最も近い「中立 owner が開拓地を置ける」頂点ID。 */
+export function nearestTbNeutralVertexId(
+  state: GameState, owner: PlayerId, x: number, y: number, maxDist = VERTEX_TAP_RADIUS,
+): string | null {
+  let best: string | null = null;
+  let bestD = maxDist * maxDist;
+  for (const v of Object.values(state.vertices)) {
+    if (!canBuildSettlement(state, owner, v.id)) continue;
+    const dx = v.pixel.x - x, dy = v.pixel.y - y;
+    const d = dx * dx + dy * dy;
+    if (d <= bestD) { bestD = d; best = v.id; }
+  }
+  return best;
+}
+
+/** 交易と蛮族「Catan for Two」: 点(x,y)に最も近い「中立 owner が道を置ける」辺ID。 */
+export function nearestTbNeutralEdgeId(
+  state: GameState, owner: PlayerId, x: number, y: number, maxDist = EDGE_TAP_RADIUS,
+): string | null {
+  let best: string | null = null;
+  let bestD = maxDist * maxDist;
+  for (const e of Object.values(state.edges)) {
+    if (!canBuildRoad(state, owner, e.id)) continue;
+    const a = state.vertices[e.vertexIds[0]];
+    const b = state.vertices[e.vertexIds[1]];
+    if (!a || !b) continue;
+    const d = distToSegmentSq(x, y, a.pixel.x, a.pixel.y, b.pixel.x, b.pixel.y);
+    if (d <= bestD) { bestD = d; best = e.id; }
+  }
+  return best;
+}
+
 // 画面座標(clientX/Y)を盤面ピクセル座標（vertex.pixel と同じ系）へ変換する。
 // content グループの CTM 逆行列で content ローカル座標(=pixel+offset)に直し、offset を引く。
 function clickToBoardPixel(svg: SVGSVGElement, clientX: number, clientY: number): { x: number; y: number } | null {
@@ -432,6 +464,8 @@ export function attachBoardEvents(
   setDeserterRemove: (vid: string | null) => void = () => {},
   // 航海者・盗賊/海賊の事前選択: 'robber'=盗賊(陸)のみ / 'pirate'=海賊(海)のみ / null=未選択（両方動かせる盤で先に選ぶ）。
   getRobberPiece: () => 'robber' | 'pirate' | null = () => null,
+  // 交易と蛮族「Catan for Two」: TB_NEUTRAL で配置する中立プレイヤー（null=未選択。バーで先に選ぶ）。
+  getTbNeutralOwner: () => PlayerId | null = () => null,
 ): void {
   svg.addEventListener('click', (e) => {
     // 直前のパン/ピンチで動いた指のクリックは配置に使わない（誤配置防止）。
@@ -474,6 +508,24 @@ export function attachBoardEvents(
       }
       const owner = vid ? state.vertices[vid]?.building?.playerId : null;
       if (vid && owner) dispatch({ type: 'DOWNGRADE_CITY', playerId: owner, vertexId: vid });
+      return;
+    }
+
+    // ---- 交易と蛮族「Catan for Two」: 中立コマの無償配置（TB_NEUTRAL）。
+    //      光った合法位置をタップ → TB_NEUTRAL_ROAD / TB_NEUTRAL_SETTLEMENT。
+    //      両中立に置ける時はバーで中立(色)を選んでから（未選択なら無視）。 ----
+    if (state.phase === 'MAIN' && state.turnPhase === 'TB_NEUTRAL') {
+      const owner = getTbNeutralOwner();
+      if (!owner) return; // 先に「どちらの中立に置くか」を選ぶ
+      const ptn = clickToBoardPixel(svg, e.clientX, e.clientY);
+      if (!ptn) return;
+      if (state.tbNeutralPending === 'settlement') {
+        const vid = nearestTbNeutralVertexId(state, owner, ptn.x, ptn.y);
+        if (vid) dispatch({ type: 'TB_NEUTRAL_SETTLEMENT', owner, vertexId: vid });
+      } else {
+        const eid = nearestTbNeutralEdgeId(state, owner, ptn.x, ptn.y);
+        if (eid) dispatch({ type: 'TB_NEUTRAL_ROAD', owner, edgeId: eid });
+      }
       return;
     }
 
