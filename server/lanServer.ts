@@ -69,6 +69,11 @@ export function requiredActor(state: GameState, action: Action): PlayerId | null
     case 'DOWNGRADE_CITY':    return action.playerId;
     case 'DISCARD_PROGRESS':  return action.playerId;
     case 'RESPOND_TRADE':     return action.response.playerId;
+    // 交易と蛮族「イベントカード」: 多人数解決は action.playerId、強奪は保留中の奪う側本人のみ。
+    case 'CHOOSE_EVENT_GIVE':    return action.playerId;
+    case 'CHOOSE_EVENT_HELPFUL': return action.playerId;
+    case 'CHOOSE_EVENT_DAMAGE':  return action.playerId;
+    case 'CHOOSE_EVENT_STEAL':   return state.tbPendingEventSteal?.playerId ?? null;
     default:                  return state.playerOrder[state.currentPlayerIndex] ?? null;
   }
 }
@@ -385,8 +390,10 @@ function applyCpuStep(room: Room, pid: PlayerId, action: Action): Action['type']
     try {
       const prev = room.state;
       const cur = prev.playerOrder[prev.currentPlayerIndex];
-      // フォールバックの actor: 捨て札/金選択/交易応答は対象本人、それ以外は手番者。
-      const fbActor = (action.type === 'DISCARD_RESOURCES' || action.type === 'CHOOSE_GOLD' || action.type === 'RESPOND_TRADE') ? pid : (cur ?? pid);
+      // フォールバックの actor: 捨て札/金選択/交易応答/T&Bイベント選択は対象本人、それ以外は手番者。
+      const fbActor = (action.type === 'DISCARD_RESOURCES' || action.type === 'CHOOSE_GOLD' || action.type === 'RESPOND_TRADE'
+        || action.type === 'CHOOSE_EVENT_GIVE' || action.type === 'CHOOSE_EVENT_HELPFUL'
+        || action.type === 'CHOOSE_EVENT_STEAL' || action.type === 'CHOOSE_EVENT_DAMAGE') ? pid : (cur ?? pid);
       const fb = cpuFallbackAction(prev, fbActor as PlayerId);
       const next = applyAction(prev, fb, Math.random);
       room.state = next;

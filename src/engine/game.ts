@@ -5,9 +5,10 @@
 import type {
   GameState, Action, PlayerId, ResourceType, DevCard, VertexId, ResourceHand,
 } from '../types';
-import { RESOURCE_TYPES, COMMODITY_TYPES, BUILD_COSTS, DEV_CARD_COUNTS, TILE_RESOURCE_MAP, VP_TABLE } from '../constants';
+import { RESOURCE_TYPES, COMMODITY_TYPES, BUILD_COSTS, DEV_CARD_COUNTS, TILE_RESOURCE_MAP, VP_TABLE, TB_ROAD_REPAIR_COST, TB_EVENT_CARDS_36 } from '../constants';
 import type { CommodityType } from '../types';
-import { rollDice, distributeResources, computeGoldPicks } from './dice';
+import { rollDice, distributeResources, computeGoldPicks, capPicksByBank } from './dice';
+import { buildTbEventDeck, tbApplyEventEffect, tbEventStealTargets } from './tbEvents';
 import {
   canBuildRoad, buildRoad,
   canBuildShip, buildShip,
@@ -25,7 +26,7 @@ import {
   downgradeCity, discardProgressCard,
 } from './citiesKnights';
 import { executeBankTrade, canBankTrade, offerTrade, respondTrade, confirmTrade, cancelTrade } from './trade';
-import { updateLongestRoad, updateLargestArmy, updateStrongestPorts, checkVictory, calcVP, victoryTarget } from './scoring';
+import { updateLongestRoad, updateLargestArmy, updateStrongestPorts, checkVictory, calcVP, calcPublicVP, victoryTarget } from './scoring';
 import { newIslandBonusRep, islandRepOf } from './islands';
 import { edgeTileIds } from './board';
 import { revealFogAround, revealPendingNumbers } from './explore';
@@ -111,16 +112,46 @@ export function buildDevDeck(rng: () => number = Math.random): DevCard[] {
  * C&K×航海者コンボ（金タイル入りの盤）でも金が産出するようにする。
  */
 function applyGoldChoicePhase(next: GameState, total: number): GameState {
-  const rawPicks = computeGoldPicks(next, total);
-  let bankLeft = RESOURCE_TYPES.reduce((s, r) => s + next.bank[r], 0);
-  const goldPicks: Record<string, number> = {};
-  for (const pid of next.playerOrder) {
-    const capped = Math.min(rawPicks[pid] ?? 0, bankLeft);
-    if (capped > 0) { goldPicks[pid] = capped; bankLeft -= capped; }
-  }
+  const goldPicks = capPicksByBank(next, computeGoldPicks(next, total));
   return Object.keys(goldPicks).length > 0
     ? { ...next, turnPhase: 'GOLD', pendingGoldChoice: goldPicks }
     : { ...next, turnPhase: 'TRADE_BUILD' };
+}
+
+/**
+ * 基本/航海者: 出目（または交易と蛮族イベントカードの数字ディスク値）の解決。
+ * 7＝捨て札/盗賊、それ以外＝生産→織物→金タイル。ROLL_DICE 本体と、イベントカードの
+ * 選択解決後の再開（tbContinueAfterEvent）の両方から呼ぶ（重複排除＋一貫性）。
+ */
+function resolveBaseRollOutcome(next: GameState, total: number): GameState {
+  if (total === 7) {
+    // S7 海賊の島々では moveFleet が「資源収集前」に略奪して手札を減らしうるため、
+    // 捨て札要否は現在の手札(next)で判定する（詳細は ROLL_DICE 内コメント参照）。
+    const needsDiscard = next.playerOrder.some(p => {
+      const h = next.players[p]!.hand;
+      return RESOURCE_TYPES.reduce((s, r) => s + h[r], 0) >= 8;
+    });
+    // S7 海賊の島々（useRobber=false）: 盗賊不使用。7は手札破棄のみで盗賊移動・盗みは無し。
+    const afterDiscard = next.useRobber === false ? 'TRADE_BUILD' : 'ROBBER';
+    next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : afterDiscard };
+  } else {
+    next = distributeResources({ ...next, turnPhase: 'TRADE_BUILD' }, total);
+    // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
+    next = produceCloth(next, total);
+    // 航海者: 金タイル産出があれば、任意資源の選択待ち(GOLD)へ。無ければ通常どおり TRADE_BUILD。
+    next = applyGoldChoicePhase(next, total);
+  }
+  return checkClothEnd(next); // S6: 織物生産後、5村供給切れなら終了（無い盤では no-op）
+}
+
+/**
+ * 交易と蛮族「イベントカード」: イベント効果の選択解決（EVENT_* / GOLD）が全て終わったら、
+ * 保留しておいたカードの数字ディスク値で生産（または7の解決）へ進む。
+ */
+function tbContinueAfterEvent(next: GameState): GameState {
+  const total = next.tbPendingEventNumber;
+  if (total == null) return { ...next, turnPhase: 'TRADE_BUILD' }; // 保険（通常は必ず数字が保留されている）
+  return resolveBaseRollOutcome({ ...next, tbPendingEventNumber: null }, total);
 }
 
 function resolveCkRollOutcome(next: GameState, total: number): GameState {
@@ -172,6 +203,39 @@ export function applyAction(
       if (state.phase !== 'MAIN') throw new Error('ROLL_DICE: not MAIN phase');
       if (state.turnPhase !== 'PRE_ROLL') throw new Error('ROLL_DICE: not PRE_ROLL');
 
+      // ---- 交易と蛮族「イベントカード」: 赤黄ダイスの代わりにデッキの一番上をめくる ----
+      if (state.tbEventCards) {
+        let deck = state.tbEventDeck ?? [];
+        let rebuilt = false;
+        // New Year（または山札切れ＝保険）→ デッキを作り直してから一番上をめくって通常解決。
+        // New Year はデッキ再構築後の一番上には来ない（底から6枚目に埋まる）ため再帰しない。
+        if (deck.length === 0 || deck[0]!.event === 'new_year') {
+          deck = buildTbEventDeck(TB_EVENT_CARDS_36, rng);
+          rebuilt = true;
+        }
+        const card = deck[0]!;
+        deck = deck.slice(1);
+        const total = card.number!;
+        // lastDiceRoll にはカード数字の2分割を入れ、既存の生産演出/履歴/統計と互換にする
+        // （UI 側は tbLastEventCard を見てダイスの代わりにカードを表示する）。
+        const d1 = Math.min(6, Math.ceil(total / 2));
+        const d2 = total - d1;
+        let next: GameState = {
+          ...state,
+          tbEventDeck: deck,
+          tbLastEventCard: card,
+          tbNewYearRebuilt: rebuilt,
+          lastDiceRoll: [d1, d2],
+          diceRolledThisTurn: true,
+        };
+        // イベント効果を解決（CN3089 p5: 効果 → 数字ディスク値で生産 or 7 の順）。
+        next = tbApplyEventEffect(next, card);
+        // プレイヤーの選択が要る効果は保留フェーズ(EVENT_*/GOLD)へ遷移済み
+        // → 数字の解決は全選択の解決後（CHOOSE_* ハンドラの tbContinueAfterEvent）。
+        if (next.turnPhase !== 'PRE_ROLL') return { ...next, tbPendingEventNumber: total };
+        return resolveBaseRollOutcome(next, total);
+      }
+
       // 騎士と商人: 錬金術師(alchemist)で目を事前指定済みなら、それを使い消費する。
       const forced = isCk(state) ? (state.alchemistForcedDice ?? null) : null;
       const [d1, d2] = forced ?? rollDice(rng);
@@ -189,30 +253,11 @@ export function applyAction(
       }
 
       // S7 海賊の島々: ダイス後・資源収集前に海賊艦隊が「小さい目」の数だけ前進し、隣接建物から略奪。
+      // （捨て札要否は略奪後の手札で判定する必要があるため、moveFleet は resolveBaseRollOutcome より前）
       if (state.pirateFleet) next = moveFleet(next, Math.min(d1, d2), rng);
 
-      if (total === 7) {
-        // S7 海賊の島々では上の moveFleet が「資源収集前」に略奪して手札を減らしうる。
-        // 捨て札要否は略奪後の手札(next)で判定する（state だと8→7に減った人がいても DISCARD に
-        // 入り、実際は誰も捨てる必要が無く手詰まりになる）。非艦隊シナリオでは next===state で不変。
-        const needsDiscard = next.playerOrder.some(p => {
-          const h = next.players[p]!.hand;
-          return RESOURCE_TYPES.reduce((s, r) => s + h[r], 0) >= 8;
-        });
-        // S7 海賊の島々（useRobber=false）: 盗賊不使用。7は手札破棄のみで盗賊移動・盗みは無し。
-        const afterDiscard = state.useRobber === false ? 'TRADE_BUILD' : 'ROBBER';
-        next = { ...next, discardedThisRound: [], turnPhase: needsDiscard ? 'DISCARD' : afterDiscard };
-      } else {
-        next = distributeResources({ ...next, turnPhase: 'TRADE_BUILD' }, total);
-        // S6 カタンの織物: 村の数字が出たら接続済みプレイヤーへ織物を配る（無い盤では no-op）。
-        next = produceCloth(next, total);
-        // 航海者: 金タイル産出があれば、任意資源の選択待ち(GOLD)へ。無ければ通常どおり TRADE_BUILD。
-        // 選択枚数のバンク頭打ち（ソフトロック回避）は applyGoldChoicePhase に集約（CK経路と共通）。
-        next = applyGoldChoicePhase(next, total);
-      }
-
-      next = checkClothEnd(next); // S6: 織物生産後、5村供給切れなら終了（無い盤では no-op）
-      return next;
+      // 7の捨て札/盗賊 or 生産→織物→金タイル（T&Bイベントカード経路と共通の resolveBaseRollOutcome へ集約）。
+      return resolveBaseRollOutcome(next, total);
     }
 
     // ----------------------------------------------------------
@@ -250,10 +295,143 @@ export function applyAction(
         pendingGoldChoice: nextPending,
       };
       // 全員の選択が済んだら、手番プレイヤーの交易・建設フェーズへ進む。
+      // T&B イベントカードのイベント効果（豊作の年/穏やかな海/馬上槍試合）で GOLD に入っていた
+      // 場合は、保留中のカード数字の生産へ進む（tbContinueAfterEvent。通常の金タイルGOLDは
+      // tbPendingEventNumber が null なので従来どおり TRADE_BUILD）。
       if (Object.keys(nextPending).length === 0) {
-        next = { ...next, turnPhase: 'TRADE_BUILD', pendingGoldChoice: {} };
+        next = { ...next, pendingGoldChoice: {} };
+        next = next.tbPendingEventNumber != null
+          ? tbContinueAfterEvent(next)
+          : { ...next, turnPhase: 'TRADE_BUILD' };
       }
       return next;
+    }
+
+    // ----------------------------------------------------------
+    // 交易と蛮族「イベントカード」: イベント効果の選択解決
+    // ----------------------------------------------------------
+
+    // 良き隣人(GOOD NEIGHBORS): 各自が左隣へ渡す任意資源1枚を選ぶ（多人数解決）。
+    case 'CHOOSE_EVENT_GIVE': {
+      if (state.turnPhase !== 'EVENT_GIVE') throw new Error('CHOOSE_EVENT_GIVE: not in EVENT_GIVE phase');
+      const { playerId, resource } = action;
+      const toId = (state.tbPendingEventGive ?? {})[playerId];
+      if (!toId) throw new Error('CHOOSE_EVENT_GIVE: no pending give for this player');
+      const giver = state.players[playerId];
+      const receiver = state.players[toId];
+      if (!giver || !receiver) throw new Error('CHOOSE_EVENT_GIVE: unknown player');
+      // resource は必ず既知の資源種別（LANの不正ペイロードで hand[bogus]=NaN を作らせない）。
+      if (!RESOURCE_TYPES.includes(resource)) throw new Error('CHOOSE_EVENT_GIVE: unknown resource');
+      if (giver.hand[resource] < 1) throw new Error('CHOOSE_EVENT_GIVE: resource not in hand');
+
+      const pending = { ...(state.tbPendingEventGive ?? {}) };
+      delete pending[playerId];
+      let next: GameState = {
+        ...state,
+        players: {
+          ...state.players,
+          [playerId]: { ...giver, hand: { ...giver.hand, [resource]: giver.hand[resource] - 1 } },
+          [toId]: { ...receiver, hand: { ...receiver.hand, [resource]: receiver.hand[resource] + 1 } },
+        },
+        tbPendingEventGive: pending,
+      };
+      if (Object.keys(pending).length === 0) next = tbContinueAfterEvent({ ...next, tbPendingEventGive: {} });
+      return next;
+    }
+
+    // 親切な隣人(HELPFUL NEIGHBOR): 公開VP最多者が「より少ない者」へ渡す資源と相手を選ぶ。
+    case 'CHOOSE_EVENT_HELPFUL': {
+      if (state.turnPhase !== 'EVENT_HELPFUL') throw new Error('CHOOSE_EVENT_HELPFUL: not in EVENT_HELPFUL phase');
+      const { playerId, resource, toPlayerId } = action;
+      if (!(state.tbPendingEventHelpful ?? []).includes(playerId))
+        throw new Error('CHOOSE_EVENT_HELPFUL: no pending give for this player');
+      const giver = state.players[playerId];
+      const receiver = state.players[toPlayerId];
+      if (!giver || !receiver || playerId === toPlayerId) throw new Error('CHOOSE_EVENT_HELPFUL: invalid players');
+      // resource は必ず既知の資源種別（LANの不正ペイロードで hand[bogus]=NaN を作らせない）。
+      if (!RESOURCE_TYPES.includes(resource)) throw new Error('CHOOSE_EVENT_HELPFUL: unknown resource');
+      if (giver.hand[resource] < 1) throw new Error('CHOOSE_EVENT_HELPFUL: resource not in hand');
+      // 受け取れるのは「渡す側よりVPの少ない」プレイヤーのみ（公開VPで判定・CN3089 p6）。
+      if (calcPublicVP(state, toPlayerId) >= calcPublicVP(state, playerId))
+        throw new Error('CHOOSE_EVENT_HELPFUL: recipient must have fewer VPs');
+
+      const pending = (state.tbPendingEventHelpful ?? []).filter(p => p !== playerId);
+      let next: GameState = {
+        ...state,
+        players: {
+          ...state.players,
+          [playerId]: { ...giver, hand: { ...giver.hand, [resource]: giver.hand[resource] - 1 } },
+          [toPlayerId]: { ...receiver, hand: { ...receiver.hand, [resource]: receiver.hand[resource] + 1 } },
+        },
+        tbPendingEventHelpful: pending,
+      };
+      if (pending.length === 0) next = tbContinueAfterEvent({ ...next, tbPendingEventHelpful: [] });
+      return next;
+    }
+
+    // 衝突(CONFLICT)/交易優位(TRADE ADVANTAGE): タイル保持者が奪う相手を選ぶ（無作為1枚）。
+    case 'CHOOSE_EVENT_STEAL': {
+      if (state.turnPhase !== 'EVENT_STEAL') throw new Error('CHOOSE_EVENT_STEAL: not in EVENT_STEAL phase');
+      const pending = state.tbPendingEventSteal;
+      if (!pending) throw new Error('CHOOSE_EVENT_STEAL: no pending steal');
+      const { targetPlayerId } = action;
+      if (targetPlayerId == null) {
+        // 見送りは「騎士カード最多の単独者」（原文 "may steal"）のときだけ許す。タイル保持者は必須。
+        if (!pending.optional) throw new Error('CHOOSE_EVENT_STEAL: stealing is mandatory for the tile holder');
+        return tbContinueAfterEvent({ ...state, tbPendingEventSteal: null });
+      }
+      if (!tbEventStealTargets(state).includes(targetPlayerId))
+        throw new Error('CHOOSE_EVENT_STEAL: invalid steal target');
+      let next = stealResource(state, pending.playerId, targetPlayerId, rng);
+      next = { ...next, tbPendingEventSteal: null };
+      return tbContinueAfterEvent(next);
+    }
+
+    // 地震(EARTHQUAKE): 各自が損傷させる自分の道1本を選ぶ（多人数解決）。
+    case 'CHOOSE_EVENT_DAMAGE': {
+      if (state.turnPhase !== 'EVENT_DAMAGE') throw new Error('CHOOSE_EVENT_DAMAGE: not in EVENT_DAMAGE phase');
+      const { playerId, edgeId } = action;
+      if (!(state.tbPendingEventDamage ?? []).includes(playerId))
+        throw new Error('CHOOSE_EVENT_DAMAGE: no pending damage for this player');
+      const edge = state.edges[edgeId];
+      if (!edge?.road || edge.road.playerId !== playerId)
+        throw new Error('CHOOSE_EVENT_DAMAGE: not your road');
+      if (edge.road.damaged) throw new Error('CHOOSE_EVENT_DAMAGE: road already damaged');
+
+      const pending = (state.tbPendingEventDamage ?? []).filter(p => p !== playerId);
+      let next: GameState = {
+        ...state,
+        edges: { ...state.edges, [edgeId]: { ...edge, road: { ...edge.road, damaged: true } } },
+        tbPendingEventDamage: pending,
+      };
+      if (pending.length === 0) next = tbContinueAfterEvent({ ...next, tbPendingEventDamage: [] });
+      return next;
+    }
+
+    // 損傷した道の修理（レンガ1木1・自分のターンの交易/建設フェーズ・CN3089 p5）。
+    case 'REPAIR_ROAD': {
+      if (state.phase !== 'MAIN' || state.turnPhase !== 'TRADE_BUILD')
+        throw new Error('REPAIR_ROAD: not in TRADE_BUILD phase');
+      const { edgeId } = action;
+      const edge = state.edges[edgeId];
+      if (!edge?.road || edge.road.playerId !== pid) throw new Error('REPAIR_ROAD: not your road');
+      if (!edge.road.damaged) throw new Error('REPAIR_ROAD: road is not damaged');
+      const player = state.players[pid]!;
+      if (!hasEnoughResources(player.hand, TB_ROAD_REPAIR_COST))
+        throw new Error('REPAIR_ROAD: not enough resources');
+
+      const newHand = { ...player.hand };
+      const newBank = { ...state.bank };
+      for (const r of RESOURCE_TYPES) {
+        newHand[r] -= TB_ROAD_REPAIR_COST[r];
+        newBank[r] += TB_ROAD_REPAIR_COST[r];
+      }
+      return {
+        ...state,
+        bank: newBank,
+        players: { ...state.players, [pid]: { ...player, hand: newHand } },
+        edges: { ...state.edges, [edgeId]: { ...edge, road: { playerId: pid } } },
+      };
     }
 
     // ----------------------------------------------------------
@@ -1062,6 +1240,8 @@ export function applyAction(
         shipsBuiltThisTurn: [],
         // 騎士と商人専用フラグは CK でのみリセット（非CK状態を汚さない）。
         ...(isCk(state) ? { knightMovedThisTurn: false, knightChasedThisTurn: false } : {}),
+        // T&B イベントカード「疫病」はそのターンの生産のみ（非対象シナリオの状態を汚さない）。
+        ...(state.tbEpidemic ? { tbEpidemic: false } : {}),
         pendingTrade: null,
       };
     }

@@ -3,14 +3,15 @@
 // ============================================================
 
 import './style.css';
-import type { GameState, Action, PlayerId, AiDifficulty, ResourceType, TradeOffer, ResourceHand } from './types';
+import type { GameState, Action, PlayerId, AiDifficulty, ResourceType, TradeOffer, ResourceHand, TbEventCard } from './types';
 import type { PlayerOrderMode } from './engine/setup';
-import { makeHand, RESOURCE_TYPES, COMMODITY_TYPES, VP_TABLE, TILE_RESOURCE_MAP, TILE_COMMODITY_MAP, CK_BARBARIAN_MAX, CK_TRACK_NAME, PROGRESS_CARD_NAME } from './constants';
+import { makeHand, RESOURCE_TYPES, COMMODITY_TYPES, VP_TABLE, TILE_RESOURCE_MAP, TILE_COMMODITY_MAP, CK_BARBARIAN_MAX, CK_TRACK_NAME, PROGRESS_CARD_NAME, TB_EVENT_NAME, TB_ROAD_REPAIR_COST } from './constants';
 import { createInitialGameState } from './engine/createState';
 import type { ScenarioId } from './engine/scenarios';
 import type { PlayerSpec } from './engine/createState';
 import { applyAction, setupGainFor } from './engine/game';
 import { findPendingDiscarder, discardCount, getRobberMoveTargets } from './engine/robber';
+import { tbEventPendingIds, tbHasDamagedRoad, tbDamagedRoadEdges } from './engine/tbEvents';
 import {
   playSE, bgmStart, bgmStop, bgmSetVolume, setBgmTrack, BGM_TRACKS,
   isBgmEnabled, setBgmEnabled, getBgmVolume, getBgmTrack, isSeEnabled, setSeEnabled,
@@ -665,6 +666,20 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
       return opts;
     }
 
+    // 交易と蛮族イベント「地震」: 対象（LAN=viewer/ローカル=人間）の未損傷の道を光らせて盤面でタップ選択。
+    if (state.turnPhase === 'EVENT_DAMAGE') {
+      const pending = state.tbPendingEventDamage ?? [];
+      const me = selfPlayerId();
+      const acting = me && pending.includes(me) ? me : pending.find(p => state.players[p]?.type === 'human');
+      if (acting) {
+        opts.validEdgeIds = new Set(Object.keys(state.edges).filter(eid => {
+          const r = state.edges[eid]!.road;
+          return r?.playerId === acting && !r.damaged;
+        }));
+      }
+      return opts;
+    }
+
     if (state.turnPhase === 'TRADE_BUILD') {
       if (mode === 'road') {
         opts.validEdgeIds = new Set(
@@ -751,6 +766,9 @@ function computeHighlights(state: GameState, mode: BuildMode): BoardRenderOption
       } else if (mode === 'selectIntrigueKnight') {
         // 騎士と商人・陰謀: 退去させられる敵騎士（自分の道/船に隣接）を光らせる。
         opts.validVertexIds = new Set(intrigueKnightTargets(state, pid));
+      } else if (mode === 'idle' && state.tbEventCards && tbHasDamagedRoad(state, pid)) {
+        // 交易と蛮族イベント「地震」: 自分の損傷した道を光らせる（タップで修理・レンガ1木1）。
+        opts.validEdgeIds = new Set(tbDamagedRoadEdges(state, pid));
       }
     }
   }
@@ -1077,7 +1095,19 @@ function computeSheetStatus(): { text: string; alert: boolean } {
   // 航海者: 自分が金タイル産出の選択待ちなら案内（手番でなくても出す）。
   if (viewer && state.phase === 'MAIN' && state.turnPhase === 'GOLD'
       && ((state.pendingGoldChoice ?? {})[viewer] ?? 0) > 0) {
-    return { text: '✨ 金を選択！', alert: true };
+    // T&B イベント（豊作の年など）でも GOLD を流用しているため文言を出し分ける。
+    return { text: state.tbPendingEventNumber != null ? '✨ 資源を選択！' : '✨ 金を選択！', alert: true };
+  }
+  // 交易と蛮族イベント: 自分が選択待ちなら案内（手番でなくても出す）。
+  if (viewer && state.phase === 'MAIN') {
+    if (state.turnPhase === 'EVENT_GIVE' && (state.tbPendingEventGive ?? {})[viewer])
+      return { text: '🎁 左隣へ渡す資源を選択！', alert: true };
+    if (state.turnPhase === 'EVENT_HELPFUL' && (state.tbPendingEventHelpful ?? []).includes(viewer))
+      return { text: '🎁 渡す相手と資源を選択！', alert: true };
+    if (state.turnPhase === 'EVENT_STEAL' && state.tbPendingEventSteal?.playerId === viewer)
+      return { text: '⚔ 奪う相手を選択！', alert: true };
+    if (state.turnPhase === 'EVENT_DAMAGE' && (state.tbPendingEventDamage ?? []).includes(viewer))
+      return { text: '🚧 損傷させる自分の道をタップ', alert: true };
   }
   if (viewer && cur === viewer) {
     if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
@@ -1088,7 +1118,7 @@ function computeSheetStatus(): { text: string; alert: boolean } {
       }
       return { text: '🏠 開拓地を配置', alert: false };
     }
-    if (state.turnPhase === 'PRE_ROLL') return { text: '🎲 ダイス', alert: false };
+    if (state.turnPhase === 'PRE_ROLL') return { text: state.tbEventCards ? '🃏 イベントカードをめくる' : '🎲 ダイス', alert: false };
     if (state.turnPhase === 'ROBBER')   return { text: '🦹 盗賊を移動するタイルをタップ', alert: true };
     if (state.turnPhase === 'CITY_DOWNGRADE') return { text: '⚔ 格下げする自分の都市をタップ', alert: true };
     if (state.turnPhase === 'PROGRESS_DISCARD') return { text: '📜 進歩カードが5枚 — 捨てる1枚を選択', alert: true };
@@ -1572,6 +1602,18 @@ function scheduleAiTurn(): void {
     return;
   }
 
+  // 交易と蛮族イベント: 選択待ち（良き隣人/親切な隣人/衝突・交易優位/地震）。対象 CPU を1人ずつ自動解決。
+  if (state.phase === 'MAIN' && tbEventPendingIds(state).length > 0) {
+    const epid = tbEventPendingIds(state).find(p => state.players[p]?.type === 'ai');
+    if (epid) {
+      setTimeout(() => {
+        if (gen !== gameGeneration) return;
+        runCpuStep(epid, {});
+      }, aiDelayMs());
+    }
+    return;
+  }
+
   const pid = state.playerOrder[state.currentPlayerIndex]!;
   if (state.players[pid]?.type === 'ai') {
     const aiOpts: AiOpts = { skipPlayerTrade: cpuPlayerTradeOfferedThisTurn };
@@ -1636,6 +1678,10 @@ function cpuIsResponsible(): boolean {
   }
   if (state.phase === 'MAIN' && state.turnPhase === 'PROGRESS_DISCARD') {
     return (state.pendingProgressDiscard ?? []).some(p => state.players[p]?.type === 'ai');
+  }
+  // 交易と蛮族イベント: 選択待ちの対象に CPU がいる時だけ CPU 責任（GOLD 等と同方針）。
+  if (state.phase === 'MAIN' && tbEventPendingIds(state).length > 0) {
+    return tbEventPendingIds(state).some(p => state.players[p]?.type === 'ai');
   }
   const cur = state.playerOrder[state.currentPlayerIndex];
   return !!cur && state.players[cur]?.type === 'ai';
@@ -1723,6 +1769,12 @@ function safeFallbackAction(): Action | null {
   if (state.phase === 'MAIN' && state.turnPhase === 'PROGRESS_DISCARD') {
     const cpid = (state.pendingProgressDiscard ?? []).find(p => state.players[p]?.type === 'ai');
     if (cpid) return chooseAction(state, cpid);
+    return null;
+  }
+  // 交易と蛮族イベント: 選択待ち（対象 CPU の選択を chooseAction で生成）。
+  if (state.phase === 'MAIN' && tbEventPendingIds(state).length > 0) {
+    const epid = tbEventPendingIds(state).find(p => state.players[p]?.type === 'ai');
+    if (epid) return chooseAction(state, epid);
     return null;
   }
   const cur = state.playerOrder[state.currentPlayerIndex];
@@ -2425,13 +2477,20 @@ function triggerResourceAnimation(
   // ロールでこれらの保留フェーズに入った時はまだ資源が配られていないので生産アニメを出さない
   // （出すと「幻の資源」が飛び、さらに分配アニメ用ゲートで進行が約2秒固まる＝手前の処理が
   //   終わっていないように見える原因になっていた）。生産は保留が解けた時に出す。
+  // T&B イベントカード: イベント効果の選択待ち（EVENT_* / イベント由来のGOLD）中も生産は「保留」。
   const rollDeferred = action?.type === 'ROLL_DICE'
-    && (newState.turnPhase === 'CITY_DOWNGRADE' || newState.turnPhase === 'PROGRESS_DISCARD');
+    && (newState.turnPhase === 'CITY_DOWNGRADE' || newState.turnPhase === 'PROGRESS_DISCARD'
+      || newState.tbPendingEventNumber != null);
   // 保留が全て解決して生産が確定した瞬間（DOWNGRADE_CITY / DISCARD_PROGRESS でフェーズが抜けた）。
-  const deferredResolved = ck
+  const ckDeferredResolved = ck
     && (action?.type === 'DOWNGRADE_CITY' || action?.type === 'DISCARD_PROGRESS')
     && (oldState.turnPhase === 'CITY_DOWNGRADE' || oldState.turnPhase === 'PROGRESS_DISCARD')
     && newState.turnPhase !== 'CITY_DOWNGRADE' && newState.turnPhase !== 'PROGRESS_DISCARD';
+  // T&B: イベント選択の最後の1手（CHOOSE_EVENT_* / CHOOSE_GOLD）で保留数字が消えた＝生産が走った瞬間。
+  const tbDeferredResolved = (action?.type === 'CHOOSE_EVENT_GIVE' || action?.type === 'CHOOSE_EVENT_HELPFUL'
+      || action?.type === 'CHOOSE_EVENT_STEAL' || action?.type === 'CHOOSE_EVENT_DAMAGE' || action?.type === 'CHOOSE_GOLD')
+    && oldState.tbPendingEventNumber != null && newState.tbPendingEventNumber == null;
+  const deferredResolved = ckDeferredResolved || tbDeferredResolved;
   // ダイス生産アニメを出す総数。通常ロール（保留なし）か、保留解決時。盤面は確定後の newState 基準
   //（保留中に格下げされた都市を反映＝実際に配られた量と一致）。
   const prodTotal = isDice ? diceTotal
@@ -3207,8 +3266,13 @@ function animateBuildPlacement(action: Action | undefined): void {
 }
 
 // ROLL_DICE ならダイス演出（赤・黄・イベントの3個＋CKの抽選/蛮族パネル）を見せてから finish。
+// 交易と蛮族「イベントカード」ではダイスは箱に戻っている＝カードめくり演出に差し替える。
 function runWithDiceAnim(action: Action | undefined, prevState: GameState, finish: () => void): void {
-  if (action?.type === 'ROLL_DICE' && state.lastDiceRoll) {
+  if (action?.type === 'ROLL_DICE' && state.tbEventCards && state.tbLastEventCard) {
+    diceAnimating = true;
+    _diceAnimStart = (typeof performance !== 'undefined' ? performance.now() : 0);
+    playTbEventCardReveal(state.tbLastEventCard, state.tbNewYearRebuilt === true, finish);
+  } else if (action?.type === 'ROLL_DICE' && state.lastDiceRoll) {
     diceAnimating = true;
     _diceAnimStart = (typeof performance !== 'undefined' ? performance.now() : 0);
     const [d1, d2] = state.lastDiceRoll;
@@ -3216,6 +3280,73 @@ function runWithDiceAnim(action: Action | undefined, prevState: GameState, finis
   } else {
     finish();
   }
+}
+
+// 交易と蛮族「イベントカード」: カードの1行説明（めくり演出用のUI文言）。
+const TB_EVENT_SUMMARY: Record<TbEventCard['event'], string> = {
+  beautiful_day:    '事件なし。数字のヘックスが通常どおり生産',
+  calm_seas:        '港に建物が最も多い人が、好きな資源1枚を獲得',
+  conflict:         '最大騎士力（無ければ騎士カード最多の1人）が誰かから1枚奪う',
+  earthquake:       '全員が自分の道1本を損傷。修理するまで道を建てられない',
+  epidemic:         'この生産では都市も資源1枚だけ',
+  good_neighbors:   '全員が左隣へ好きな資源1枚を渡す',
+  helpful_neighbor: '点数トップが、点数の低い人へ資源1枚を渡す',
+  new_year:         'イベントデッキを作り直す',
+  plentiful_year:   '全員が好きな資源1枚を獲得',
+  robber_attacks:   '「7」として解決！ 8枚以上は捨て札→盗賊が動く',
+  robber_flees:     '盗賊が砂漠へ帰る（誰からも奪わない）',
+  tournament:       '表向きの騎士カード最多の人が、好きな資源1枚を獲得',
+  trade_advantage:  '最長交易路の人が誰かから1枚奪う',
+};
+
+// カードめくり演出: ダイスの代わりに、めくったイベントカード（名前・数字・効果）を短時間見せる。
+function playTbEventCardReveal(card: TbEventCard, rebuilt: boolean, onDone: () => void): void {
+  const reduced = prefersReducedMotion();
+  const mode = diceFxMode();
+  const instant = reduced || mode === 'off';
+
+  const host = document.getElementById('board-area') ?? document.body;
+  const dim = showBoardDim(instant);
+  const overlay = document.createElement('div');
+  overlay.className = 'dice-roll-overlay';
+  const panel = document.createElement('div');
+  panel.className = 'dice-result-card tb-event-reveal';
+
+  if (rebuilt) {
+    const ny = document.createElement('div');
+    ny.textContent = '🔄 新年！ イベントデッキを作り直しました';
+    ny.style.cssText = 'font-size:14px;opacity:.9;margin-bottom:6px;';
+    panel.appendChild(ny);
+  }
+  const title = document.createElement('div');
+  title.textContent = `🃏 ${TB_EVENT_NAME[card.event]}`;
+  title.style.cssText = 'font-size:22px;font-weight:700;';
+  panel.appendChild(title);
+  if (card.number != null) {
+    // ダイス合計と同じ見た目の数字強調を流用（.dice-sum-total の黄色い大数字）。
+    const sum = document.createElement('div');
+    sum.className = 'dice-sum show';
+    const label = document.createElement('span');
+    label.className = 'dice-sum-label';
+    label.textContent = '生産数字';
+    const total = document.createElement('span');
+    total.className = 'dice-sum-total';
+    total.textContent = String(card.number);
+    sum.append(label, total);
+    panel.appendChild(sum);
+  }
+  const desc = document.createElement('div');
+  desc.textContent = TB_EVENT_SUMMARY[card.event];
+  desc.style.cssText = 'font-size:13px;opacity:.92;margin-top:6px;max-width:280px;';
+  panel.appendChild(desc);
+
+  overlay.appendChild(panel);
+  host.appendChild(overlay);
+  // 7(盗賊の襲撃)の不穏SEは演出後の runTransitionFx が鳴らす（ここで鳴らすと二重になる）。
+
+  const k = mode === 'fast' ? 0.6 : mode === 'slow' ? 1.5 : 1;
+  const hold = instant ? 900 : Math.round(2100 * k);
+  setTimeout(() => { overlay.remove(); hideBoardDim(dim); onDone(); }, hold);
 }
 
 // ターン終了時など、盤面を画面内に出す（スマホで操作パネルまでスクロールしている状態から戻す）。
@@ -3355,6 +3486,10 @@ function dispatch(action: Action): void {
         : action.type === 'CHOOSE_GOLD' ? action.playerId
         : action.type === 'DOWNGRADE_CITY' ? action.playerId
         : action.type === 'DISCARD_PROGRESS' ? action.playerId
+        : action.type === 'CHOOSE_EVENT_GIVE' ? action.playerId
+        : action.type === 'CHOOSE_EVENT_HELPFUL' ? action.playerId
+        : action.type === 'CHOOSE_EVENT_DAMAGE' ? action.playerId
+        : action.type === 'CHOOSE_EVENT_STEAL' ? prevState.tbPendingEventSteal?.playerId
         : action.type === 'RESPOND_TRADE' ? action.response.playerId
         : prevState.playerOrder[prevState.currentPlayerIndex];
       if (actorPid === selfPlayerId()) vibrateForAction(action);
@@ -3800,6 +3935,12 @@ function boardCanAct(): boolean {
     if (netMode) return viewerPlayerId != null && pending.includes(viewerPlayerId);
     return pending.some(p => state.players[p]?.type === 'human');
   }
+  // 交易と蛮族イベント「地震」: 対象は手番外でも盤面（自分の道）をタップして解決する。
+  if (state.turnPhase === 'EVENT_DAMAGE') {
+    const pending = state.tbPendingEventDamage ?? [];
+    if (netMode) return viewerPlayerId != null && pending.includes(viewerPlayerId);
+    return pending.some(p => state.players[p]?.type === 'human');
+  }
   if (netMode) return viewerPlayerId != null && viewerPlayerId === currentPid(state);
   return state.players[currentPid(state)]?.type === 'human';
 }
@@ -4016,6 +4157,12 @@ function playActionSE(action: Action): void {
     case 'DECLARE_VICTORY':   playSE('victory'); break;
     case 'DISCARD_RESOURCES': playSE('discardLose'); break;
     case 'CHOOSE_GOLD':       playSE('build'); break;
+    // 交易と蛮族「イベントカード」: 選択解決のSE（既存音の流用）。
+    case 'CHOOSE_EVENT_GIVE':
+    case 'CHOOSE_EVENT_HELPFUL': playSE('tradeOk'); break;
+    case 'CHOOSE_EVENT_STEAL':   if (action.targetPlayerId != null) playSE('robber'); break;
+    case 'CHOOSE_EVENT_DAMAGE':  playSE('discardLose'); break;
+    case 'REPAIR_ROAD':          playSE('build'); break;
   }
 }
 
@@ -4110,6 +4257,10 @@ function netDispatch(action: Action): void {
     action.type === 'CHOOSE_GOLD'       ? action.playerId :
     action.type === 'DOWNGRADE_CITY'    ? action.playerId :
     action.type === 'DISCARD_PROGRESS'  ? action.playerId :
+    action.type === 'CHOOSE_EVENT_GIVE'    ? action.playerId :
+    action.type === 'CHOOSE_EVENT_HELPFUL' ? action.playerId :
+    action.type === 'CHOOSE_EVENT_DAMAGE'  ? action.playerId :
+    action.type === 'CHOOSE_EVENT_STEAL'   ? (state.tbPendingEventSteal?.playerId ?? currentPid(state)) :
     action.type === 'RESPOND_TRADE'     ? action.response.playerId :
     currentPid(state);
   if (actor !== viewerPlayerId) return; // 自分の操作できる場面のみ送信

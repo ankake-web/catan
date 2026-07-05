@@ -38,6 +38,7 @@ export type ScenarioId =
   | 'oasis'                    // 公式アプリ「オアシス」（基本ゲーム＋道で砂漠/霧を探索＋財宝・10点）
   | 'tb_friendly_robber'       // 交易と蛮族「親切な盗賊(The Friendly Robber)」変種（基本盤＋盗賊の移動制限・10点）
   | 'tb_harbors'               // 交易と蛮族「強き港(Harbors of Catan / Strongest Ports)」変種（基本盤＋2VPタイル・11点）
+  | 'tb_event_cards'           // 交易と蛮族「イベントカード(Catan Event Cards)」変種（基本盤＋ダイス→カード置換・10点）
   | 'cities_knights';
 
 export interface ScenarioBoard {
@@ -1345,6 +1346,23 @@ const tbHarbors: Scenario = {
   rules: { strongestPorts: true },
 };
 
+// ---- 交易と蛮族「イベントカード（Catan Event Cards）」変種（第6版 CN3089 p4-6） ----
+// 基本19タイル盤（classic と同じ生成）で、生産フェーズの赤黄ダイスをイベントデッキに置換した変種。
+// 毎ターン山札の一番上をめくり、イベント効果を解決してからカードの数字ディスク値で生産（または7の解決）。
+// 36枚の数字分布は2d6の確率分布どおり（出典は独語版第6版ルールブック p5・仕様書§2-3）。
+// New Year でデッキを再構築。勝利目標は本体準拠（基本=10点）。
+const tbEventCards: Scenario = {
+  id: 'tb_event_cards',
+  name: '交易と蛮族：イベントカード',
+  description: '基本19タイル。ダイスの代わりにイベントカードをめくり、事件を解決してから生産（10点で勝利）。',
+  category: 'traders_barbarians',
+  recommendedPlayers: '4人',
+  coords: () => getAllTileCoords(),
+  build: (geo, rng) => createRandomBoard(geo, rng),
+  victoryTarget: 10,
+  rules: { eventCards: true },
+};
+
 const SCENARIOS: Record<ScenarioId, Scenario> = {
   classic,
   // 公式航海者シナリオ
@@ -1373,6 +1391,7 @@ const SCENARIOS: Record<ScenarioId, Scenario> = {
   // 交易と蛮族（Traders & Barbarians）
   tb_friendly_robber: tbFriendlyRobber,
   tb_harbors: tbHarbors,
+  tb_event_cards: tbEventCards,
   cities_knights: citiesKnights,
 };
 
@@ -1503,6 +1522,12 @@ const SCENARIO_RULES: Record<ScenarioId, string[]> = {
     '港（2:1/3:1）の上に建てた建物のVP合計（開拓地1・都市2）が最も多い人が「強き港」タイル（+2点）を得る。',
     '最初に港建物の合計3点に達した人が獲得。以後は他の人がそれを上回ると即その人へ移る。',
   ],
+  tb_event_cards: [
+    '10点で勝ち。ダイスの代わりに、毎ターン イベントカードの山札を1枚めくる。',
+    'カードの事件（地震・疫病・盗賊の襲撃など13種）を先に解決し、その後カードの数字で通常どおり生産する。数字の出方はダイスと同じ確率分布（7が6枚など全36枚）。',
+    '「新年」が出たら山札を作り直す（下5枚は毎回使われずに終わるので、少しだけ先が読めない）。',
+    '地震で損傷した道は、修理（レンガ1木1）するまで自分の道を新しく建てられない。損傷した道の隣には開拓地も建てられない。',
+  ],
 };
 
 /** このゲーム固有の詳細ルール（遊び方表示用）。未知IDは基本のルールにフォールバック。 */
@@ -1552,6 +1577,7 @@ const VISIBLE_SCENARIO_IDS: ReadonlySet<ScenarioId> = new Set<ScenarioId>([
   // 交易と蛮族
   'tb_friendly_robber',
   'tb_harbors',
+  'tb_event_cards',
 ]);
 /** 盤面選択UIに表示するシナリオ一覧（listScenarios のうち VISIBLE のみ）。 */
 export function listVisibleScenarios(): ReadonlyArray<ScenarioInfo> {

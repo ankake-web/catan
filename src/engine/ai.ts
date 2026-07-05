@@ -3,7 +3,7 @@
 // ============================================================
 
 import type { GameState, Action, PlayerId, ResourceType, AiDifficulty, ResourceHand, DevCardType, CkTrack } from '../types';
-import { RESOURCE_TYPES, COMMODITY_TYPES, BUILD_COSTS, VP_TABLE, TILE_RESOURCE_MAP, LONGEST_ROAD_MIN } from '../constants';
+import { RESOURCE_TYPES, COMMODITY_TYPES, BUILD_COSTS, VP_TABLE, TILE_RESOURCE_MAP, LONGEST_ROAD_MIN, TB_ROAD_REPAIR_COST } from '../constants';
 import { discardCount, robbableCardCount, getRobberMoveTargets, isFriendlyRobberProtected } from './robber';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, hasEnoughResources } from './actions';
 import {
@@ -15,8 +15,9 @@ import { isUnclaimedNewIslandVertex } from './islands';
 import { bestWonderAction } from './wonders';
 import { canAttackFortress, bestFortressShip, canPlayWarship } from './pirateIslands';
 import { canBankTrade, getEffectiveTradeRate } from './trade';
-import { calcVP, victoryTarget, calcLongestRoad } from './scoring';
+import { calcVP, calcPublicVP, victoryTarget, calcLongestRoad } from './scoring';
 import { applyAction } from './game';
+import { tbEventStealTargets } from './tbEvents';
 
 // ============================================================
 // 確率テーブル（数字トークンの出目確率 /36）
@@ -480,6 +481,12 @@ export function chooseAction(state: GameState, pid: PlayerId, opts?: AiOpts): Ac
     return chooseProgressDiscard(state, pid);
   }
 
+  // 交易と蛮族「イベントカード」: イベント選択の解決（手番に関わらず対象プレイヤーが解決する）。
+  if (state.turnPhase === 'EVENT_GIVE')    return chooseEventGive(state, pid);
+  if (state.turnPhase === 'EVENT_HELPFUL') return chooseEventHelpful(state, pid);
+  if (state.turnPhase === 'EVENT_STEAL')   return chooseEventSteal(state, pid);
+  if (state.turnPhase === 'EVENT_DAMAGE')  return chooseEventDamage(state, pid);
+
   if (state.playerOrder[state.currentPlayerIndex] !== pid) return null;
 
   const player = state.players[pid];
@@ -707,6 +714,60 @@ function chooseProgressDiscard(state: GameState, pid: PlayerId): Action | null {
 }
 
 // ============================================================
+// 交易と蛮族「イベントカード」: イベント選択の解決（対象 CPU）
+// ============================================================
+
+/** 手札のうち一番多く持っている資源（渡す用。同数は RESOURCE_TYPES 順で決定的）。無ければ null。 */
+function mostHeldResource(state: GameState, pid: PlayerId): ResourceType | null {
+  const hand = state.players[pid]!.hand;
+  let best: ResourceType | null = null;
+  for (const r of RESOURCE_TYPES) {
+    if (hand[r] > 0 && (best == null || hand[r] > hand[best])) best = r;
+  }
+  return best;
+}
+
+// 良き隣人: 左隣へ渡す資源 = 一番多く持っている資源（自分の計画への影響が最小になりやすい）。
+function chooseEventGive(state: GameState, pid: PlayerId): Action | null {
+  if (!(state.tbPendingEventGive ?? {})[pid]) return null;
+  const give = mostHeldResource(state, pid);
+  if (!give) return null; // 手札0はエンジン側で pending に入らない（保険）
+  return { type: 'CHOOSE_EVENT_GIVE', playerId: pid, resource: give };
+}
+
+// 親切な隣人: 渡す相手 = 公開VP最少のプレイヤー（勝者に近い相手を利さない）・資源は最多所持。
+function chooseEventHelpful(state: GameState, pid: PlayerId): Action | null {
+  if (!(state.tbPendingEventHelpful ?? []).includes(pid)) return null;
+  const myVp = calcPublicVP(state, pid);
+  const targets = state.playerOrder.filter(p => p !== pid && calcPublicVP(state, p) < myVp);
+  const give = mostHeldResource(state, pid);
+  if (targets.length === 0 || !give) return null;
+  const to = targets.reduce((best, p) => calcPublicVP(state, p) < calcPublicVP(state, best) ? p : best, targets[0]!);
+  return { type: 'CHOOSE_EVENT_HELPFUL', playerId: pid, resource: give, toPlayerId: to };
+}
+
+// 衝突/交易優位: 奪う相手 = 札が最も多い相手（chooseStealTarget と同方針）。奪って損は無いので常に実行。
+function chooseEventSteal(state: GameState, pid: PlayerId): Action | null {
+  if (state.tbPendingEventSteal?.playerId !== pid) return null;
+  const targets = tbEventStealTargets(state);
+  if (targets.length === 0)
+    return state.tbPendingEventSteal.optional ? { type: 'CHOOSE_EVENT_STEAL', targetPlayerId: null } : null;
+  const target = targets.reduce((b, p) => robbableCardCount(state, p) > robbableCardCount(state, b) ? p : b, targets[0]!);
+  return { type: 'CHOOSE_EVENT_STEAL', targetPlayerId: target };
+}
+
+// 地震: 損傷させる自分の道 = 隣接の空き頂点が最少の道（開拓地候補地を自分で塞ぎにくい）。
+function chooseEventDamage(state: GameState, pid: PlayerId): Action | null {
+  if (!(state.tbPendingEventDamage ?? []).includes(pid)) return null;
+  const mine = Object.values(state.edges).filter(e => e.road?.playerId === pid && !e.road.damaged);
+  if (mine.length === 0) return null;
+  const freeVerts = (eid: string): number =>
+    (state.edges[eid]?.vertexIds ?? []).filter(v => !state.vertices[v]?.building).length;
+  const edgeId = mine.map(e => e.id).sort((a, b) => freeVerts(a) - freeVerts(b) || (a < b ? -1 : 1))[0]!;
+  return { type: 'CHOOSE_EVENT_DAMAGE', playerId: pid, edgeId };
+}
+
+// ============================================================
 // ROBBER フェーズ
 // ============================================================
 
@@ -803,6 +864,15 @@ function chooseRobberAction(state: GameState, pid: PlayerId, rng: () => number):
 // ============================================================
 
 function chooseTradeBuildAction(state: GameState, pid: PlayerId, skipPlayerTrade = false, rng: () => number = Math.random): Action {
+  // 交易と蛮族イベント「地震」: 損傷した道があれば最優先で修理（レンガ1木1）。
+  // 修理しないと道を1本も建てられず、拡張が事実上止まる。
+  if (state.tbEventCards) {
+    const damaged = Object.values(state.edges).find(e => e.road?.playerId === pid && e.road.damaged);
+    if (damaged && hasEnoughResources(state.players[pid]!.hand, TB_ROAD_REPAIR_COST)) {
+      return { type: 'REPAIR_ROAD', edgeId: damaged.id };
+    }
+  }
+
   // 街道建設カード使用中: 無料道を拡張先評価(bestRoadEdge)で置く（置けなければ効果完了）。
   // 「盤面順で最初の合法辺」では自陣の内側など無価値な辺に置かれ、カードがほぼ無駄になる。
   if (state.roadBuildingRoadsRemaining > 0) {

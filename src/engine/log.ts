@@ -10,7 +10,7 @@
 // ============================================================
 
 import type { GameState, Action, PlayerId, LogEntry, ResourceType, TradeKind } from '../types';
-import { RESOURCE_TYPES, PROGRESS_CARD_NAME, CK_TRACK_NAME } from '../constants';
+import { RESOURCE_TYPES, PROGRESS_CARD_NAME, CK_TRACK_NAME, TB_EVENT_NAME } from '../constants';
 
 export const RES_EMOJI: Record<ResourceType, string> = {
   wood: '🌲', brick: '🧱', wool: '🐑', grain: '🌾', ore: '⛰',
@@ -56,10 +56,17 @@ export function buildActionLog(
   switch (action.type) {
     case 'ROLL_DICE': {
       const [d1, d2] = next.lastDiceRoll ?? [0, 0];
-      const evMsg = next.lastEventDie === 'ship' ? '🛶蛮族前進'
-        : next.lastEventDie === 'trade' ? '🟡商業' : next.lastEventDie === 'politics' ? '🔵政治'
-        : next.lastEventDie === 'science' ? '🟢科学' : '';
-      push(actor, 'DICE_ROLL', `🎲 ${nm(actor)} がダイス ${d1}+${d2}=${d1 + d2}${evMsg ? `（${evMsg}）` : ''}`);
+      // 交易と蛮族「イベントカード」: ダイスの代わりにめくったカードを記録（数字はカードの数字ディスク値）。
+      if (next.tbEventCards && next.tbLastEventCard) {
+        if (next.tbNewYearRebuilt) push(actor, 'DICE_ROLL', '🔄 「新年」！イベントデッキを作り直した');
+        const card = next.tbLastEventCard;
+        push(actor, 'DICE_ROLL', `🃏 ${nm(actor)} がイベントカード「${TB_EVENT_NAME[card.event]}」（数字 ${card.number}）をめくった`);
+      } else {
+        const evMsg = next.lastEventDie === 'ship' ? '🛶蛮族前進'
+          : next.lastEventDie === 'trade' ? '🟡商業' : next.lastEventDie === 'politics' ? '🔵政治'
+          : next.lastEventDie === 'science' ? '🟢科学' : '';
+        push(actor, 'DICE_ROLL', `🎲 ${nm(actor)} がダイス ${d1}+${d2}=${d1 + d2}${evMsg ? `（${evMsg}）` : ''}`);
+      }
       // 騎士と商人: 蛮族襲来が起きたら結果を記録（撃退/敗北・誰が守護VP/誰が都市格下げ予定か）。
       if ((next.barbarianAttacks ?? 0) > (prev.barbarianAttacks ?? 0)) {
         const defenders = next.playerOrder
@@ -164,9 +171,37 @@ export function buildActionLog(
     case 'CHOOSE_GOLD': {
       // 金タイルで選んだ枚数のみ（種類は秘匿・捨て札/盗みと同方針）
       const count = RESOURCE_TYPES.reduce((s, r) => s + (action.resources[r] ?? 0), 0);
-      if (count > 0) push(action.playerId, 'RESOURCE_GAIN', `✨ ${nm(action.playerId)} が金タイルから ${count}枚 獲得`);
+      // T&B イベント（豊作の年/穏やかな海/馬上槍試合）でも GOLD を流用しているため文言を出し分ける。
+      const viaEvent = prev.tbEventCards && prev.tbPendingEventNumber != null;
+      if (count > 0) push(action.playerId, 'RESOURCE_GAIN',
+        viaEvent ? `✨ ${nm(action.playerId)} がイベントで供給から ${count}枚 獲得`
+                 : `✨ ${nm(action.playerId)} が金タイルから ${count}枚 獲得`);
       break;
     }
+    // ---- 交易と蛮族「イベントカード」: 選択解決（渡す/奪う内容の種類は秘匿・枚数のみ公開） ----
+    case 'CHOOSE_EVENT_GIVE': {
+      const toId = prev.tbPendingEventGive?.[action.playerId];
+      push(action.playerId, 'TRADE_PLAYER', `🎁 ${nm(action.playerId)} が左隣の ${toId ? nm(toId) : '隣人'} へ1枚渡した`);
+      break;
+    }
+    case 'CHOOSE_EVENT_HELPFUL':
+      push(action.playerId, 'TRADE_PLAYER', `🎁 ${nm(action.playerId)} が ${nm(action.toPlayerId)} へ1枚渡した`);
+      break;
+    case 'CHOOSE_EVENT_STEAL': {
+      const thief = prev.tbPendingEventSteal?.playerId;
+      if (action.targetPlayerId == null) {
+        if (thief) push(thief, 'ROBBER', `🕊 ${nm(thief)} は奪うのを見送った`);
+      } else if (thief) {
+        push(thief, 'ROBBER', `🦹 ${nm(thief)} が ${nm(action.targetPlayerId)} から1枚奪った`);
+      }
+      break;
+    }
+    case 'CHOOSE_EVENT_DAMAGE':
+      push(action.playerId, 'ROBBER', `🚧 ${nm(action.playerId)} の道が地震で損傷した`);
+      break;
+    case 'REPAIR_ROAD':
+      push(actor, 'BUILD', `🔧 ${nm(actor)} が損傷した道を修理した`);
+      break;
     case 'OFFER_TRADE': {
       push(actor, 'TRADE_PLAYER', isMe(actor) ? `🤝 あなたが交易を提案` : `🤝 ${nm(actor)} が交易を提案`);
       break;

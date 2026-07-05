@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { GameState, Action, PlayerId, CkTrack } from '../types';
+import { RESOURCE_TYPES, TB_ROAD_REPAIR_COST } from '../constants';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from '../engine/actions';
 import { canMoveKnight, isKnightMovable, robberAdjacentChasableVertexIds, canBuildKnight, canActivateKnight, canUpgradeKnight, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from '../engine/citiesKnights';
 import { getPirateRobbablePlayerIds, robbableCardCount, pirateRobbableCount, getRobberMoveTargets, isFriendlyRobberProtected } from '../engine/robber';
@@ -343,6 +344,31 @@ function edgeDist2(state: GameState, edgeId: string, x: number, y: number): numb
   return distToSegmentSq(x, y, a.pixel.x, a.pixel.y, b.pixel.x, b.pixel.y);
 }
 
+/** 交易と蛮族イベント「地震」: 点(x,y)に最も近い「損傷させられる道」（pending プレイヤーの未損傷道）。 */
+function nearestTbDamageEdgeId(state: GameState, x: number, y: number, maxDist = EDGE_TAP_RADIUS): string | null {
+  const pendingSet = new Set(state.tbPendingEventDamage ?? []);
+  let best: string | null = null;
+  let bestD = maxDist * maxDist;
+  for (const e of Object.values(state.edges)) {
+    if (!e.road || e.road.damaged || !pendingSet.has(e.road.playerId)) continue;
+    const d = edgeDist2(state, e.id, x, y);
+    if (d <= bestD) { bestD = d; best = e.id; }
+  }
+  return best;
+}
+
+/** 交易と蛮族イベント「地震」: 点(x,y)に最も近い自分の損傷道（修理対象）。 */
+function nearestTbRepairEdgeId(state: GameState, pid: PlayerId, x: number, y: number, maxDist = EDGE_TAP_RADIUS): string | null {
+  let best: string | null = null;
+  let bestD = maxDist * maxDist;
+  for (const e of Object.values(state.edges)) {
+    if (e.road?.playerId !== pid || !e.road.damaged) continue;
+    const d = edgeDist2(state, e.id, x, y);
+    if (d <= bestD) { bestD = d; best = e.id; }
+  }
+  return best;
+}
+
 export function nearestValidShipEdgeId(
   state: GameState, pid: PlayerId, mode: BuildMode, x: number, y: number, maxDist = EDGE_TAP_RADIUS,
 ): string | null {
@@ -446,6 +472,46 @@ export function attachBoardEvents(
       const owner = vid ? state.vertices[vid]?.building?.playerId : null;
       if (vid && owner) dispatch({ type: 'DOWNGRADE_CITY', playerId: owner, vertexId: vid });
       return;
+    }
+
+    // ---- 交易と蛮族イベント「地震」: 光った自分の道をタップ → CHOOSE_EVENT_DAMAGE（多人数解決）----
+    if (state.phase === 'MAIN' && state.turnPhase === 'EVENT_DAMAGE') {
+      const pendingSet = new Set(state.tbPendingEventDamage ?? []);
+      const damageable = (id: string | null): boolean => {
+        const r = id ? state.edges[id]?.road : null;
+        return !!r && !r.damaged && pendingSet.has(r.playerId);
+      };
+      let eid = target.closest('[data-road-edge-id]')?.getAttribute('data-road-edge-id')
+        ?? target.closest('[data-edge-id]')?.getAttribute('data-edge-id') ?? null;
+      if (!damageable(eid)) {
+        const ptd = clickToBoardPixel(svg, e.clientX, e.clientY);
+        eid = ptd ? nearestTbDamageEdgeId(state, ptd.x, ptd.y) : null;
+      }
+      const owner = eid ? state.edges[eid]?.road?.playerId : null;
+      if (eid && owner && damageable(eid)) dispatch({ type: 'CHOOSE_EVENT_DAMAGE', playerId: owner, edgeId: eid });
+      return;
+    }
+
+    // ---- 交易と蛮族イベント「地震」: 損傷した自分の道をタップ → REPAIR_ROAD（レンガ1木1）----
+    if (state.phase === 'MAIN' && state.turnPhase === 'TRADE_BUILD' && mode === 'idle' && state.tbEventCards) {
+      let eid = target.closest('[data-road-edge-id]')?.getAttribute('data-road-edge-id')
+        ?? target.closest('[data-edge-id]')?.getAttribute('data-edge-id') ?? null;
+      const isMyDamaged = (id: string | null): boolean => {
+        const r = id ? state.edges[id]?.road : null;
+        return !!r && r.damaged === true && r.playerId === pid;
+      };
+      if (!isMyDamaged(eid)) {
+        const ptr = clickToBoardPixel(svg, e.clientX, e.clientY);
+        eid = ptr ? nearestTbRepairEdgeId(state, pid, ptr.x, ptr.y) : null;
+      }
+      if (eid && isMyDamaged(eid)) {
+        const hand = state.players[pid]!.hand;
+        if (RESOURCE_TYPES.every(r => hand[r] >= TB_ROAD_REPAIR_COST[r])) {
+          dispatch({ type: 'REPAIR_ROAD', edgeId: eid });
+        }
+        return; // 損傷道のタップは他のクリック処理へ流さない（資源不足時は何もしない）
+      }
+      // 該当なし: 通常のクリック処理へフォールスルー
     }
 
     // ---- 航海者: 船の移動モード（2段階: 船を選択 → 移動先をタップ）----

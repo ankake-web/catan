@@ -508,6 +508,15 @@ function renderEdges(
         'stroke-width': 7,
         'stroke-linecap': 'round',
       });
+      // 交易と蛮族イベント「地震」: 損傷した道は中点まわりに回転させて「横倒し」を表現＋破線。
+      if (edge.road.damaged) {
+        const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        line.setAttribute('transform', `rotate(38 ${mx} ${my})`);
+        line.classList.add('road-damaged');
+      }
+      // 敷設済みの道が validEdgeIds に入る場面（T&B地震の損傷選択/修理、C&K外交官の道撤去）は
+      // 光らせて「タップ対象」であることを示す（従来の外交官は無表示だったため改善を兼ねる）。
+      if (opts?.validEdgeIds?.has(edge.id)) line.classList.add('road-selectable');
       g.appendChild(line);
     } else if (edge.ship) {
       // 船: 破線＋ボート。道と視覚的に区別する。

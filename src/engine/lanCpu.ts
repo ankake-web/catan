@@ -18,6 +18,7 @@ import type { GameState, Action, PlayerId } from '../types';
 import { chooseAction, evaluateTradeOffer, chooseStealTarget } from './ai';
 import { discardCount, getRobberMoveTargets } from './robber';
 import { canBuildSettlement, canBuildRoad } from './actions';
+import { tbEventStealTargets } from './tbEvents';
 
 export interface CpuStep {
   readonly pid: PlayerId;
@@ -106,6 +107,23 @@ export function nextCpuAction(state: GameState, rng: () => number = Math.random)
     return null; // 人間の選択待ち
   }
 
+  // ---- 交易と蛮族「イベントカード」: イベント選択（手番に関わらず対象 CPU を1人ずつ処理）----
+  if (state.phase === 'MAIN'
+    && (state.turnPhase === 'EVENT_GIVE' || state.turnPhase === 'EVENT_HELPFUL'
+      || state.turnPhase === 'EVENT_STEAL' || state.turnPhase === 'EVENT_DAMAGE')) {
+    const pendingIds: PlayerId[] =
+      state.turnPhase === 'EVENT_GIVE' ? Object.keys(state.tbPendingEventGive ?? {}) as PlayerId[]
+      : state.turnPhase === 'EVENT_HELPFUL' ? (state.tbPendingEventHelpful ?? [])
+      : state.turnPhase === 'EVENT_STEAL' ? (state.tbPendingEventSteal ? [state.tbPendingEventSteal.playerId] : [])
+      : (state.tbPendingEventDamage ?? []);
+    const epid = pendingIds.find(p => isCpu(state, p));
+    if (epid) {
+      const action = chooseAction(state, epid, { rng });
+      if (action) return { pid: epid, action };
+    }
+    return null; // 人間の選択待ち
+  }
+
   // ---- 手番が CPU なら通常の一手（初期配置 / ダイス / 盗賊 / 建設等）----
   const cur = state.playerOrder[state.currentPlayerIndex];
   if (cur && isCpu(state, cur)) {
@@ -149,6 +167,21 @@ export function cpuFallbackAction(state: GameState, pid: PlayerId): Action {
   if (state.turnPhase === 'GOLD') {
     // owed な対象本人の選択を生成（chooseAction が GOLD を処理）。最終手段として銀1枚。
     return chooseAction(state, pid) ?? { type: 'CHOOSE_GOLD', playerId: pid, resources: { wool: 1 } };
+  }
+  // 交易と蛮族「イベントカード」: イベント選択（chooseAction が各フェーズを処理）。
+  if (state.turnPhase === 'EVENT_GIVE' || state.turnPhase === 'EVENT_HELPFUL'
+    || state.turnPhase === 'EVENT_DAMAGE') {
+    const a = chooseAction(state, pid);
+    if (a) return a;
+  }
+  if (state.turnPhase === 'EVENT_STEAL') {
+    const a = chooseAction(state, pid);
+    if (a) return a;
+    // 保険: 必須（タイル保持者）の場合でも合法になるよう、対象がいれば先頭を奪う。
+    const targets = tbEventStealTargets(state);
+    return targets.length > 0
+      ? { type: 'CHOOSE_EVENT_STEAL', targetPlayerId: targets[0]! }
+      : { type: 'CHOOSE_EVENT_STEAL', targetPlayerId: null };
   }
   return { type: 'END_TURN' };
 }

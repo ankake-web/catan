@@ -15,8 +15,9 @@ import type { PlayerOrderMode } from './setup';
 import { getScenario } from './scenarios';
 import type { ScenarioId } from './scenarios';
 import { buildDevDeck } from './game';
-import { makeHand, makeCommodities, BANK_INITIAL, COMMODITY_BANK_INITIAL } from '../constants';
+import { makeHand, makeCommodities, BANK_INITIAL, COMMODITY_BANK_INITIAL, TB_EVENT_CARDS_36 } from '../constants';
 import { buildProgressDecks } from './citiesKnights';
+import { buildTbEventDeck } from './tbEvents';
 
 export interface PlayerSpec {
   readonly id: PlayerId;
@@ -150,6 +151,10 @@ export function createInitialGameState(
     ...(scenario.rules?.strongestPorts ? { strongestPorts: true, strongestPortsHolder: null } : {}),
     // 交易と蛮族「親切な盗賊」: 有効時は盗賊の移動先制限（公開VP2以下の建物ヘックス禁止）を配線。
     ...(scenario.rules?.friendlyRobber ? { friendlyRobber: true } : {}),
+    // 交易と蛮族「イベントカード」: 有効時はイベントデッキを作成して配線（赤黄ダイスの置換）。
+    ...(scenario.rules?.eventCards
+      ? { tbEventCards: true, tbEventDeck: buildTbEventDeck(TB_EVENT_CARDS_36, rng), tbLastEventCard: null }
+      : {}),
     ...(scenario.rules?.maxCities != null ? { maxCities: scenario.rules.maxCities } : {}),
     ...(scenario.rules?.missingNumberTokens ? { numberTokenSupply: scenario.rules.numberTokenSupply ?? 5 } : {}),
     ...(scenario.rules?.regionBonusVp != null ? { regionBonusVp: scenario.rules.regionBonusVp } : {}),

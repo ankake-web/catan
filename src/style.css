@@ -499,6 +499,17 @@ html.reduce-motion .building-downgrade { animation: none; filter: drop-shadow(0 
 }
 .edge-line:hover { stroke: rgba(255,255,255,0.55); }
 
+/* ---- 交易と蛮族イベント「地震」: 損傷した道（横倒し＝rotateはSVG側）と選択ハイライト ---- */
+.road-line-built.road-damaged { opacity: 0.72; stroke-dasharray: 6 5; }
+.road-line-built.road-selectable {
+  cursor: pointer;
+  animation: tb-road-pulse 1.2s ease-in-out infinite;
+}
+@keyframes tb-road-pulse {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 210, 80, 0.9)); }
+  50%      { filter: drop-shadow(0 0 8px rgba(255, 210, 80, 1)); }
+}
+
 /* ---- 有効配置ハイライト ---- */
 .vertex-dot.valid {
   fill: rgba(80, 255, 140, 0.75);

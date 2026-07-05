@@ -1,4 +1,4 @@
-# PROGRESS — カタン（航海者版＋交易と蛮族 実装中）（最終更新: 2026-07-05）
+# PROGRESS — カタン（航海者版＋交易と蛮族 実装中）（最終更新: 2026-07-05 その2）
 
 > Vite + TypeScript のブラウザ版カタン。リポジトリ: `ankake-web/catan`（origin）。
 > 本番: https://ankake-web.github.io/catan/ （`.github/workflows/deploy.yml` が main への push で自動デプロイ）。
@@ -7,11 +7,11 @@
 > **main への直接push／PRのmainマージ／hyaku/main への push（いずれも本番デプロイ）は毎回ユーザの明示許可後**。
 > 回答は日本語。完了/入力待ちごとに CLAUDE.md の beep+トースト通知を実行。
 
-## 0. 現在の状態（2026-07-05）
+## 0. 現在の状態（2026-07-05 その2）
 - **いま作業中のテーマ = 交易と蛮族（Traders & Barbarians, T&B）拡張の新規実装**。
 - **作業ブランチ `feat/traders-barbarians`（未push・未マージ＝本番未反映）**。ここに全T&B作業がある。
-  - `33d1b2f` 確定仕様書 ／ `4d22d47` 増分1「強き港(Strongest Ports)」 ／ `7dbf120` 増分2「親切な盗賊(The Friendly Robber)」（=HEAD）。
-  - このブランチで **vitest 981緑・typecheck緑・build緑**（コミット済み・作業ツリークリーン）。
+  - `33d1b2f` 確定仕様書 ／ `4d22d47` 増分1「強き港(Strongest Ports)」 ／ `7dbf120` 増分2「親切な盗賊(The Friendly Robber)」 ／ **増分3「イベントカード(Catan Event Cards)」（=次コミット予定）**。
+  - このブランチで **vitest 1027緑・typecheck緑・build緑**（増分3も含む・作業ツリーは増分3コミット待ち）。
 - **catan main**: `3ab026d`（== origin/main・vitest **950**緑）。T&B はまだ入っていない。
 - **100万石(fork)**: `art-pass/100man-goku` @ `ccbd159`（==hyaku/main・vitest 917緑）。**今回未変更**。
 - 検証コマンド: `npm run typecheck` / `npx vitest run` / `npm run build`。dev=`npm run dev`。
@@ -25,6 +25,13 @@
 2. （完了・維持）航海者版を公式準拠で完成＋100万石へ順方向同期（SYNC.md／GLOSSARY.md が正）。
 
 ## 2. 完了したこと（新しい順）
+- **2026-07-05 T&B セッション3（本ブランチ・増分3）**:
+  - **増分3「Catan Event Cards（イベントカード）」変種**（CN3089 p4-6）: 生産フェーズの赤黄ダイスをイベントデッキ（37枚）に置換。毎ターン山札の一番上をめくり、13種のイベント効果を解決してからカードの数字ディスク値で「生産」または「7の解決」。New Year でデッキ再構築。
+    - **残存【要確認】C6 を解決**: 36枚の「イベント×生産数字×枚数」を**公式ドイツ語版第6版ルールブック p.5**（catan.de 685140）の明文列挙で確定（英語版CN3089には内訳記載なし）。BGG実カード写真・旧版Mayfairルール・CatanFusion の**4系統一致**＋2d6分布と厳密一致で裏取り。`TB_EVENT_CARDS_36` にデータ定数化し仕様書§2-3の表で固定。**残る【要確認】は荷馬車の木の本数(Lv3-5)のみ**。
+    - 実装: 型（TbEventType/TbEventCard/Road.damaged/EVENT_*フェーズ/CHOOSE_EVENT_*・REPAIR_ROADアクション）／`engine/tbEvents.ts`（デッキ構築・13効果の適用・保留フェーズ遷移・ヘルパー）／`game.ts`（ROLL_DICE のカード置換・`resolveBaseRollOutcome` 抽出でダイス経路と共通化・`tbContinueAfterEvent`・各CHOOSE_EVENTハンドラ・REPAIR_ROAD・END_TURNの tbEpidemic リセット）。供給から取る系（豊作の年/穏やかな海/馬上槍試合）は **GOLD フェーズを流用**（`capPicksByBank` を dice.ts へ抽出）。疫病は `computeDiceProduction` の都市産出を2→1。地震は `Road.damaged`＋`canBuildRoad`/`canBuildSettlement` の制限＋修理（レンガ1木1）。
+    - 配線: mask（デッキ順を秘匿）・createState・scenarios（`tb_event_cards`・基本盤・10点）・log・ai（4選択フェーズ＋修理優先）・lanCpu・protocol（LAN_SYNCED_ACTIONS）・lanServer（requiredActor＋フォールバックactor）。UI: main.ts（EVENT_DAMAGEの盤面タップ／カードめくり演出 `playTbEventCardReveal`／生産アニメ保留 `tbPendingEventNumber`／CPU駆動・ウォッチドッグ・fallback・シート案内）・ui.ts（EVENT_GIVE/HELPFUL/STEALモーダル＋地震修理ヒント＋ホットシート用の操作者名）・events.ts（損傷選択/修理タップ）・board.ts（損傷道の回転描画＋selectable）。
+    - テスト `tb_event_cards.test.ts`（45件・データ分布/デッキ構築/13効果/AI自動解決/LANマスク/不干渉/不正入力）＋ `scenarios.test.ts`・`scenarios_smoke.test.ts` 更新。全**1027緑**・tsc/build緑。実機（Playwright）で tb_event_cards をセットアップ→カードめくり→7解決まで通しエラー0を確認。
+    - **ウルトラコード多角レビュー**（4視点ファインダー→敵対検証はセッション上限で走らず自己裁定）: 指摘7件のうち**実バグ2件**（CHOOSE_EVENT_GIVE/HELPFUL の資源名未検証＝LAN不正ペイロードでNaN混入／lanServer フォールバックactorにイベント選択未追加）を修正＋テスト追加、**UX改善4件**（金タイル見出し流用・地震の修理案内・ホットシートの操作者名×2）を反映、**1件**（地震の盤面タップが他者の道も受理）は CITY_DOWNGRADE と同一の既存パターン（ハイライト1人分＋netDispatch/requiredActorで拒否）で既存踏襲＝不要と裁定。
 - **2026-07-05 T&B セッション2（本ブランチ）**:
   - **増分2「The Friendly Robber（親切な盗賊）」変種**（CN3089 p3・原文をPDFから再確認して実装）: 公開VP2以下のプレイヤーの建物ヘックスへ盗賊移動不可／合法ヘックスなしなら砂漠へ（既に砂漠なら留まる）／強奪は2VP超のみ。`getRobberMoveTargets`/`isFriendlyRobberProtected`（robber.ts）に一元化し、game.ts(MOVE_ROBBER)・ai.ts・lanCpu.ts・main.ts(ハイライト/ウォッチドッグ)・events.ts(クリック/強奪対象) の全経路へ配線。シナリオ `tb_friendly_robber`（基本盤・10点）。テスト20件で仕様固定（計981緑）。実装解釈は仕様書§2-1に追記。ウルトラコード多角レビュー（4視点＋指摘ごとに3人反証・変異実験）で実装バグ0件を確認し、変異に耐えるようテスト3箇所を強化。
 - **2026-07-05 T&B セッション1（本ブランチ）**:
@@ -50,19 +57,21 @@
   - 「2VPしか持たない」は**公開VP**（`calcPublicVP`）で判定＝隠しVPカードが盗賊の合法手から逆算されるのを防ぐ。原文どおり**手番プレイヤー自身の2VP建物も区別しない**。奪えるのは「2VP超（公開3VP以上）」のみ。
   - 砂漠フォールバックで盗賊が既に砂漠なら**その場に留まる**（同一タイル移動を例外許可）。砂漠が無い盤は原文想定外→通常候補へ（進行を止めない保険）。
   - **盗賊の合法移動先は `getRobberMoveTargets`（robber.ts）に一元化**（現在地除外・S5数字限定・保護・砂漠フォールバック）。エンジン/AI/LAN CPU/ウォッチドッグ/盤ハイライト/クリックの全経路がこれを使う。今後の変種もここに足す。
+- **Event Cards の実装解釈**（原文と根拠は仕様書§2-3・テストで固定済み）:
+  - 36枚の数字分布は**公式独語版第6版 p.5**が正（2d6分布どおり・7の6枚=ROBBER ATTACKS・A BEAUTIFUL DAY 16枚）。`TB_EVENT_CARDS_36` にデータ化。
+  - 効果→（選択が要るなら保留フェーズ）→カード数字で生産or7 の順（公式記載順）。カード数字は `lastDiceRoll` に2分割で格納し既存の生産/演出/統計と互換。
+  - 供給から取る系（豊作の年/穏やかな海/馬上槍試合）は **GOLD フェーズを流用**（新フェーズ数を抑える）。渡す/奪う系は EVENT_GIVE/HELPFUL/STEAL、地震は EVENT_DAMAGE（盤面タップ・都市格下げと同型）。
+  - HELPFUL NEIGHBOR/親切な盗賊と同様 **公開VP** で判定（隠しVP逆算防止）。CALM SEAS は港上の**建物数**（VPでなく個数）。CONFLICT はタイル保持者=必須/騎士最多単独=任意。
+  - デッキ秘匿は mask.ts（並び順を不透明化・めくった `tbLastEventCard` は公開）。LAN不正入力対策で CHOOSE_EVENT_GIVE/HELPFUL は資源名を `RESOURCE_TYPES.includes` で検証。
 - **実装はデータ駆動＋テストで数値固定**が原則。変種/シナリオは既存 `classic` 盤や `ScenarioRules` トグルへ薄く乗せる。
 
 ## 4. 未完了タスク（優先順位順・次セッションはここから）
 > すべて [docs/交易と蛮族_仕様書_v6.md](docs/交易と蛮族_仕様書_v6.md) をデータ化＋テスト固定していく。各増分ごとに `tsc`/`vitest`/`build` 緑・区切りコミット。
-1. **増分3：残りの変種を実装**。次=**Catan Event Cards**（仕様書§2-3・ダイス→イベントデッキ置換）。着手手順:
-   - (a) まず**残存【要確認】C6 を解決**: 公式PDF p5-6 のカード面をPNGレンダリング（§5の環境手順）し、**36枚の「枚数内訳×生産数字ディスクの割当て」**を読み取って仕様書§2-3を確定させる。
-   - (b) デッキ構築（36枚シャッフル→下5枚→New Year→残り）・ROLL_DICE 置換（カードめくり→イベント解決→数字で生産 or 7）・New Year で再構築。イベント13種の効果は仕様書§2-3に一覧済み。
-   - (c) `game.ts` の `ROLL_DICE` 分岐に代替経路（C&K `applyEventDie` が雛形）。シナリオ登録・テスト固定は増分1/2（`4d22d47`/`7dbf120`）の流儀どおり。
-   - その後 **Catan for Two**（§2-4・trade token＋中立2人。2人戦の生産2回等）。
+1. **増分3の残り＝Catan for Two（2人用・§2-4）**: trade token 20＋中立プレイヤー2人。可変セットアップで各中立に開拓地1（図示位置）。生産フェーズ×2回（2回目は1回目と別出目まで振り直し）・建設のたび中立の道/開拓地も無償配置・trade token 経済（Forced Trade / Move Robber）。要設計（中立プレイヤーの扱い・2人戦専用の状態）。**Event Cards と併用可**（イベントカードのCONFLICT等は中立に特則あり）。
 2. **増分4以降：5シナリオ**（Fishing→Rivers→Merchant Trains→Barbarian Attack→Traders & Barbarians）。
    - **Fishing on Catan**（§3-1）は最初の完全シナリオだが**要設計**: 湖が**4数字**で産出＝現 `Tile.number:number|null`（単一）を拡張要／漁場は盤ヘックスでなく**フレーム上の産出源**＝新しい盤フィーチャー／fishトークン経済（秘匿・上限7・ぼろ靴・消費アクション）。
    - Rivers=川タイル(3+4hex)＋沼＋橋(新建物)＋コイン＋最富豪/極貧。Barbarian/T&B=騎士・蛮族・専用デッキ・荷馬車で最も重い。
-3. **残存【要確認】（軽微・データ定数で1行修正可）**: 荷馬車アップグレードの**木の本数(Lv3-5)**（暫定「木2」で実装可）／Event Cards の**36枚の生産数字分布**（Event Cards実装時に §p5-6 を要読）。
+3. **残存【要確認】（軽微・データ定数で1行修正可）**: 荷馬車アップグレードの**木の本数(Lv3-5)**（暫定「木2」で実装可）。※Event Cards の数字分布(C6)は**解決済み**（§2-3）。
 4. **完了後**: ユーザ許可を得て feature ブランチを push→PR→（許可後）main マージ→本番。その後 100万石(fork)へ SYNC.md §3 手順で戦国語化移植。
 
 ## 5. 詰まっている点・注意点・保留中の判断
@@ -72,14 +81,17 @@
   - PDF URL: `https://www.catan.com/sites/default/files/2025-04/CN3089%20CATAN%20%E2%80%93%20T&B%20Rulebook.pdf`（ローカルにも `C:\Users\b1242\Downloads\CATAN_交易と蛮族_第6版_CN3089.pdf`）。
   - テキスト抽出=`/mingw64/bin/pdftotext -layout`（散文は raw の方が綺麗）。**画像レンダラは未導入**→ scratchpad で `npm i pdfjs-dist@^4 @napi-rs/canvas` して `render.mjs`/`crop.mjs`（**clip の undefined を吸収するパッチ必須・スケールは≤10**。14はskia確保失敗）。ページ1/19/24はSMaskで描画失敗するが重要図版なし。
   - **PDFのページ番号と印刷ページ番号がズレる箇所あり**（例: PDF8=印刷8だがCatan for Two、Fishingは印刷9-10=PDF9-10）。仕様書の出典は印刷ページ。
-- **`scenarios.test.ts` は「表示シナリオ集合」を厳密に固定**＝**可視シナリオを1つ追加するたびにこのテストの配列を更新**する（tb_harbors / tb_friendly_robber で更新済み）。`scenarios_smoke` は表示シナリオを自動で拾い「3人CPUフルゲーム完走」まで回す（新シナリオ追加で自動的に+1件）。
+- **`scenarios.test.ts` は「表示シナリオ集合」を厳密に固定**＝**可視シナリオを1つ追加するたびにこのテストの配列を更新**する（tb_harbors / tb_friendly_robber / tb_event_cards で更新済み）。`scenarios_smoke` は表示シナリオを自動で拾い「3人CPUフルゲーム完走」まで回す（新シナリオ追加で自動的に+1件）。**イベントカード等で新しい多人数解決フェーズを足したら `scenarios_smoke` の駆動ループにも対象pid解決を追加する**（EVENT_* は `tbEventPendingIds` で解決済み）。
 - **numberHexOnly(S5) と friendlyRobber は併用不可**（砂漠フォールバックと数字限定が矛盾。現行シナリオに併用なし・robber.ts にコメント済み）。将来変種を合成する時は要再設計。
-- 増分2はウルトラコード多角レビュー済み（実装バグ0・テスト強化3件反映済み）。**未反映の指摘は無し**。
+- **Event Cards は基本盤のみで実装**（scenarios: `tb_event_cards`）。仕様上は Seafarers/C&K とも併用可だが未対応。C&K併用時は「イベントダイス＋赤ダイスをカードと同時に振り赤ダイスで進歩カード抽選」の特則があり、`isCk` 経路との統合は未実装（`ROLL_DICE` の tbEventCards 分岐は isCk より前で早期returnするため現状は非CK専用）。
+- **増分3のウルトラコード多角レビュー**: 4視点ファインダーは完走したが**敵対検証(verify)フェーズはセッション上限で全滅**→指摘7件を**自己裁定**して反映（実バグ2件修正＋テスト・UX4件改善・1件は既存踏襲で不要）。次セッションでverifyを再実行したい場合は Workflow の resumeFromRunId=`wf_3570e023-8ff` でファインダー結果はキャッシュ再利用できる。
+- **New Year は36枚に含まれない別カード**。デッキは37枚（36+NY）で作り、下5枚→NY→残り31枚を上に積む＝NYより下の5枚はそのゲームで使われない（`buildTbEventDeck`）。`TB_EVENT_DECK_BOTTOM=5`。
 - **網羅Recordが多い**: `SCENARIOS`/`SCENARIO_RULES`（Record<ScenarioId>）、`TILE_COUNTS`/`TILE_RESOURCE_MAP`/`TILE_COMMODITY_MAP`（Record<TileType>）、`category` union（`scenarios.ts`×2＋`scenarioSelect.ts`）。id/tile/category を足すと全部直さないと tsc が通らない（＝抜け漏れ検知になる）。
 - **vitest が稀に ESM ローダで一時クラッシュ(exit 134)**: 失敗ではない。再実行で緑。
 - 参考メモリ: `seafarers-pr9-known-bugs` / `seafarers-official-rebuild`。フォーク同期は SYNC.md／100万石 `docs/reskin/GLOSSARY.md`。
 
 ## 過去ログ（要約）
+- 2026-07-05(2): T&B 増分3「イベントカード」実装＋C6（数字分布）を公式独語版で確定（feat/traders-barbarians・未push・全1027緑）。
 - 2026-07-05: T&B 仕様確定（公式PDF図版をPNG視認）＋増分1「強き港」＋増分2「親切な盗賊」実装（feat/traders-barbarians・未push）。
 - 2026-07-04: 航海者フルリビルドのフォーク全移植／脱走兵UI／オセアニア再設計（catan PR#14-17・fork→hyaku/main）。
 - 2026-06-28〜07-03: 公式準拠リビルド（S1〜S8＋NW）→敵対レビュー→ultracode監査→docs整理。

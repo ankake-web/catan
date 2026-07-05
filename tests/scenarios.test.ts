@@ -39,6 +39,7 @@ describe('scenarios: registry', () => {
         // 交易と蛮族（Traders & Barbarians）
         'tb_friendly_robber',
         'tb_harbors',
+        'tb_event_cards',
       ].sort(),
     );
     // 非表示シナリオも実装（getScenario）とフル一覧（listScenarios）には残る。

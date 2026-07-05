@@ -13,6 +13,7 @@ import { chooseAction } from '../src/engine/ai';
 import { applyAction } from '../src/engine/game';
 import { computeIslandReps } from '../src/engine/islands';
 import { findPendingDiscarder } from '../src/engine/robber';
+import { tbEventPendingIds } from '../src/engine/tbEvents';
 import { listScenarios, getScenario, type ScenarioId } from '../src/engine/scenarios';
 import type { GameState } from '../src/types';
 
@@ -36,6 +37,8 @@ function playToEnd(scenario: ScenarioId, seed: number): GameState {
       pid = (s.pendingCityDowngrade ?? [])[0] ?? pid; // 蛮族敗北の都市格下げは対象プレイヤーが解決
     } else if (s.phase === 'MAIN' && s.turnPhase === 'PROGRESS_DISCARD') {
       pid = (s.pendingProgressDiscard ?? [])[0] ?? pid; // 進歩カード上限超過の捨て札は対象プレイヤーが解決
+    } else if (s.phase === 'MAIN' && tbEventPendingIds(s).length > 0) {
+      pid = tbEventPendingIds(s)[0] ?? pid; // 交易と蛮族イベントの選択は対象プレイヤーが解決
     }
     const action = chooseAction(s, pid, { rng });
     if (!action) break;

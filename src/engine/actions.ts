@@ -51,6 +51,9 @@ export function canBuildRoad(state: GameState, playerId: PlayerId, edgeId: EdgeI
   if (!player) return false;
   if (player.remainingRoads <= 0) return false;
 
+  // 交易と蛮族イベント「地震」: 損傷した自分の道を全て修理するまで追加の道を建てられない（CN3089 p5）。
+  if (Object.values(state.edges).some(e => e.road?.playerId === playerId && e.road.damaged)) return false;
+
   const edge = state.edges[edgeId];
   if (!edge) return false;
   if (edge.road != null) return false;
@@ -294,6 +297,8 @@ export function canBuildSettlement(
   if (state.noIslandSettlement && !isHomeIslandVertex(state, vertexId)) return false;
   // S7「海賊の島々」: 海賊要塞の頂点には（奪取前は）開拓地を建てられない（攻撃で奪取する）。
   if (state.fortresses && Object.values(state.fortresses).some(f => !f.captured && f.vertexId === vertexId)) return false;
+  // 交易と蛮族イベント「地震」: 損傷した道（誰のものでも）に隣接する交差点には開拓地を建てられない（CN3089 p5）。
+  if (vertex.adjacentEdgeIds.some(eid => state.edges[eid]?.road?.damaged === true)) return false;
 
   if (!isDistanceRuleOk(vertex, state.vertices)) return false;
 
