@@ -1,4 +1,4 @@
-# PROGRESS — カタン（航海者版＋交易と蛮族 実装中）（最終更新: 2026-07-05 その3）
+# PROGRESS — カタン（航海者版＋交易と蛮族 実装中）（最終更新: 2026-07-05 その4）
 
 > Vite + TypeScript のブラウザ版カタン。リポジトリ: `ankake-web/catan`（origin）。
 > 本番: https://ankake-web.github.io/catan/ （`.github/workflows/deploy.yml` が main への push で自動デプロイ）。
@@ -7,12 +7,12 @@
 > **main への直接push／PRのmainマージ／hyaku/main への push（いずれも本番デプロイ）は毎回ユーザの明示許可後**。
 > 回答は日本語。完了/入力待ちごとに CLAUDE.md の beep+トースト通知を実行。
 
-## 0. 現在の状態（2026-07-05 その3）
+## 0. 現在の状態（2026-07-05 その4）
 - **いま作業中のテーマ = 交易と蛮族（Traders & Barbarians, T&B）拡張の新規実装**。
 - **作業ブランチ `feat/traders-barbarians`（未push・未マージ＝本番未反映）**。ここに全T&B作業がある。
-  - `33d1b2f` 確定仕様書 ／ `4d22d47` 増分1「強き港(Strongest Ports)」 ／ `7dbf120` 増分2「親切な盗賊(The Friendly Robber)」 ／ `c411a96` 増分3「イベントカード(Catan Event Cards)」＝**変種3本コミット済み**。
+  - `33d1b2f` 確定仕様書 ／ `4d22d47` 増分1「強き港(Strongest Ports)」 ／ `7dbf120` 増分2「親切な盗賊(The Friendly Robber)」 ／ `c411a96` 増分3「イベントカード(Catan Event Cards)」 ／ **`bae493e` 増分4「Catan for Two（2人用）」＝変種4本コミット済み**。
   - その後同ブランチに: `0b02810` オアシス/オセアニア盤の写真準拠リビルド ／ `e28c533`+`886e176` UI/UX改善（船コスト表示・道/船と盗賊/海賊の選択UI・進歩カード獲得通知 等）／ `ba940c2` クレーンのメトロポリス都市手動選択。
-  - このブランチで **vitest 1039緑・typecheck緑・build緑**・作業ツリーはクリーン（全部コミット済み）。
+  - このブランチで **vitest 1075緑・typecheck緑・build緑**・作業ツリーはクリーン（全部コミット済み）。
 - **catan main**: `3ab026d`（== origin/main・vitest **950**緑）。T&B はまだ入っていない。
 - **100万石(fork)**: `art-pass/100man-goku` @ `ccbd159`（==hyaku/main・vitest 917緑）。**今回未変更**。
 - 検証コマンド: `npm run typecheck` / `npx vitest run` / `npm run build`。dev=`npm run dev`。
@@ -26,6 +26,17 @@
 2. （完了・維持）航海者版を公式準拠で完成＋100万石へ順方向同期（SYNC.md／GLOSSARY.md が正）。
 
 ## 2. 完了したこと（新しい順）
+- **2026-07-05 T&B セッション4（本ブランチ・増分4・`bae493e`）**:
+  - **増分4「Catan for Two（2人用）」変種**（CN3089 p7）: 実プレイヤー2人＋**中立プレイヤー2人**（残り2色）。
+    - **中立の表現**: `PlayerType` に `'neutral'` を追加。中立は `players` に実体（`player3/4`）を持つが**`playerOrder` には入れない**（手番・生産・捨て札・勝利判定の対象外／盤上コマ・距離ルール・道の分断・接続判定は実プレイヤーと同一）。実プレイヤーは厳密に2人（`createInitialGameState` が不変条件として検証）。
+    - **図示位置の初期開拓地**: 公式 p7「CATAN FOR TWO SETUP」図を PNG レンダリング→格子フィットで計測し、**盤中心から水平±2ヘックスの2交点**＝`{1,0}∩{1,-1}∩{2,-1}`（右）と `{-1,0}∩{-1,1}∩{-2,1}`（左）に確定（`tbTwoNeutralStartVertices`）。各中立に開拓地1（道なし）。
+    - **生産フェーズ×2回**: `tbRollsDone`/`tbFirstRollTotal` ＋ `tbTwoAfterRollResolved` フック（ROLL_DICE直後・MOVE_ROBBER完了・CHOOSE_GOLD完了・DISCARD盗賊凍結時）。2回目は合計が1回目と異なるまでエンジン内で振り直し。2つの生産の間は騎士カード/トークン使用不可。
+    - **中立の無償建設**: 新フェーズ `TB_NEUTRAL` ＋ `TB_NEUTRAL_ROAD`/`TB_NEUTRAL_SETTLEMENT`。MAIN で自分の道/開拓地を建てるたびに発動（開拓地優先→両中立とも置けなければ道で代替→道も無ければスキップ）。中立コマは常に無償（`actions.ts` の free 判定に `isTb2NeutralBuilder` 追加）。
+    - **trade token 経済**: `tbTradeTokens`（各5）/`tbTradeTokenBank`（供給10・総数20）。`TB_FORCED_TRADE`（相手の無作為2枚⇄自分の任意2枚）・`TB_MOVE_ROBBER`（盗賊を砂漠へ・奪わない）・`TB_DISCARD_KNIGHT`（騎士カード1枚→トークン2）。消費コストは公開VP ≤ 相手なら1・上回れば2（1ターン1回）。取得は砂漠開拓地2/沿岸1。
+    - **scoring**: `updateLongestRoad` の候補集合に中立を追加（中立も最長交易路タイル保持可）。`updateLargestArmy` の奪取側に `k >= LARGEST_ARMY_MIN`（3枚下限）を明示（騎士捨てで保持者が減っても2枚以下の相手は奪えない）。
+    - 配線: types（PlayerType/TurnPhase/Action 5種/GameState field）・constants・`engine/tbTwo.ts`（新規・純粋ヘルパー）・game.ts・actions.ts・createState.ts・scenarios（`tb_catan_for_two`・基本盤・10点・**2人推奨**）・ai.ts（`chooseTbNeutral`＋トークン使用＋中立除外）・lanCpu.ts・protocol（LAN_SYNCED_ACTIONS 5種）・lanServer（`scenarioMaxPlayers` で2人ガード）・main.ts（TB_NEUTRALのウォッチドッグ/CPU駆動/中立色選択バー/ホームの2人固定）・ui.ts（トークンチップ/強制交易モーダル/2回目ロール文言）・events.ts（中立配置タップ）・log.ts。
+    - テスト `tb_catan_for_two.test.ts`（**35件**・仕様定数/セットアップ/生産2回/中立無償建設/最長交易路/トークン消費/相互作用禁止/dice.ts幻需要回帰）。全**1075緑**・tsc/build緑。エンジン8シードフルゲーム完走で不変条件確認（中立は資源を持たない・token総数常に20・中立は勝者にならない）。実機スモーク（Playwright: 2人用CPU戦が中立建設まで自走・トークンチップ表示・エラー0）。
+    - **ウルトラコード多角レビュー**（5視点ファインダー→指摘ごとに敵対検証3人・**56エージェント完走**）: 指摘17件のうち**確定8件を反映**。実バグ2件修正=①`dice.ts computeDiceProduction` で中立開拓地の「幻の需要」がバンク枯渇判定を汚染し実プレイヤーの生産配布がズレる（中立を demand から除外）／②強制交易モーダルが成立後に閉じず再送でエンジンエラー（`RESET_UIPHASE_ACTIONS` に `TB_FORCED_TRADE` 追加）。テスト強化6件（緩いアサーション修正・変異耐性=3枚下限binding/TB_NEUTRAL_ROAD最長交易路統合/dice回帰・タイミング窓/供給チェック）。**実バグ2件＋変異耐性3件を変異注入で実証**（修正を戻すと該当テストが赤・復元で緑）。棄却9件（既存踏襲・実害なし・nit）。
 - **2026-07-05 UI/UXセッション（ユーザのテストプレイ指摘・`e28c533`/`886e176`/`ba940c2`）**:
   - **船の建設ボタン**を道と同形式（コマ画像＋🌲🐑コストアイコン）に統一（コスト非表示は船だけだった）。
   - **街道建設カード使用中に「🚢船を置く」ボタン**（航海者: 道2/船2/道1+船1。エンジン/盤面は対応済みでUIボタンだけ欠落していた）。案内文も「道でも船でもOK」に。
@@ -81,8 +92,8 @@
 
 ## 4. 未完了タスク（優先順位順・次セッションはここから）
 > すべて [docs/交易と蛮族_仕様書_v6.md](docs/交易と蛮族_仕様書_v6.md) をデータ化＋テスト固定していく。各増分ごとに `tsc`/`vitest`/`build` 緑・区切りコミット。
-1. **増分4＝Catan for Two（2人用・§2-4）**: trade token 20＋中立プレイヤー2人。可変セットアップで各中立に開拓地1（図示位置）。生産フェーズ×2回（2回目は1回目と別出目まで振り直し）・建設のたび中立の道/開拓地も無償配置・trade token 経済（Forced Trade / Move Robber）。要設計（中立プレイヤーの扱い・2人戦専用の状態）。**Event Cards と併用可**（イベントカードのCONFLICT等は中立に特則あり）。
-2. **増分5以降：5シナリオ**（Fishing→Rivers→Merchant Trains→Barbarian Attack→Traders & Barbarians）。
+1. ~~**増分4＝Catan for Two（2人用・§2-4）**~~ → **完了**（`bae493e`・§2 セッション4参照）。**未実装の併用**: Event Cards / Seafarers との組合せ（本増分は基本盤の単独変種のみ。エンジンの発動条件は他変種と直交に実装済みなので、併用時の特則＝CONFLICT の中立特則・中立騎士等は将来課題）。
+2. **増分5以降＝5シナリオ**（優先順1位＝次にやること）: Fishing→Rivers→Merchant Trains→Barbarian Attack→Traders & Barbarians。
    - **Fishing on Catan**（§3-1）は最初の完全シナリオだが**要設計**: 湖が**4数字**で産出＝現 `Tile.number:number|null`（単一）を拡張要／漁場は盤ヘックスでなく**フレーム上の産出源**＝新しい盤フィーチャー／fishトークン経済（秘匿・上限7・ぼろ靴・消費アクション）。
    - Rivers=川タイル(3+4hex)＋沼＋橋(新建物)＋コイン＋最富豪/極貧。Barbarian/T&B=騎士・蛮族・専用デッキ・荷馬車で最も重い。
 3. **残存【要確認】（軽微・データ定数で1行修正可）**: 荷馬車アップグレードの**木の本数(Lv3-5)**（暫定「木2」で実装可）。※Event Cards の数字分布(C6)は**解決済み**（§2-3）。
@@ -100,11 +111,19 @@
 - **Event Cards は基本盤のみで実装**（scenarios: `tb_event_cards`）。仕様上は Seafarers/C&K とも併用可だが未対応。C&K併用時は「イベントダイス＋赤ダイスをカードと同時に振り赤ダイスで進歩カード抽選」の特則があり、`isCk` 経路との統合は未実装（`ROLL_DICE` の tbEventCards 分岐は isCk より前で早期returnするため現状は非CK専用）。
 - **増分3のウルトラコード多角レビュー**: 4視点ファインダーは完走したが**敵対検証(verify)フェーズはセッション上限で全滅**→指摘7件を**自己裁定**して反映（実バグ2件修正＋テスト・UX4件改善・1件は既存踏襲で不要）。次セッションでverifyを再実行したい場合は Workflow の resumeFromRunId=`wf_3570e023-8ff` でファインダー結果はキャッシュ再利用できる。
 - **New Year は36枚に含まれない別カード**。デッキは37枚（36+NY）で作り、下5枚→NY→残り31枚を上に積む＝NYより下の5枚はそのゲームで使われない（`buildTbEventDeck`）。`TB_EVENT_DECK_BOTTOM=5`。
+- **Catan for Two（増分4）の要注意点**:
+  - **中立プレイヤー（`type:'neutral'`）は `playerOrder` に入らない**。プレイヤーを走査する新コードを書くときは「playerOrder（=実プレイヤー）」か「players 全体（＝中立含む）」かを常に意識する。生産・強奪・交易・勝利判定は playerOrder のみ、盤上コマの合法判定・最長交易路は中立も含む。
+  - **中立開拓地は資源を受け取らない＝生産計算の demand にも入れない**（`dice.ts computeDiceProduction` で `type==='neutral'` を skip。入れるとバンク枯渇判定を汚染して実プレイヤーの配布がズレる＝レビューで見つけた実バグ）。C&K の `distributeCkProduction`／`computeGoldPicks` は Catan for Two と併用しない前提なので未対応（併用実装時は同様の中立除外が要る）。
+  - **中立コマは常に無償**（`actions.ts` の `isTb2NeutralBuilder`）。中立に資源コストを課すと恒久的に建設不可＝変種が成立しない。
+  - **生産2回制のフック `tbTwoAfterRollResolved` は「出目解決が完全に終わって TRADE_BUILD に入った瞬間」に PRE_ROLL へ戻す**。7の捨て札→盗賊→（2回目）や GOLD をまたぐ経路の各終端に配線済み。新しい出目解決経路を足すときはこのフックの呼び忘れに注意（呼ばないと2回目の生産が飛ぶ）。
+  - **強制交易など UI モーダルを新設したら `RESET_UIPHASE_ACTIONS`（main.ts）にアクション名を足す**（成立後にモーダルが閉じずエラー再送になる＝レビューで見つけた実バグ）。ローカル/LAN 両経路がこの Set を共有する。
+  - **2人専用ガード**: ホーム画面（`applyScenarioPlayerLimit`）・LANロビー（`scenarioMaxPlayers`）・`createInitialGameState`（specs.length!==2 で例外）の3層。`?scenario=` URL 直指定でも `initGameState` が2人に丸める。
 - **網羅Recordが多い**: `SCENARIOS`/`SCENARIO_RULES`（Record<ScenarioId>）、`TILE_COUNTS`/`TILE_RESOURCE_MAP`/`TILE_COMMODITY_MAP`（Record<TileType>）、`category` union（`scenarios.ts`×2＋`scenarioSelect.ts`）。id/tile/category を足すと全部直さないと tsc が通らない（＝抜け漏れ検知になる）。
 - **vitest が稀に ESM ローダで一時クラッシュ(exit 134)**: 失敗ではない。再実行で緑。
 - 参考メモリ: `seafarers-pr9-known-bugs` / `seafarers-official-rebuild`。フォーク同期は SYNC.md／100万石 `docs/reskin/GLOSSARY.md`。
 
 ## 過去ログ（要約）
+- 2026-07-05(4): T&B 増分4「Catan for Two（2人用）」実装（中立2人＋生産2回＋中立無償建設＋trade token 経済・`bae493e`・未push・全1075緑）＋ウルトラコード多角レビューで実バグ2件修正・変異耐性テスト6件追加。
 - 2026-07-05(3): UI/UX改善（船コスト表示・道/船と盗賊/海賊の選択UI・進歩カード獲得通知・クレーン都市選択）＋オアシス/オセアニア写真準拠リビルド（全1039緑・作業ツリークリーン）。
 - 2026-07-05(2): T&B 増分3「イベントカード」実装＋C6（数字分布）を公式独語版で確定（feat/traders-barbarians・未push・全1027緑）。
 - 2026-07-05: T&B 仕様確定（公式PDF図版をPNG視認）＋増分1「強き港」＋増分2「親切な盗賊」実装（feat/traders-barbarians・未push）。
