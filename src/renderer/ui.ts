@@ -21,7 +21,7 @@ import type { CkTrack, CommodityType, CommodityHand, TradeKind, ProgressCard, Pr
 import type { BuildMode } from './events';
 
 // 画像参照は中央マニフェスト経由（単一の真実）。
-import { ASSETS, assetImg, houseImg, cityImg, metropolisImg, type ColorKey } from '../assets/manifest';
+import { ASSETS, assetImg, houseImg, cityImg, metropolisImg, shipImg, type ColorKey } from '../assets/manifest';
 
 const knightImg = ASSETS.knight.basic;
 // 騎士と商人: 商品アイコン画像（手札チップ等）。テキスト埋め込み箇所は絵文字のまま。
@@ -2059,7 +2059,7 @@ function buildActionButtons(
   const ckey = PLAYER_COLOR_KEY[pid] ?? 'red';
   div.appendChild(modeImgBtn(ASSETS.action.road, [costLabel('道', resCostParts(BUILD_COSTS.road))], 'road', canRoad, buildMode, setBuildMode));
   if (hasSea) {
-    div.appendChild(modeBtn('🚢 船', 'ship', canShip, buildMode, setBuildMode));
+    div.appendChild(modeImgBtn(shipImg(ckey), [costLabel('船', resCostParts(BUILD_COSTS.ship))], 'ship', canShip, buildMode, setBuildMode));
     // 航海者: 動かせる船があるときだけ「船を移動」モードを出す（1ターン1回）。
     if (playerHasMovableShip(state, pid)) {
       div.appendChild(modeBtn('⛵ 船を移動', 'moveShip', true, buildMode, setBuildMode));
