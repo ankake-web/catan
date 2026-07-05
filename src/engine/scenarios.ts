@@ -11,6 +11,7 @@
 // 注意: 純粋関数（DOM非依存）。createInitialGameState から使う。
 
 import type { AxialCoord, Tile, TileId, TileType, Harbor, HarborType, ScenarioRules, EdgeTokenKind } from '../types';
+import { HEX_DIRECTIONS } from '../constants';
 import { getAllTileCoords, getHexRegion, tileId, parseTileId, edgeTileIds, type BoardGeometry } from './board';
 import { createRandomBoard } from './setup';
 
@@ -102,7 +103,10 @@ const HUGE_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(4, 3, 4)
 const FOUR_ISLANDS_COORDS = HUGE_COORDS; // S2 は 51ヘックス（公式アプリ4人盤・大きさの異なる4島）
 // オセアニア専用: 霧を始発島から必ず海で隔てるため、他盤(51)より広い 61ヘックス(半径4)を使う。
 // 盤は自動縮小して収まる（タイルは小さくなるが操作性は問題なし）。
-const OCEANIA_COORDS = (): ReturnType<typeof getHexRegion> => getHexRegion(4, 4, 4); // 61ヘックス
+// オセアニア: 公式アプリの写真準拠のいびつな2島＋霧16（photo/オセアニア IMG_6409 実測）。
+// フットプリントは「島2＋霧セル＋周囲1リングの海」（coordsWithSeaRing）。
+const OCEANIA_COORDS = (): AxialCoord[] =>
+  coordsWithSeaRing([...Object.keys(OCEANIA_HOME_LAND), ...Object.keys(OCEANIA_FOG)]);
 
 // ---- 航海者「新たな海岸を目指して」（公式S1・51ヘックス＝公式アプリ4人盤に準拠） ----
 // 公式アプリ(photo/IMG_6399)の「中央に本島＋四方に離れた小島」を51マス盤で再現。
@@ -149,7 +153,10 @@ function randomHarbors(geo: BoardGeometry, tiles: Record<TileId, Tile>, rng: () 
   const coastEdges = shuffleWithRng(
     Object.values(geo.edges).filter(e => {
       const tids = edgeTileIds(e, geo.vertices);
-      return tids.length === 2 && tids.filter(t => tiles[t]?.type === 'sea').length === 1; // 陸1・海1＝海岸線
+      if (tids.length !== 2) return false;
+      if (tids.filter(t => tiles[t]?.type === 'sea').length !== 1) return false; // 陸1・海1＝海岸線
+      // 霧タイルの岸は除外（霧は公開されると陸になり、港が内陸に取り残されるため）。
+      return !tids.some(t => tiles[t]?.fog != null);
     }),
     rng,
   );
@@ -832,49 +839,53 @@ const seafarersFogIslands: Scenario = {
 // ---- 公式アプリ「オセアニア(4)」: 霧に覆われた海に2つの始発島。どの島からでも始められ
 //   (setupAnywhere)、霧を晴らして未知の海域を探索する。発見した陸からは資源1枚（島ボーナスVPは無し）。
 //   霧の中には金鉱の島も眠る。12点。
-//   盤=61ヘックス(OCEANIA_COORDS)。始発島(西10/東7)と霧(中央帯15)は必ず海で隔て、霧は始発島に
-//   直接接触しない＝船で海を渡ってのみ探索できる（公式のオセアニア挙動）。 ----
-// 始発の2島（buildFromLandFogMap の landMap）。西10＋東7＝陸17。randomizeLandMap が島内で毎ゲーム
-//   地形/数字をシャッフル（赤6/8非隣接）。西(10):森2/畑2/牧草3/山2/丘1  東(7):森2/山1/丘2/畑1/牧草1
+//   盤形は photo/オセアニア IMG_6409 を格子フィットで実測（2026-07-05 再構築）:
+//   **北東にいびつな始発島10**（上段ジグザグ4＋中段4＋南東の張り出し2）と **南西の始発島7**、
+//   霧は「北西ブロック8＋中央〜南の帯8」の計16。島と霧は必ず海で隔たり、船で渡ってのみ探索できる。
+// 始発の2島。北東10＋南西7＝陸17。randomizeLandMap が島内で毎ゲーム地形/数字をシャッフル
+//   （赤6/8非隣接）。北東(10):森2/畑2/牧草3/山2/丘1  南西(7):森2/山1/丘2/畑1/牧草1
 const OCEANIA_HOME_LAND: LandMap = {
-  // 西の始発島（10）
-  '-4,0':  { type: 'forest',   number: 9 },
-  '-4,1':  { type: 'forest',   number: 3 },
-  '-4,2':  { type: 'field',    number: 12 },
-  '-3,-1': { type: 'mountain', number: 10 },
-  '-3,0':  { type: 'pasture',  number: 5 },
-  '-3,1':  { type: 'pasture',  number: 4 },
-  '-3,2':  { type: 'hill',     number: 6 },
-  '-2,-1': { type: 'field',    number: 6 },
-  '-2,0':  { type: 'pasture',  number: 5 },
-  '-2,1':  { type: 'mountain', number: 2 },
-  // 東の始発島（7）
-  '2,-1':  { type: 'forest',   number: 9 },
-  '2,0':   { type: 'forest',   number: 10 },
-  '3,-2':  { type: 'mountain', number: 3 },
-  '3,-1':  { type: 'hill',     number: 8 },
-  '3,0':   { type: 'hill',     number: 4 },
-  '4,-2':  { type: 'field',    number: 8 },
-  '4,-1':  { type: 'pasture',  number: 11 },
+  // 北東の始発島（10・写真どおりのいびつな形）
+  '4,-1': { type: 'forest',   number: 9 },
+  '5,-1': { type: 'field',    number: 12 },
+  '6,-2': { type: 'forest',   number: 3 },
+  '7,-2': { type: 'pasture',  number: 5 },
+  '4,0':  { type: 'pasture',  number: 4 },
+  '5,0':  { type: 'hill',     number: 6 },
+  '6,-1': { type: 'mountain', number: 10 },
+  '7,-1': { type: 'field',    number: 6 },
+  '6,0':  { type: 'pasture',  number: 5 },
+  '7,0':  { type: 'mountain', number: 2 },
+  // 南西の始発島（7）
+  '0,4':  { type: 'forest',   number: 9 },
+  '1,4':  { type: 'forest',   number: 10 },
+  '0,5':  { type: 'mountain', number: 3 },
+  '2,4':  { type: 'hill',     number: 8 },
+  '1,5':  { type: 'hill',     number: 4 },
+  '0,6':  { type: 'field',    number: 8 },
+  '2,5':  { type: 'pasture',  number: 11 },
 };
-// 霧（中央帯15セル・陸7（うち金鉱2）/海8）。両始発島から海を越えて探索する未知の海域。
+// 霧（16セル＝北西ブロック8＋中央〜南の帯8。陸7（うち金鉱2）/海9）。
 //   randomizeFogMap がどのセルが陸/海か・地形・数字を毎ゲームシャッフル（金2は必ず霧の中に残る）。
 const OCEANIA_FOG: FogMap = {
-  '0,-4':  { type: 'sea',      number: null },
-  '0,-3':  { type: 'gold',     number: 5 },   // 金鉱の島1
-  '0,-2':  { type: 'forest',   number: 9 },
-  '0,-1':  { type: 'sea',      number: null },
-  '0,0':   { type: 'field',    number: 4 },
-  '0,1':   { type: 'sea',      number: null },
-  '0,2':   { type: 'mountain', number: 10 },
-  '0,3':   { type: 'sea',      number: null },
-  '0,4':   { type: 'gold',     number: 11 },  // 金鉱の島2
-  '1,-3':  { type: 'sea',      number: null },
-  '1,-2':  { type: 'pasture',  number: 6 },
-  '1,2':   { type: 'sea',      number: null },
-  '-1,-3': { type: 'hill',     number: 3 },
-  '-1,2':  { type: 'sea',      number: null },
-  '-1,3':  { type: 'sea',      number: null },
+  // 北西ブロック（8）
+  '0,1':  { type: 'gold',     number: 5 },   // 金鉱の島1
+  '1,1':  { type: 'sea',      number: null },
+  '2,0':  { type: 'forest',   number: 9 },
+  '0,2':  { type: 'sea',      number: null },
+  '1,2':  { type: 'field',    number: 4 },
+  '2,1':  { type: 'sea',      number: null },
+  '2,2':  { type: 'mountain', number: 10 },
+  '3,2':  { type: 'sea',      number: null },
+  // 中央〜南の帯（8）
+  '4,2':  { type: 'gold',     number: 11 },  // 金鉱の島2
+  '5,2':  { type: 'sea',      number: null },
+  '4,3':  { type: 'pasture',  number: 6 },
+  '5,3':  { type: 'sea',      number: null },
+  '6,2':  { type: 'hill',     number: 3 },
+  '7,2':  { type: 'sea',      number: null },
+  '4,4':  { type: 'sea',      number: null },
+  '6,3':  { type: 'sea',      number: null },
 };
 const seafarersOceania: Scenario = {
   id: 'seafarers_oceania',
@@ -1239,79 +1250,161 @@ const ckSeafarersGreaterCatan: Scenario = {
 };
 
 // ============================================================
-// 公式アプリ「オアシス」(photo/オアシス IMG_6410 実読): 「カタンの開拓者たち」基本ゲーム＋
-//   砂漠/オアシスを“道”で探索する新メカ。船は使わず、各自30本の道で霧(=砂漠/資源)を切り開く。
-//   霧の横に道を置くと晴れて砂漠か資源地が現れ、資源地なら資源1枚。財宝の辺に道を置くと獲得。10点。
+// 公式アプリ「オアシス」(photo/オアシス IMG_6410 を格子フィットで実読・2026-07-05 再構築):
+//   「カタンの開拓者たち」基本ゲーム＋砂漠/オアシスを“道”で探索する新メカ。船は使わず各自30本の道。
+//   盤は対角構造: **右上の島（資源10＋連なる砂漠6・うち1つが盗賊の初期位置）** と
+//   **左下の島（資源7＋連なる砂漠5）**、その間に **霧（?タイル）24** が斜めの帯で広がる。
+//   霧の横に道を置くと晴れて砂漠か資源地（オアシス）が現れ、資源地なら資源1枚。
+//   財宝は交差点に置かれ、そこへ道を置くと獲得（エンジンでは最寄りの辺トークンで表現）。10点。
 // ============================================================
-// 出発の陸（中央13・全5資源＋砂漠1=盗賊初期。ここで初期配置する）。
+// 右上の島（写真の実測値）。キー先頭の砂漠 '4,-1'（案山子＝盗賊初期位置）に盗賊を置く
+//   （randomizeLandMapCore は「最初の砂漠セル」へ盗賊を置くため、この行を先頭に維持すること）。
 const OASIS_LAND: LandMap = {
-  '0,0':   { type: 'desert',   number: null, robber: true },
-  '1,0':   { type: 'forest',   number: 8 },
-  '1,-1':  { type: 'field',    number: 5 },
-  '0,-1':  { type: 'pasture',  number: 9 },
-  '-1,0':  { type: 'mountain', number: 4 },
-  '-1,1':  { type: 'hill',     number: 6 },
-  '0,1':   { type: 'forest',   number: 11 },
-  '2,-1':  { type: 'field',    number: 3 },
-  '1,-2':  { type: 'pasture',  number: 10 },
-  '0,-2':  { type: 'mountain', number: 5 },
-  '-1,-1': { type: 'hill',     number: 9 },
-  '-2,0':  { type: 'field',    number: 11 },
-  '-2,1':  { type: 'mountain', number: 8 },
+  // 砂漠帯（右上の島・6。位置は写真どおり固定＝島の南西斜面に連なる）
+  '4,-1': { type: 'desert', number: null, robber: true }, // 案山子（盗賊初期）
+  '4,0':  { type: 'desert', number: null },
+  '5,0':  { type: 'desert', number: null },
+  '6,0':  { type: 'desert', number: null },
+  '7,0':  { type: 'desert', number: null },
+  '8,0':  { type: 'desert', number: null },
+  // 資源地（右上の島・10: 森4/牧2/畑2/山1/丘1）
+  '5,-2': { type: 'forest',   number: 8 },
+  '7,-3': { type: 'forest',   number: 8 },
+  '6,-2': { type: 'pasture',  number: 5 },
+  '8,-3': { type: 'mountain', number: 2 },
+  '5,-1': { type: 'pasture',  number: 4 },
+  '7,-2': { type: 'field',    number: 11 },
+  '6,-1': { type: 'field',    number: 9 },
+  '7,-1': { type: 'forest',   number: 6 },
+  '8,-2': { type: 'hill',     number: 3 },
+  '8,-1': { type: 'forest',   number: 9 },
+  // 砂漠帯（左下の島・5。島の北東斜面に連なる）
+  '1,3':  { type: 'desert', number: null },
+  '2,3':  { type: 'desert', number: null },
+  '3,3':  { type: 'desert', number: null },
+  '4,3':  { type: 'desert', number: null },
+  '4,4':  { type: 'desert', number: null },
+  // 資源地（左下の島・7: 山2/丘3/畑1/牧1）
+  '1,4':  { type: 'mountain', number: 10 },
+  '2,4':  { type: 'hill',     number: 11 },
+  '3,4':  { type: 'hill',     number: 5 },
+  '1,5':  { type: 'field',    number: 6 },
+  '2,5':  { type: 'hill',     number: 10 },
+  '3,5':  { type: 'mountain', number: 3 },
+  '1,6':  { type: 'pasture',  number: 4 },
 };
-// 霧（砂漠/オアシス・12セル）。道で隣に到達すると晴れる。砂漠は産出なし、資源地（=オアシス）は
-//   発見時に資源1枚。海(sea)は入れない＝必ず砂漠か資源が出る（公式「砂漠か資源のある土地が現れる」）。
+// 資源セルのグループ（島内だけで種別をシャッフル＝島ごとの資源構成は毎回固定・公式アプリ準拠）。
+// 砂漠帯は第3グループ＝位置固定（写真の「連なる砂漠」の構造を保つ）。
+const OASIS_TOP_RES = ['5,-2', '7,-3', '6,-2', '8,-3', '5,-1', '7,-2', '6,-1', '7,-1', '8,-2', '8,-1'];
+const OASIS_BOTTOM_RES = ['1,4', '2,4', '3,4', '1,5', '2,5', '3,5', '1,6'];
+const OASIS_DESERTS = ['4,-1', '4,0', '5,0', '6,0', '7,0', '8,0', '1,3', '2,3', '3,3', '4,3', '4,4'];
+// 霧（?タイル・24セル＝写真の実測: 左上ブロック10＋中央帯14）。道で隣に到達すると晴れる。
+//   海(sea)は入れない＝必ず砂漠か資源が出る（公式「砂漠か資源のある土地が現れる」）。
+//   中身の構成（砂漠12＋オアシス12）は画面から確認できない隠し情報のため【推定】。
+//   数字は 2/12 を避けた中庸プール（randomizeFogMap が毎ゲームシャッフル）。
 const OASIS_FOG: FogMap = {
-  '2,0':  { type: 'desert',   number: null },
-  '1,1':  { type: 'pasture',  number: 4 },
-  '0,2':  { type: 'desert',   number: null },
-  '-1,2': { type: 'forest',   number: 9 },
-  '-2,2': { type: 'desert',   number: null },
-  '2,-2': { type: 'hill',     number: 10 },
-  '0,-3': { type: 'desert',   number: null },
-  '1,-3': { type: 'field',    number: 6 },
-  '-3,2': { type: 'mountain', number: 3 },
-  '-3,1': { type: 'desert',   number: null },
-  '3,-2': { type: 'field',    number: 5 },
-  '3,-3': { type: 'desert',   number: null },
+  // 左上ブロック（10）
+  '1,0':  { type: 'desert',   number: null },
+  '3,-1': { type: 'pasture',  number: 4 },
+  '1,1':  { type: 'desert',   number: null },
+  '2,0':  { type: 'forest',   number: 9 },
+  '3,0':  { type: 'desert',   number: null },
+  '1,2':  { type: 'field',    number: 6 },
+  '2,1':  { type: 'desert',   number: null },
+  '3,1':  { type: 'hill',     number: 10 },
+  '2,2':  { type: 'mountain', number: 3 },
+  '3,2':  { type: 'desert',   number: null },
+  // 中央帯（14）
+  '4,1':  { type: 'field',    number: 3 },
+  '4,2':  { type: 'desert',   number: null },
+  '5,1':  { type: 'mountain', number: 11 },
+  '5,2':  { type: 'desert',   number: null },
+  '5,3':  { type: 'forest',   number: 5 },
+  '5,4':  { type: 'desert',   number: null },
+  '6,1':  { type: 'desert',   number: null },
+  '6,2':  { type: 'pasture',  number: 10 },
+  '6,3':  { type: 'desert',   number: null },
+  '7,1':  { type: 'hill',     number: 5 },
+  '7,2':  { type: 'desert',   number: null },
+  '7,3':  { type: 'mountain', number: 9 },
+  '8,1':  { type: 'desert',   number: null },
+  '8,2':  { type: 'field',    number: 8 },
 };
-// オアシスの盤を組む: 出発の陸＋霧＋財宝の辺。財宝は「霧（砂漠/オアシス）に面する辺」へ決定論配置
-//   （道で到達して取れる位置）。船は使わないので harbors は無し。
-function buildOasis(landMap: LandMap, fogMap: FogMap, treasureCount: number): (geo: BoardGeometry, rng: () => number) => ScenarioBoard {
-  return (geo, rng) => {
-    const { home, fog } = randomizeHomeAndFog(landMap, fogMap, rng);
-    const tiles: Record<TileId, Tile> = {};
-    for (const id of Object.keys(geo.tileToVertices)) {
-      const coord = parseTileId(id);
-      const land = home[id];
-      const f = fog[id];
-      if (land) tiles[id] = { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber };
-      else if (f) tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false, fog: { type: f.type, number: f.number } };
-      else tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false };
+// 財宝（写真の交差点7箇所を、その交差点に接する辺トークンとして表現。道で到達して獲得）。
+//   1-4: 右上の島の砂漠帯と霧の境界（対角線上）／5: 右岸の霧ペア間／6-7: 下岸の霧際。
+const OASIS_TREASURES: ReadonlyArray<readonly [string, string]> = [
+  ['4,0', '3,1'],
+  ['5,0', '4,1'],
+  ['6,0', '5,1'],
+  ['7,0', '6,1'],
+  ['8,1', '8,2'],
+  ['5,4', '6,3'],
+  ['7,3', '8,3'], // (8,3) は外周の海＝境界の辺
+];
+// 盤フットプリント: 52セル（島2＋霧24）＋周囲1リングの海（海岸線・港・境界の財宝辺のため）。
+const OASIS_COORDS = (): AxialCoord[] =>
+  coordsWithSeaRing([...Object.keys(OASIS_LAND), ...Object.keys(OASIS_FOG)]);
+// セル集合＋周囲1リングの海、というフットプリントを作る（公式アプリの写真準拠で島の形が
+// いびつな盤用。六角形リージョンだと収まらない／余白が大きすぎるため、必要な分だけ海を敷く）。
+function coordsWithSeaRing(cellIds: string[]): AxialCoord[] {
+  const set = new Set(cellIds);
+  const out = new Map<string, AxialCoord>();
+  for (const id of cellIds) out.set(id, parseTileId(id));
+  for (const id of cellIds) {
+    const { q, r } = parseTileId(id);
+    for (const d of HEX_DIRECTIONS) {
+      const nid = tileId({ q: q + d.q, r: r + d.r });
+      if (!set.has(nid) && !out.has(nid)) out.set(nid, { q: q + d.q, r: r + d.r });
     }
-    // 財宝: 霧（砂漠/オアシス）に面する辺へ等間隔配置。道で到達して獲得する。
-    const fogEdges = Object.values(geo.edges).filter(e => {
-      const tids = edgeTileIds(e, geo.vertices);
-      return tids.some(t => tiles[t]?.fog != null);
-    }).sort((a, b) => (a.id < b.id ? -1 : 1));
-    const edgeTokens: Record<string, EdgeTokenKind> = {};
-    const step = Math.max(1, Math.floor(fogEdges.length / treasureCount));
-    for (let i = 0; i < treasureCount && i * step < fogEdges.length; i++) {
-      edgeTokens[fogEdges[i * step]!.id] = 'treasure';
-    }
-    return { tiles, harbors: [], edgeTokens };
-  };
+  }
+  return [...out.values()];
+}
+
+// 2タイル間の共有辺ID（辺ID規約: 両端頂点IDをソートして '|' 連結）。隣接していなければ null。
+function edgeIdBetween(geo: BoardGeometry, a: string, b: string): string | null {
+  const va = new Set(geo.tileToVertices[a] ?? []);
+  const shared = (geo.tileToVertices[b] ?? []).filter(v => va.has(v));
+  if (shared.length !== 2) return null;
+  return [...shared].sort().join('|');
+}
+// オアシスの盤を組む: 資源は島内シャッフル・砂漠帯は固定・霧は中身シャッフル・財宝は写真の位置へ固定。
+//   港は「本物の海岸線」（霧の岸を除く）へランダム配置（最大9＝写真の個数）。
+function buildOasisBoard(geo: BoardGeometry, rng: () => number): ScenarioBoard {
+  const groups = [OASIS_TOP_RES, OASIS_BOTTOM_RES, OASIS_DESERTS];
+  let home = randomizeLandMapCore(OASIS_LAND, rng, groups);
+  let fog = randomizeFogMap(OASIS_FOG, rng);
+  // 島と霧の境界をまたぐ赤6/8隣接もリトライで避ける（randomizeHomeAndFog と同じ方針）。
+  for (let i = 0; i < 200 && hasCrossRedAdjacency(home, fog); i++) {
+    home = randomizeLandMapCore(OASIS_LAND, rng, groups);
+    fog = randomizeFogMap(OASIS_FOG, rng);
+  }
+  const tiles: Record<TileId, Tile> = {};
+  for (const id of Object.keys(geo.tileToVertices)) {
+    const coord = parseTileId(id);
+    const land = home[id];
+    const f = fog[id];
+    if (land) tiles[id] = { id, coord, type: land.type, number: land.number, hasRobber: !!land.robber };
+    else if (f) tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false, fog: { type: f.type, number: f.number } };
+    else tiles[id] = { id, coord, type: 'sea', number: null, hasRobber: false };
+  }
+  const edgeTokens: Record<string, EdgeTokenKind> = {};
+  for (const [a, b] of OASIS_TREASURES) {
+    const eid = edgeIdBetween(geo, a, b);
+    if (eid) edgeTokens[eid] = 'treasure';
+  }
+  return { tiles, harbors: randomHarbors(geo, tiles, rng, 9), edgeTokens };
 }
 const seafarersOasis: Scenario = {
   id: 'oasis',
   name: 'オアシス',
-  description: '基本ゲーム＋砂漠探索。各自30本の道で霧を切り開き、砂漠の奥のオアシス（資源地）や財宝を見つける（10点）。',
+  description: '右上と左下の島の間に広大な砂漠（霧24）。各自30本の道で切り開き、オアシスや交差点の財宝を見つける（10点）。',
   category: 'basic',
-  coords: BIG_COORDS, // 37ヘックス（出発の陸＋霧の砂漠）
-  build: buildOasis(OASIS_LAND, OASIS_FOG, 6),
+  coords: OASIS_COORDS, // 52ヘックス（島2＋霧24）＋海リング
+  build: buildOasisBoard,
   victoryTarget: 10,
   recommendedPlayers: '4人',
-  rules: { startingRoads: 30, noShips: true, newIslandBonusVp: 0 },
+  // setupAnywhere: 初期配置は右上・左下どちらの島でも可（2島とも出発の陸）。島ボーナスは無し(0)。
+  rules: { startingRoads: 30, noShips: true, newIslandBonusVp: 0, setupAnywhere: true },
 };
 
 // ---- 交易と蛮族「親切な盗賊（The Friendly Robber）」変種（第6版 CN3089 p3） ----
@@ -1507,10 +1600,10 @@ const SCENARIO_RULES: Record<ScenarioId, string[]> = {
     '都市と騎士の要素（商品・都市改善・騎士・蛮族の襲来）もすべて適用される。',
   ],
   oasis: [
-    '10点で勝ち。基本ゲームのルールで、目の前の広大な砂漠を探索する盤（船は使わない）。',
-    '各プレイヤーに道が30本。砂漠（霧）の横に道を置くと晴れて、砂漠か資源地（オアシス）が現れる。',
-    'オアシス（資源地）を発見すると資源1枚。砂漠の奥に道を伸ばして探索を進める。',
-    '財宝が砂漠やオアシスに眠る。財宝の辺に道を置くと、資源や発展カードがもらえる。',
+    '10点で勝ち。右上と左下の2つの島の間に、広大な砂漠（?タイル24）が横たわる盤（船は使わない）。',
+    '初期配置はどちらの島でもOK。各島には「連なる砂漠」があり、盗賊は右上の島の砂漠から始まる。',
+    '各プレイヤーに道が30本。?タイルの横に道を置くと晴れて、砂漠か資源地（オアシス）が現れる。オアシス発見で資源1枚。',
+    '財宝（宝箱）が砂漠の交差点に眠る。宝箱のある場所に道を置くと、資源や発展カードがもらえる。',
   ],
   tb_friendly_robber: [
     '10点で勝ち。盗賊が弱い人を狙わない「親切な盗賊」ルールで遊ぶ。',

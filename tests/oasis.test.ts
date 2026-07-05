@@ -18,28 +18,79 @@ const oasis = (): GameState =>
   createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'oasis');
 const total = (h: ResourceHand): number => RESOURCE_TYPES.reduce((s, r) => s + h[r], 0);
 
-describe('オアシス: 盤構造（基本ゲーム＋砂漠探索）', () => {
+describe('オアシス: 盤構造（公式アプリ photo/オアシス IMG_6410 実測）', () => {
   const s = oasis();
-  it('37ヘックス・出発の陸13(全5資源＋砂漠)＋霧12・財宝あり・10点', () => {
-    expect(Object.keys(s.tiles)).toHaveLength(37);
+  it('可視の陸28（右上=資源10+砂漠6・左下=資源7+砂漠5）＋霧24＋海リング・10点', () => {
+    // 島2つ＋霧24＝52セル＋周囲1リングの海。
     const land = Object.values(s.tiles).filter(t => t.type !== 'sea');
-    expect(land).toHaveLength(13);
+    expect(land).toHaveLength(28);
+    expect(land.filter(t => t.type === 'desert')).toHaveLength(11); // 連なる砂漠 6+5
+    expect(land.filter(t => t.type !== 'desert')).toHaveLength(17); // 資源地 10+7
     const types = new Set(land.map(t => t.type));
     for (const t of ['forest', 'hill', 'pasture', 'field', 'mountain', 'desert']) expect(types.has(t as never)).toBe(true);
-    expect(Object.values(s.tiles).filter(t => t.fog != null)).toHaveLength(12);
-    expect(Object.values(s.edgeTokens ?? {}).filter(k => k === 'treasure').length).toBeGreaterThan(0);
+    expect(Object.values(s.tiles).filter(t => t.fog != null)).toHaveLength(24); // ?タイル（写真実測）
     expect(s.victoryTarget).toBe(10);
   });
-  it('船は使わない: 各自30本の道・船0・海賊コマなし。盗賊は砂漠から開始', () => {
+  it('陸は2つの島（右上16セル・左下12セル）に分かれ、砂漠帯の位置は毎ゲーム固定', () => {
+    // 連結成分を辺隣接で数える（簡易BFS）。
+    const landIds = Object.values(s.tiles).filter(t => t.type !== 'sea').map(t => t.id);
+    const landSet = new Set(landIds);
+    const seen = new Set<string>();
+    const sizes: number[] = [];
+    for (const start of landIds) {
+      if (seen.has(start)) continue;
+      let n = 0;
+      const stack = [start];
+      seen.add(start);
+      while (stack.length) {
+        const cur = stack.pop()!;
+        n++;
+        const { q, r } = s.tiles[cur]!.coord;
+        for (const [dq, dr] of [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]] as const) {
+          const nid = `${q + dq},${r + dr}`;
+          if (landSet.has(nid) && !seen.has(nid)) { seen.add(nid); stack.push(nid); }
+        }
+      }
+      sizes.push(n);
+    }
+    expect(sizes.sort((a, b) => b - a)).toEqual([16, 12]);
+    // 砂漠帯は写真どおりの固定位置（資源だけが島内シャッフルされる）。
+    for (const id of ['4,-1', '4,0', '5,0', '6,0', '7,0', '8,0', '1,3', '2,3', '3,3', '4,3', '4,4']) {
+      expect(s.tiles[id]?.type, `砂漠帯 ${id}`).toBe('desert');
+    }
+  });
+  it('財宝は写真の7箇所（対角の砂漠境界4＋右岸1＋下岸2）に固定配置', () => {
+    expect(Object.values(s.edgeTokens ?? {}).filter(k => k === 'treasure')).toHaveLength(7);
+  });
+  it('港は最大9・本物の海岸線のみ（霧の岸の辺には置かない＝晴れると内陸になるため）', () => {
+    expect(s.harbors.length).toBeGreaterThan(0);
+    expect(s.harbors.length).toBeLessThanOrEqual(9);
+    // 港の辺（2頂点の共有タイル）は「本物の陸1＋本物の海1」。霧タイルの辺は不可。
+    for (const h of s.harbors) {
+      const [va, vb] = h.vertexIds;
+      const setA = new Set(s.vertices[va]!.adjacentTileIds);
+      const shared = s.vertices[vb]!.adjacentTileIds.filter(t => setA.has(t));
+      const tiles = shared.map(t => s.tiles[t]!);
+      expect(tiles.some(t => t.fog != null), `港 ${h.id} が霧の岸の辺にある`).toBe(false);
+      expect(tiles.filter(t => t.type !== 'sea')).toHaveLength(1); // 陸1
+      expect(tiles.filter(t => t.type === 'sea')).toHaveLength(1); // 海1
+    }
+  });
+  it('船は使わない: 各自30本の道・船0・海賊コマなし。盗賊は右上の島の砂漠（案山子の位置）から開始', () => {
     expect(s.players.player1!.remainingRoads).toBe(30);
     expect(s.players.player1!.remainingShips).toBe(0);
     expect(s.piratePosition).toBeUndefined();
-    expect(Object.values(s.tiles).find(t => t.hasRobber)!.type).toBe('desert');
+    const robberTile = Object.values(s.tiles).find(t => t.hasRobber)!;
+    expect(robberTile.type).toBe('desert');
+    expect(robberTile.id).toBe('4,-1'); // 写真の案山子（盗賊）の位置に固定
   });
   it('霧は砂漠か資源地のみを隠す（海は隠さない＝必ず砂漠か資源が出る）', () => {
     for (const t of Object.values(s.tiles)) {
       if (t.fog) expect(t.fog.type).not.toBe('sea');
     }
+  });
+  it('初期配置はどちらの島でも可（setupAnywhere）', () => {
+    expect(s.setupAnywhere).toBe(true);
   });
 });
 

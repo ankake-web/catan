@@ -467,12 +467,20 @@ describe('scenarios: 航海者「4つの島」(公式S2・公式アプリ4人盤
 
 describe('scenarios: 航海者「オセアニア」(公式アプリ4人盤 photo/IMG_6409 実読)', () => {
   const s = createInitialGameState(SPECS, 'fixed', ['player1', 'player2'], createRng(1), 'seafarers_oceania');
-  it('61ヘックス・始発の2島(10/7)＋霧の海域。砂漠なし＝盗賊は盤外・海賊は海', () => {
-    expect(Object.keys(s.tiles)).toHaveLength(61);
+  it('始発の2島(10/7・写真どおりのいびつな形)＋霧16＋海リング。砂漠なし＝盗賊は盤外・海賊は海', () => {
+    // フットプリント: 島17＋霧16＝33セル＋周囲1リングの海（coordsWithSeaRing）。
+    expect(Object.keys(s.tiles)).toHaveLength(73);
+    expect(Object.values(s.tiles).filter(t => t.fog != null)).toHaveLength(16);
     const repOf = computeIslandReps(s.tiles); // 霧は海扱い＝島に数えない
     const sizes = [...new Set(Object.values(repOf))]
       .map(r => Object.values(repOf).filter(x => x === r).length).sort((a, b) => b - a);
     expect(sizes).toEqual([10, 7]);
+    // 島の形は写真の実測位置に固定（いびつな形の回帰防止。中身の資源/数字は島内シャッフル）。
+    const landIds = Object.values(s.tiles).filter(t => t.type !== 'sea').map(t => t.id).sort();
+    expect(landIds).toEqual([
+      '0,4', '0,5', '0,6', '1,4', '1,5', '2,4', '2,5',                       // 南西の島7
+      '4,-1', '4,0', '5,-1', '5,0', '6,-1', '6,-2', '6,0', '7,-1', '7,-2', '7,0', // 北東の島10
+    ].sort());
     expect(Object.values(s.tiles).some(t => t.type === 'desert')).toBe(false);
     expect(Object.values(s.tiles).some(t => t.hasRobber)).toBe(false);
     expect(s.tiles[s.piratePosition!]!.type).toBe('sea');
