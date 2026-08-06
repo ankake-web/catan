@@ -12,7 +12,7 @@ import type { ScenarioId } from '../engine/scenarios';
 import { buildScenarioSelect } from '../renderer/scenarioSelect';
 import type { GameState, PlayerId, PlayerColor, AiDifficulty } from '../types';
 import { attachNameField, savePlayerName } from './nameField';
-import { saveResume, clearResume, loadResume, saveSnapshot, loadSnapshot } from './resume';
+import { saveResume, clearResume, loadResume, saveSnapshot, loadSnapshot, decodeResumeCode } from './resume';
 import type { ResumeInfo } from './resume';
 
 // 盤面/パネル/スコアボードと同じ正準パレットに合わせる（ロビーのドット色を統一）。
@@ -307,6 +307,40 @@ export function renderLanLobby(container: HTMLElement, cb: LanLobbyCallbacks, re
     joinRow.appendChild(codeInput);
     joinRow.appendChild(joinBtn);
     root.appendChild(joinRow);
+
+    // 別の端末・履歴を消した端末から進行中の対局へ戻るための復帰コード入力（普段は畳んでおく）。
+    // 同じ端末なら保存情報で自動復帰するため、ここは「引っ越し用の非常口」。
+    const recover = document.createElement('details');
+    recover.className = 'lan-recover';
+    const summary = document.createElement('summary');
+    summary.textContent = '別の端末から対局に戻る（復帰コード）';
+    recover.appendChild(summary);
+    const rHint = document.createElement('p');
+    rHint.className = 'lan-hint';
+    rHint.textContent = '対局中の端末の ☰メニュー →「🔑 復帰コードをコピー」で出る文字列を貼り付けてください。ルームNo だけでは戻れません（席の持ち主だけが戻れるようにするため）。';
+    recover.appendChild(rHint);
+    const rRow = document.createElement('div');
+    rRow.className = 'lan-join-row';
+    const rInput = document.createElement('input');
+    rInput.type = 'text';
+    rInput.className = 'home-input';
+    rInput.placeholder = 'CATAN1-…';
+    rInput.setAttribute('autocomplete', 'off');
+    rInput.setAttribute('aria-label', '復帰コード');
+    const rBtn = document.createElement('button');
+    rBtn.className = 'home-online-btn';
+    rBtn.textContent = '戻る';
+    const submitRecover = (): void => {
+      const info = decodeResumeCode(rInput.value);
+      if (!info) { view.error = '復帰コードが正しくありません（CATAN1- で始まる文字列を貼り付けてください）'; render(); return; }
+      saveResume(info);        // 以後はこの端末でも自動復帰できるようにする
+      void startResume(info);
+    };
+    rBtn.addEventListener('click', submitRecover);
+    rInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitRecover(); } });
+    rRow.append(rInput, rBtn);
+    recover.appendChild(rRow);
+    root.appendChild(recover);
 
     const hint = document.createElement('p');
     hint.className = 'lan-hint';

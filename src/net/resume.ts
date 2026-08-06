@@ -45,6 +45,42 @@ export function clearResume(): void {
   clearSnapshot();
 }
 
+// ---- 復帰コード（別端末・データ消失からの復帰用）----
+//
+// 自動復帰は localStorage の保存情報で行うため、普段は何も入力しなくてよい。
+// ただし「別のスマホで続きをやりたい」「履歴を消してしまった」場合は保存情報が無く、
+// ルームNo だけでは復帰できない（同一プレイヤーの証明＝トークンが必要なため）。
+// そこで No＋自分のスロット＋トークンを1本の文字列にまとめ、貼り付けで復帰できるようにする。
+//
+// 注意: この文字列は「その席で対局に入れる鍵」そのもの。他人に渡すと成りすませる。
+
+const CODE_PREFIX = 'CATAN1-';
+
+/** ResumeInfo → 貼り付け用の1行文字列。 */
+export function encodeResumeCode(info: ResumeInfo): string {
+  const json = JSON.stringify([info.code, info.you, info.token]);
+  // btoa は Latin-1 しか扱えないが、中身は ASCII（数字/player1-4/base64url トークン）なので安全。
+  return CODE_PREFIX + btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** 貼り付けられた復帰コードを ResumeInfo に戻す。壊れていれば null。 */
+export function decodeResumeCode(raw: string): ResumeInfo | null {
+  try {
+    const s = (raw ?? '').trim().replace(/\s+/g, '');
+    if (!s.toUpperCase().startsWith(CODE_PREFIX)) return null;
+    const b64 = s.slice(CODE_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
+    const arr = JSON.parse(json) as unknown;
+    if (!Array.isArray(arr) || arr.length < 3) return null;
+    const [code, you, token] = arr;
+    if (typeof code !== 'string' || typeof you !== 'string' || typeof token !== 'string') return null;
+    if (!code || !token || !/^player[1-4]$/.test(you)) return null;
+    return { code, you: you as PlayerId, token };
+  } catch {
+    return null;
+  }
+}
+
 // ---- 封印スナップショット（サーバ再起動からの復元用）----
 
 interface SnapshotStore {

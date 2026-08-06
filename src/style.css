@@ -1471,6 +1471,37 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
   text-align: left;
 }
 .game-menu-btn:hover { background: rgba(208,168,108,0.18); color: #fff; }
+/* オンライン対戦のルーム情報（No＋復帰コード）。メニュー最上段に一区画として置く。 */
+.game-menu-room {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(208,168,108,0.22);
+}
+.room-code-copy {
+  padding: 3px 12px;
+  border: 1px solid rgba(208,168,108,0.35);
+  border-radius: 7px;
+  background: rgba(208,168,108,0.12);
+  color: #ffe6bd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.05rem;
+  font-weight: bold;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+.room-code-copy:hover { background: rgba(208,168,108,0.24); color: #fff; }
+.game-menu-note { font-size: 0.68rem; line-height: 1.45; color: rgba(255,255,255,0.5); }
+/* ロビー: 別端末から戻るための復帰コード入力（既定は畳む） */
+.lan-recover { margin-top: 10px; }
+.lan-recover > summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.6);
+  padding: 4px 0;
+}
+.lan-recover > summary:hover { color: rgba(255,255,255,0.85); }
 .game-menu-danger {
   margin-top: 2px;
   border-color: rgba(255,120,90,0.5);

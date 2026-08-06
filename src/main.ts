@@ -24,7 +24,7 @@ import { LanClient } from './net/lanClient';
 import { LAN_SYNCED_ACTIONS } from './net/protocol';
 import { generateRandomPlayerName, pickCpuNames } from './net/names';
 import { attachNameField, savePlayerName } from './net/nameField';
-import { saveResume, loadResume, clearResume, saveSnapshot, loadSnapshot } from './net/resume';
+import { saveResume, loadResume, clearResume, saveSnapshot, loadSnapshot, encodeResumeCode } from './net/resume';
 import type { ResumeInfo } from './net/resume';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from './engine/actions';
 import { isKnightMovable, canMoveKnight, robberAdjacentChasableVertexIds, isCk, computeCkProduction, canBuildKnight, canActivateKnight, canUpgradeKnight, plainCityVertexIds, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, improvementTakesMetropolis, craneEligibleTracks, craneTrack, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from './engine/citiesKnights';
@@ -1272,6 +1272,30 @@ const CPU_SPEED_LABELS: Record<CpuSpeed, string> = {
   slow: 'ゆっくり', normal: '普通', fast: '速い', instant: '最速',
 };
 
+// クリップボードへコピーし、押したボタンのラベルを一時的に結果表示に差し替える。
+// navigator.clipboard は https/localhost 限定なので、LAN 内の http アクセス（例 http://192.168.x.x:5173）
+// でも動くよう、隠し textarea + execCommand をフォールバックに持つ。
+async function copyToClipboard(text: string, btn: HTMLElement, restoreLabel: string): Promise<void> {
+  let ok = false;
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); ok = true; }
+  } catch { ok = false; }
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      ta.remove();
+    } catch { ok = false; }
+  }
+  btn.textContent = ok ? '✅ コピーしました' : '⚠ 長押しで選んでコピーしてください';
+  setTimeout(() => { btn.textContent = restoreLabel; }, 1800);
+}
+
 function updateGameNav(): void {
   gameNav.innerHTML = '';
 
@@ -1305,6 +1329,49 @@ function updateGameNav(): void {
     dd.style.display = gameMenuOpen ? 'flex' : 'none';
   });
   dd.addEventListener('click', (e) => e.stopPropagation());
+
+  // ---- オンライン対戦: ルーム情報（対局中でも確認できる場所に置く）----
+  // 同じ端末なら自動で戻れるが、ルームNo は「今どの部屋にいるか」を人に伝えるのに要る。
+  // 別端末へ移る/履歴を消した場合はルームNo だけでは戻れないので、鍵つきの復帰コードも配る。
+  if (netMode) {
+    const info = loadResume();
+    if (info) {
+      const room = document.createElement('div');
+      room.className = 'game-menu-room';
+
+      const codeRow = document.createElement('div');
+      codeRow.className = 'game-menu-row';
+      const codeLbl = document.createElement('span');
+      codeLbl.className = 'game-menu-label';
+      codeLbl.textContent = '🔢 ルームNo';
+      const codeVal = document.createElement('button');
+      codeVal.className = 'room-code-copy';
+      codeVal.textContent = info.code;
+      codeVal.title = 'タップでコピー';
+      codeVal.addEventListener('click', () => { void copyToClipboard(info.code, codeVal, info.code); });
+      codeRow.append(codeLbl, codeVal);
+      room.appendChild(codeRow);
+
+      const linkRow = document.createElement('div');
+      linkRow.className = 'game-menu-row';
+      const linkBtn = document.createElement('button');
+      linkBtn.className = 'game-menu-btn';
+      linkBtn.textContent = '🔑 復帰コードをコピー';
+      linkBtn.title = '別のスマホ/PCから、この席に戻るための合言葉';
+      linkBtn.addEventListener('click', () => {
+        void copyToClipboard(encodeResumeCode(info), linkBtn, '🔑 復帰コードをコピー');
+      });
+      linkRow.appendChild(linkBtn);
+      room.appendChild(linkRow);
+
+      const note = document.createElement('div');
+      note.className = 'game-menu-note';
+      note.textContent = '同じ端末なら切断しても自動で戻ります。別の端末から戻るときだけ復帰コードを使ってください（他人に渡すと席を乗っ取られます）。';
+      room.appendChild(note);
+
+      dd.appendChild(room);
+    }
+  }
 
   // 初心者モード（ゲーム中でも切替可。ヒント/おすすめ⭐/遊び方ボタンを即反映）。
   {
