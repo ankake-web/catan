@@ -29,8 +29,9 @@ import { buildActionLog, MAX_LOG_ENTRIES } from '../src/engine/log';
 import { nextCpuAction, cpuFallbackAction } from '../src/engine/lanCpu';
 import { generateRandomPlayerName, resolveUniqueName, pickCpuName } from '../src/net/names';
 import { RESOURCE_TYPES, COMMODITY_TYPES } from '../src/constants';
-import { LAN_WS_PATH, LAN_SYNCED_ACTIONS } from '../src/net/protocol';
+import { LAN_WS_PATH, LAN_SYNCED_ACTIONS, SERVER_PING_INTERVAL_MS } from '../src/net/protocol';
 import type { ClientMessage, ServerMessage, LobbyPlayer, LanOrderMode } from '../src/net/protocol';
+import { seal, unseal, hashToken, SNAPSHOT_TTL_MS } from './roomSeal';
 import type { PlayerId, PlayerColor, PlayerType, GameState, Action, LogEntry, AiDifficulty } from '../src/types';
 import type { PlayerSpec } from '../src/engine/createState';
 import type { ScenarioId } from '../src/engine/scenarios';
@@ -89,13 +90,29 @@ const CPU_STEP_MS = 850;
 const CPU_AFTER_ROLL_MS = 1700;
 
 // 切断したメンバーを保持して再接続を待つ猶予(ms)。これを過ぎたら解放する。
+// ロビー中のみ有効（スロットを空けて他の人が入れるようにするため短め）。
 const DISCONNECT_GRACE_MS = 90_000;
+
+// 対局中に「全員が切断したままのルーム」を保持し続ける時間(ms)。
+// スマホのバックグラウンド落ち・回線切替・トンネル・端末再起動から戻れるよう長めに取る。
+// （対局中は誰かが繋がっている限りルームは消えない。この時間は全員居なくなった場合の猶予）
+const GAME_ROOM_KEEP_MS = 30 * 60_000; // 30分
+
+// 復元用スナップショットの再送間隔(ms)。毎手番送ると帯域と CPU(gzip+AES)を食うので絞る。
+// 間引いた場合も「最後の1通」は必ず遅延送信するため、取りこぼしはない。
+const SNAPSHOT_MIN_INTERVAL_MS = 4_000;
+
+// 同時に保持するルーム数の上限。放置ルームでメモリを食い潰さないための保険。
+// 超過時は「全員切断状態が最も古いルーム」から破棄する（対局中の生きたルームは守られる）。
+const MAX_ROOMS = 200;
 
 // タイミング設定（テストで短縮値を注入できるようにする。未指定なら上記の本番既定値）。
 export interface LanServerOptions {
   graceMs?: number;
+  gameKeepMs?: number;      // 全員切断のまま対局ルームを保持する時間
   cpuStepMs?: number;
   cpuAfterRollMs?: number;
+  snapshotMinIntervalMs?: number;
   // 接続を受理する Origin の許可リスト（本番=スタンドアロン起動で指定）。
   // 未指定なら Origin 検証を行わない（dev で Vite に相乗りする場合の従来挙動）。
   allowedOrigins?: string[];
@@ -116,7 +133,10 @@ interface Member {
   name: string;
   isHost: boolean;
   connected: boolean;
-  token: string;              // 再接続用の秘密トークン
+  // 再接続用トークンは SHA-256 のみ保持する（平文はクライアントにだけ渡す）。
+  // 復元スナップショットにもこのハッシュだけを載せるので、万一スナップショットの鍵が
+  // 漏れてもトークンそのものは漏れない。
+  tokenHash: string;
   graceTimer: ReturnType<typeof setTimeout> | null; // 切断後の解放タイマー
 }
 
@@ -136,8 +156,14 @@ interface Room {
   memberLogs: Record<string, LogEntry[]>;
   // タイミング（attachLanServer のオプションから設定。テストでは短縮値を注入）。
   graceMs: number;
+  gameKeepMs: number;
   cpuStepMs: number;
   cpuAfterRollMs: number;
+  // ---- 復元スナップショット（サーバ再起動対策）----
+  snapshotMinIntervalMs: number;
+  lastSnapshotAt: number;                            // 最後に配信した時刻(ms)
+  snapshotTimer: ReturnType<typeof setTimeout> | null; // 間引き中の遅延送信タイマー
+  emptySince: number | null;                          // 全員切断になった時刻（掃除の順序付け用）
 }
 
 const rooms = new Map<string, Room>();
@@ -147,11 +173,32 @@ const rooms = new Map<string, Room>();
 export function __resetRoomsForTest(): void {
   for (const room of rooms.values()) {
     if (room.cpuTimer) { clearTimeout(room.cpuTimer); room.cpuTimer = null; }
+    if (room.snapshotTimer) { clearTimeout(room.snapshotTimer); room.snapshotTimer = null; }
     for (const m of room.members) {
       if (m.graceTimer) { clearTimeout(m.graceTimer); m.graceTimer = null; }
     }
   }
   rooms.clear();
+}
+
+// ルームの保留タイマーをすべて止めてレジストリから外す（破棄の共通処理）。
+function destroyRoom(room: Room): void {
+  if (room.cpuTimer) { clearTimeout(room.cpuTimer); room.cpuTimer = null; }
+  if (room.snapshotTimer) { clearTimeout(room.snapshotTimer); room.snapshotTimer = null; }
+  for (const m of room.members) { if (m.graceTimer) { clearTimeout(m.graceTimer); m.graceTimer = null; } }
+  rooms.delete(room.code);
+}
+
+// ルーム数が上限に達していたら、全員切断のまま最も長く放置されているルームを捨てる。
+// 対局中で誰かが接続しているルームは対象にしない（生きた対局を巻き添えにしない）。
+function evictIfCrowded(): void {
+  if (rooms.size < MAX_ROOMS) return;
+  let victim: Room | null = null;
+  for (const room of rooms.values()) {
+    if (connectedHumans(room) > 0) continue;
+    if (!victim || (room.emptySince ?? 0) < (victim.emptySince ?? 0)) victim = room;
+  }
+  if (victim) destroyRoom(victim);
 }
 
 function send(ws: WebSocket | null, msg: ServerMessage): void {
@@ -302,6 +349,84 @@ export function redactActionFor(action: Action, viewerId: PlayerId, byPid: Playe
   return action;
 }
 
+// ============================================================
+// 復元スナップショット（サーバ再起動・スリープからの復帰）
+// ============================================================
+//
+// 正本 state ごと封印して各端末に預ける。サーバが記憶を失っても、誰か1人が
+// 差し戻せば対局を再構築できる。中身は暗号化されているのでクライアントからは読めない。
+
+interface SnapshotPayload {
+  v: 1;
+  code: string;
+  savedAt: number;
+  turn: number;
+  cpuCount: number;
+  cpuNames: string[];
+  cpuDifficulty: AiDifficulty;
+  orderMode: LanOrderMode;
+  scenario: ScenarioId;
+  members: { id: PlayerId; name: string; isHost: boolean; tokenHash: string }[];
+  memberLogs: Record<string, LogEntry[]>;
+  state: GameState;
+}
+
+function buildSnapshot(room: Room): string | null {
+  if (!room.started || !room.state) return null;
+  const payload: SnapshotPayload = {
+    v: 1,
+    code: room.code,
+    savedAt: Date.now(),
+    turn: room.state.globalTurnNumber,
+    cpuCount: room.cpuCount,
+    cpuNames: room.cpuNames,
+    cpuDifficulty: room.cpuDifficulty,
+    orderMode: room.orderMode,
+    scenario: room.scenario,
+    members: room.members.map(m => ({ id: m.id, name: m.name, isHost: m.isHost, tokenHash: m.tokenHash })),
+    memberLogs: room.memberLogs,
+    state: room.state,
+  };
+  try { return seal(payload); } catch { return null; }
+}
+
+// 接続中の全員（または指定メンバー）へ最新スナップショットを配る。
+function sendSnapshot(room: Room, targets?: Member[]): void {
+  const sealed = buildSnapshot(room);
+  if (!sealed || !room.state) return;
+  room.lastSnapshotAt = Date.now();
+  const msg: ServerMessage = { t: 'snapshot', code: room.code, sealed, turn: room.state.globalTurnNumber };
+  for (const m of (targets ?? room.members)) { if (m.connected) send(m.ws, msg); }
+}
+
+// state 更新のたびに呼ぶ。連続更新では間引くが、最後の1通は必ず遅延送信で届ける。
+function scheduleSnapshot(room: Room): void {
+  if (!room.started || !room.state) return;
+  if (room.snapshotTimer) return; // 既に予約済み
+  const wait = room.lastSnapshotAt + room.snapshotMinIntervalMs - Date.now();
+  if (wait <= 0) { sendSnapshot(room); return; }
+  room.snapshotTimer = setTimeout(() => {
+    room.snapshotTimer = null;
+    sendSnapshot(room);
+  }, wait);
+  // Node のタイマーなら unref してプロセス終了を妨げない（テストの後始末を軽くする）。
+  (room.snapshotTimer as unknown as { unref?: () => void }).unref?.();
+}
+
+// 差し戻された封印スナップショットを検証して payload を取り出す。壊れ物は null。
+export function verifySnapshot(sealed: string, code: string, you: PlayerId, token: string, now = Date.now()): SnapshotPayload | null {
+  const raw = unseal(sealed) as Partial<SnapshotPayload> | null;
+  if (!raw || raw.v !== 1) return null;
+  if (raw.code !== code) return null;
+  if (typeof raw.savedAt !== 'number' || now - raw.savedAt > SNAPSHOT_TTL_MS || raw.savedAt > now + 60_000) return null;
+  if (!Array.isArray(raw.members) || !raw.state || typeof raw.state !== 'object') return null;
+  // 差し戻した本人がこの対局のメンバーで、トークンが一致すること（他人の対局は復元できない）。
+  const me = raw.members.find(m => m && m.id === you);
+  if (!me || me.tokenHash !== hashToken(token)) return null;
+  if (!Array.isArray(raw.state.playerOrder) || !raw.state.players) return null;
+  return raw as SnapshotPayload;
+}
+
 function broadcastState(room: Room, prev: GameState, action: Action, byPid: PlayerId): void {
   if (!room.state) return;
   for (const m of room.members) {
@@ -314,6 +439,8 @@ function broadcastState(room: Room, prev: GameState, action: Action, byPid: Play
     if (!m.connected) continue;
     send(m.ws, { t: 'state', state: { ...maskStateFor(room.state, m.id), log }, action: redactActionFor(action, m.id, byPid), by: byPid });
   }
+  // 各端末が預かる復元スナップショットも更新する（サーバ再起動からの復帰用）。
+  scheduleSnapshot(room);
 }
 
 function startGame(room: Room): void {
@@ -347,6 +474,8 @@ function startGame(room: Room): void {
     room.memberLogs[m.id] = [];
     send(m.ws, { t: 'started', you: m.id, state: maskStateFor(state, m.id) });
   }
+  // 開始局面の復元スナップショットを配る（この時点で落ちても初手から復元できる）。
+  sendSnapshot(room);
   // 開始直後の手番が CPU の場合に備えて CPU 駆動を起動。
   scheduleCpuTick(room, room.cpuStepMs);
 }
@@ -424,9 +553,27 @@ export function attachLanServer(httpServer: Server, fallbackPort = 5173, opts: L
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: { threshold: 1024 } });
   // タイミング設定（テストでは短縮値を注入。未指定なら本番既定値）。
   const graceMs = opts.graceMs ?? DISCONNECT_GRACE_MS;
+  const gameKeepMs = opts.gameKeepMs ?? GAME_ROOM_KEEP_MS;
   const cpuStepMs = opts.cpuStepMs ?? CPU_STEP_MS;
   const cpuAfterRollMs = opts.cpuAfterRollMs ?? CPU_AFTER_ROLL_MS;
+  const snapshotMinIntervalMs = opts.snapshotMinIntervalMs ?? SNAPSHOT_MIN_INTERVAL_MS;
   const allowedOrigins = opts.allowedOrigins; // 未指定なら Origin 検証なし（dev 相乗り）。
+
+  // ---- ハートビート（半死接続の掃除）----
+  // モバイル回線やスリープでは「TCP は繋がったままだが実際には届かない」状態が起きる。
+  // これを検知しないと、切断したはずのプレイヤーが connected のまま残り、その人の手番で
+  // 対局が永久に止まる（AI 代行も再接続も発火しない）。定期 ping に応答しない接続は
+  // terminate して通常の切断処理（AI 代行＋再接続待ち）へ落とす。
+  const alive = new WeakMap<WebSocket, boolean>();
+  const heartbeat = setInterval(() => {
+    for (const client of wss.clients as Set<WebSocket>) {
+      if (alive.get(client) === false) { try { client.terminate(); } catch { /* noop */ } continue; }
+      alive.set(client, false);
+      try { client.ping(); } catch { /* noop */ }
+    }
+  }, SERVER_PING_INTERVAL_MS);
+  (heartbeat as unknown as { unref?: () => void }).unref?.();
+  httpServer.on('close', () => clearInterval(heartbeat));
 
   // ホスト URL 表示用に、実際に listen しているポートを動的取得する。
   const currentUrls = (): string[] => {
@@ -452,27 +599,46 @@ export function attachLanServer(httpServer: Server, fallbackPort = 5173, opts: L
   wss.on('connection', (ws: WebSocket) => {
     let room: Room | null = null;
     let me: Member | null = null;
+    // ハートビート: pong が返るか、何かメッセージが届いた接続は「生きている」とみなす。
+    alive.set(ws, true);
+    ws.on('pong', () => alive.set(ws, true));
     // ルームコード総当たり対策: この接続で「存在しないコードへの join」が
     // 続いたら接続を切る。1接続あたりの試行を絞り、4桁(1万通り)の全探索を非現実的にする。
     // 正本(connected room)に入れば 0 に戻す。誤入力数回では切らない緩めの上限。
     let badJoinAttempts = 0;
     const MAX_BAD_JOINS = 12;
 
+    // ルーム生成の共通処理（新規作成／スナップショットからの復元で共有する）。
+    const newRoom = (code: string): Room => ({
+      code, members: [], started: false, state: null, cpuCount: 0, cpuTimer: null, cpuNames: [],
+      cpuDifficulty: 'strong', orderMode: 'random', scenario: 'classic', memberLogs: {},
+      graceMs, gameKeepMs, cpuStepMs, cpuAfterRollMs,
+      snapshotMinIntervalMs, lastSnapshotAt: 0, snapshotTimer: null, emptySince: null,
+    });
+
     ws.on('message', (data: unknown) => {
+      alive.set(ws, true); // 受信＝生きている
       let msg: ClientMessage;
       try { msg = JSON.parse(String(data)); } catch { return; }
 
       switch (msg.t) {
+        case 'ping': {
+          // アプリ層の生存確認。クライアントはこの応答が途絶えたら自分から張り直す。
+          send(ws, { t: 'pong' });
+          break;
+        }
         case 'create': {
           if (room) return;
+          evictIfCrowded();
           let code: string;
           try { code = genCode(c => rooms.has(c)); }
           catch { send(ws, { t: 'error', message: 'ルームを作成できませんでした。時間をおいて再度お試しください' }); return; }
-          room = { code, members: [], started: false, state: null, cpuCount: 0, cpuTimer: null, cpuNames: [], cpuDifficulty: 'strong', orderMode: 'random', scenario: 'classic', memberLogs: {}, graceMs, cpuStepMs, cpuAfterRollMs };
+          room = newRoom(code);
           rooms.set(code, room);
-          me = { ws, id: 'player1', name: assignName(msg.name, room), isHost: true, connected: true, token: genToken(), graceTimer: null };
+          const token = genToken();
+          me = { ws, id: 'player1', name: assignName(msg.name, room), isHost: true, connected: true, tokenHash: hashToken(token), graceTimer: null };
           room.members.push(me);
-          send(ws, { t: 'joined', code, you: me.id, isHost: true, token: me.token, started: false });
+          send(ws, { t: 'joined', code, you: me.id, isHost: true, token, started: false });
           broadcastLobby(room, currentUrls());
           break;
         }
@@ -493,38 +659,112 @@ export function attachLanServer(httpServer: Server, fallbackPort = 5173, opts: L
           const slot = nextSlot(target);
           if (!slot) { send(ws, { t: 'error', message: 'ルームが満員です（最大4人）' }); return; }
           room = target;
-          me = { ws, id: slot, name: assignName(msg.name, target), isHost: false, connected: true, token: genToken(), graceTimer: null };
+          const token = genToken();
+          me = { ws, id: slot, name: assignName(msg.name, target), isHost: false, connected: true, tokenHash: hashToken(token), graceTimer: null };
           room.members.push(me);
-          send(ws, { t: 'joined', code: room.code, you: me.id, isHost: false, token: me.token, started: false });
+          send(ws, { t: 'joined', code: room.code, you: me.id, isHost: false, token, started: false });
           broadcastLobby(room, currentUrls());
           break;
         }
         case 'resume': {
           // 再接続: 同一プレイヤー(token一致)として復帰する。新規プレイヤーは増やさない。
           if (room) return;
-          const target = rooms.get((msg.code || '').toUpperCase());
-          if (!target) { send(ws, { t: 'error', message: '接続が切れました。ルームに入り直してください', fatal: true }); return; }
-          const member = target.members.find(m => m.id === msg.you && m.token === msg.token);
+          const code = (msg.code || '').toUpperCase();
+          const target = rooms.get(code);
+          if (!target) {
+            // サーバ再起動・スリープ復帰などでルームが消えている。端末が封印スナップショットを
+            // 持っていれば restore で復元できるので、まずそれを促す（ここで諦めない）。
+            send(ws, { t: 'restorable', code });
+            return;
+          }
+          const member = target.members.find(m => m.id === msg.you && m.tokenHash === hashToken(msg.token ?? ''));
           if (!member) { send(ws, { t: 'error', message: '接続が切れました。ルームに入り直してください', fatal: true }); return; }
           // 二重接続: 古い接続があれば無効化（新しい接続を正とする）。
           if (member.ws && member.ws !== ws) { try { member.ws.close(); } catch { /* noop */ } }
           if (member.graceTimer) { clearTimeout(member.graceTimer); member.graceTimer = null; }
           member.ws = ws;
           member.connected = true;
+          target.emptySince = null;
           room = target;
           me = member;
-          send(ws, { t: 'joined', code: target.code, you: member.id, isHost: member.isHost, token: member.token, started: target.started });
+          send(ws, { t: 'joined', code: target.code, you: member.id, isHost: member.isHost, token: msg.token, started: target.started });
           if (target.started && target.state) {
             // 切断中は AI が代行していた Player を、本人復帰につき人間へ戻す。
             convertPlayerType(target, member.id, 'human');
             // ゲーム中: 現在の視点別マスク state ＋ 自分視点ログで再同期。
             send(ws, { t: 'started', you: member.id, state: { ...maskStateFor(target.state, member.id), log: target.memberLogs[member.id] ?? [] } });
+            // 復帰した端末には最新スナップショットも渡す（次に落ちたときの保険を新しくする）。
+            sendSnapshot(target, [member]);
             // 復帰を他プレイヤーへ通知＋CPU駆動を再評価（手番待ち解消の場合に備える）。
             notifyReconnect(target, member.name);
             scheduleCpuTick(target, target.cpuStepMs);
           } else {
             broadcastLobby(target, currentUrls());
           }
+          break;
+        }
+        case 'restore': {
+          // サーバがルームを失った後の復元。端末が預かっている封印スナップショットを
+          // 差し戻してもらい、復号・改竄検証してからルームを再構築する。
+          if (room) return;
+          const code = (msg.code || '').toUpperCase();
+          const existing = rooms.get(code);
+          if (existing) {
+            // 誰かが先に復元済み（または落ちていなかった）。通常の再接続として扱う。
+            const member = existing.members.find(m => m.id === msg.you && m.tokenHash === hashToken(msg.token ?? ''));
+            if (!member) { send(ws, { t: 'error', message: 'このルームには復帰できません。入り直してください', fatal: true }); return; }
+            if (member.ws && member.ws !== ws) { try { member.ws.close(); } catch { /* noop */ } }
+            if (member.graceTimer) { clearTimeout(member.graceTimer); member.graceTimer = null; }
+            member.ws = ws; member.connected = true; existing.emptySince = null;
+            room = existing; me = member;
+            send(ws, { t: 'joined', code: existing.code, you: member.id, isHost: member.isHost, token: msg.token, started: existing.started });
+            if (existing.started && existing.state) {
+              convertPlayerType(existing, member.id, 'human');
+              send(ws, { t: 'started', you: member.id, state: { ...maskStateFor(existing.state, member.id), log: existing.memberLogs[member.id] ?? [] } });
+              sendSnapshot(existing, [member]);
+              notifyReconnect(existing, member.name);
+              scheduleCpuTick(existing, existing.cpuStepMs);
+            } else {
+              broadcastLobby(existing, currentUrls());
+            }
+            break;
+          }
+          const snap = verifySnapshot(msg.sealed ?? '', code, msg.you, msg.token ?? '');
+          if (!snap) {
+            send(ws, { t: 'error', message: '対局データを復元できませんでした。ルームに入り直してください', fatal: true });
+            return;
+          }
+          evictIfCrowded();
+          const restored = newRoom(code);
+          restored.started = true;
+          restored.state = snap.state;
+          restored.cpuCount = snap.cpuCount;
+          restored.cpuNames = snap.cpuNames ?? [];
+          restored.cpuDifficulty = snap.cpuDifficulty;
+          restored.orderMode = snap.orderMode;
+          restored.scenario = snap.scenario;
+          restored.memberLogs = snap.memberLogs ?? {};
+          // 復元直後は全員が未接続。差し戻した本人だけを接続状態にし、他は AI 代行のまま待つ
+          // （各自が resume/restore で戻ってくれば順次 human に戻る）。
+          restored.members = snap.members.map(m => ({
+            ws: null, id: m.id, name: m.name, isHost: m.isHost, connected: false,
+            tokenHash: m.tokenHash, graceTimer: null,
+          }));
+          const self = restored.members.find(m => m.id === msg.you);
+          if (!self) { send(ws, { t: 'error', message: '対局データを復元できませんでした。ルームに入り直してください', fatal: true }); return; }
+          rooms.set(code, restored);
+          for (const m of restored.members) {
+            // 未接続メンバーは AI 代行に切り替え、猶予タイマーを張る（誰も戻らなければ破棄）。
+            if (m.id !== self.id) { convertPlayerType(restored, m.id, 'ai'); scheduleMemberRelease(restored, m); }
+          }
+          self.ws = ws; self.connected = true;
+          convertPlayerType(restored, self.id, 'human');
+          room = restored; me = self;
+          send(ws, { t: 'joined', code, you: self.id, isHost: self.isHost, token: msg.token, started: true });
+          send(ws, { t: 'started', you: self.id, state: { ...maskStateFor(restored.state!, self.id), log: restored.memberLogs[self.id] ?? [] } });
+          notifySystem(restored, `♻️ サーバ再起動から対局を復元しました（${self.name} の端末のバックアップ）`);
+          sendSnapshot(restored, [self]);
+          scheduleCpuTick(restored, restored.cpuStepMs);
           break;
         }
         case 'rename': {
@@ -651,6 +891,7 @@ export function attachLanServer(httpServer: Server, fallbackPort = 5173, opts: L
       if (me.ws !== ws) return;
       me.connected = false;
       me.ws = null;
+      if (connectedHumans(room) === 0 && room.emptySince == null) room.emptySince = Date.now();
       if (!room.started) {
         // 開始前: 即削除せず猶予を持たせ、同一端末の再接続(resume)で復帰できるようにする。
         broadcastLobby(room, currentUrls());
@@ -674,8 +915,12 @@ export function attachLanServer(httpServer: Server, fallbackPort = 5173, opts: L
 }
 
 // 切断メンバーを猶予後に解放する（再接続が来なければ枠を空ける）。
+// 対局中は「スロットは解放しない・ルームは長く保持する」方針なので、待ち時間も
+// ロビー(graceMs)より大幅に長い gameKeepMs を使う。回線切替・端末再起動・
+// スマホのバックグラウンド落ちから戻ってこられるようにするため。
 function scheduleMemberRelease(room: Room, member: Member): void {
   if (member.graceTimer) clearTimeout(member.graceTimer);
+  const wait = room.started ? room.gameKeepMs : room.graceMs;
   member.graceTimer = setTimeout(() => {
     member.graceTimer = null;
     if (member.connected) return; // 既に再接続済み
@@ -684,11 +929,8 @@ function scheduleMemberRelease(room: Room, member: Member): void {
       // 開始後はスロットを解放しない。resume（id+token 一致）で同一プレイヤーとして
       // 復帰できるよう Member を残す（その間 Player は AI が代行し続ける）。
       // 全員が戻らないまま猶予を過ぎた場合のみルームを破棄する。
-      if (connectedHumans(room) === 0) {
-        if (room.cpuTimer) { clearTimeout(room.cpuTimer); room.cpuTimer = null; }
-        for (const m of room.members) { if (m.graceTimer) { clearTimeout(m.graceTimer); m.graceTimer = null; } }
-        rooms.delete(room.code);
-      }
+      // ※ 破棄後も各端末の封印スナップショットから restore で復元できる（TTL 内なら）。
+      if (connectedHumans(room) === 0) destroyRoom(room);
       return;
     }
 
@@ -699,13 +941,10 @@ function scheduleMemberRelease(room: Room, member: Member): void {
       room.members[0]!.isHost = true;
     }
     // 誰もいなくなったら CPU を止めてルーム破棄
-    if (room.members.length === 0) {
-      if (room.cpuTimer) { clearTimeout(room.cpuTimer); room.cpuTimer = null; }
-      rooms.delete(room.code);
-      return;
-    }
+    if (room.members.length === 0) { destroyRoom(room); return; }
     broadcastLobby(room, lanHostUrls(5173));
-  }, room.graceMs);
+  }, wait);
+  (member.graceTimer as unknown as { unref?: () => void }).unref?.();
 }
 
 function sanitizeName(raw: string): string {
@@ -739,3 +978,20 @@ function notifySystem(room: Room, message: string): void {
 }
 function notifyDisconnect(room: Room, name: string): void { notifySystem(room, `🔌 ${name} が切断しました`); }
 function notifyReconnect(room: Room, name: string): void { notifySystem(room, `🔄 ${name} が再接続しました`); }
+
+/**
+ * 計画停止（デプロイ・再起動・スリープ前）の後始末。
+ * 落ちる直前に「最新の封印スナップショット」を全端末へ押し込んでから bye を送る。
+ * これで再起動後、誰か1人が戻ってくれば直前の局面から対局を続けられる。
+ */
+export function shutdownLanServer(reason = 'サーバを再起動しています'): void {
+  for (const room of rooms.values()) {
+    if (room.snapshotTimer) { clearTimeout(room.snapshotTimer); room.snapshotTimer = null; }
+    if (room.cpuTimer) { clearTimeout(room.cpuTimer); room.cpuTimer = null; }
+    try { sendSnapshot(room); } catch { /* noop */ }
+    for (const m of room.members) {
+      if (!m.connected) continue;
+      send(m.ws, { t: 'bye', reason });
+    }
+  }
+}

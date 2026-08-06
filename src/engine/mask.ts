@@ -23,11 +23,12 @@ import { RESOURCE_TYPES, COMMODITY_TYPES, makeHand, makeCommodities } from '../c
 
 export function maskStateFor(state: GameState, viewerId: PlayerId): GameState {
   const players: GameState['players'] = {};
-  const revealWinner = state.phase === 'GAME_OVER' && state.winner != null;
+  // GAME_OVER になったら全員の手札・発展カードを公開する。勝敗は決しているため
+  // 秘匿を続ける意味が無く、感想戦で「相手の得点カード」も含めた正しい最終得点を見せるため。
+  const revealAll = state.phase === 'GAME_OVER';
   for (const pid of Object.keys(state.players)) {
     const p = state.players[pid]!;
-    // 自分自身、および GAME_OVER 時の勝者は全公開（勝敗内訳の表示用）。
-    if (pid === viewerId || (revealWinner && pid === state.winner)) {
+    if (pid === viewerId || revealAll) {
       players[pid] = p;
       continue;
     }

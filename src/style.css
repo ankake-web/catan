@@ -238,8 +238,11 @@ h1 {
   }
   #board-area.corner-panels .player-panel .panel-meta,
   #board-area.corner-panels .player-panel .vp-breakdown,
-  #board-area.corner-panels .player-panel .dev-card-panel,
   #board-area.corner-panels .player-panel .rank-badge { display: none; }
+  /* 伏せ札の枚数（発展/進歩カード・商品）は公開情報。横持ちスマホの四隅パネルでも
+     詰めて表示する（ミニパネルが出ないレイアウトなので、ここで消すと確認手段が無くなる）。 */
+  #board-area.corner-panels .player-panel .dev-card-panel { gap: 2px; margin-top: 2px; }
+  #board-area.corner-panels .player-panel .dev-card-chip { font-size: 0.6rem; padding: 1px 3px; }
   #board-area.corner-panels .player-panel .panel-name {
     max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
@@ -928,9 +931,12 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
     font-size: 0.72rem;
     padding: 7px 6px;
   }
-  /* 他プレイヤーの小パネルでは詳細（内訳・発展カード枠）を畳んで高さを揃える。 */
-  .player-panel.panel-opp .vp-breakdown,
-  .player-panel.panel-opp .dev-card-panel { display: none; }
+  /* 他プレイヤーの小パネルでは点数内訳だけ畳む。
+     伏せ札の枚数（発展/進歩カード・商品）は戦況判断に必要な公開情報なので、
+     チップを小さくして必ず表示する（スマホで相手の手札状況が読めない、の解消）。 */
+  .player-panel.panel-opp .vp-breakdown { display: none; }
+  .player-panel.panel-opp .dev-card-panel { gap: 2px; margin-top: 3px; }
+  .player-panel.panel-opp .dev-card-chip { font-size: 0.66rem; padding: 1px 4px; }
 }
 .player-panel.active {
   border-width: 2px;
@@ -1224,23 +1230,59 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
 }
 .turn-title-item { white-space: nowrap; }
 
-/* 再接続中バナー（画面上部中央・小さく） */
+/* 再接続中バナー（画面上部中央・小さく）。手動再試行と離脱の逃げ道を必ず添える */
 #reconnect-banner {
   position: fixed;
   top: 8px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 3000;
-  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(94vw, 460px);
+  padding: 6px 10px 6px 14px;
   background: rgba(228,150,40,0.95);
   color: #fff;
   font-size: 0.85rem;
   font-weight: bold;
   border-radius: 999px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-  animation: reconnPulse 1s ease-in-out infinite;
 }
+#reconnect-text {
+  animation: reconnPulse 1s ease-in-out infinite;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#reconnect-banner button {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid rgba(255,255,255,0.6);
+  border-radius: 999px;
+  background: rgba(0,0,0,0.18);
+  color: #fff;
+  font-size: 0.74rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+#reconnect-banner button:hover { background: rgba(0,0,0,0.32); }
+#reconnect-quit { border-color: rgba(255,255,255,0.35); opacity: 0.85; }
 @keyframes reconnPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+/* ロビー: 前回の対局へ戻る導線 */
+.lan-resume-btn { background: #2e7d32; }
+.lan-resume-drop {
+  display: block;
+  margin: 6px auto 0;
+  padding: 2px 8px;
+  border: none;
+  background: none;
+  color: rgba(255,255,255,0.55);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
 
 /* 直近の公開イベント（1行のみ・省略表示・高さを取らない） */
 .last-event {
@@ -2471,6 +2513,25 @@ html.reduce-motion #played-progress { animation: none; }
 }
 .victory-btns .btn-nav { padding: 10px 18px; font-size: 0.9rem; }
 
+/* 結果モーダルを一時的に隠して最終盤面を見る（感想戦）用の表示切替 */
+.victory-overlay.victory-hidden { display: none; }
+#victory-reopen-btn {
+  position: fixed;
+  right: 16px; bottom: 16px;
+  z-index: 1999;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 2px solid #ffd700;
+  background: rgba(20,26,30,0.92);
+  color: #ffd700;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  animation: victFadeIn 0.25s ease-out;
+}
+#victory-reopen-btn:hover { background: rgba(32,40,46,0.95); }
+
 /* ===== 終了後スコアボード（item6/7: 順位・最終VP・内訳・講評） ===== */
 .score-board {
   margin: 6px 0 2px;
@@ -3151,6 +3212,8 @@ html.reduce-motion .mini-panel.mine.bonus-flash { animation: none; }
 }
 .mini-stat { color: #f0e4cf; font-weight: 700; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; }
 .mini-vp { color: #ffd700; }
+/* 伏せ札（発展/進歩カード）の枚数。中身は非公開だが枚数は全員に見える公開情報。 */
+.mini-dev { color: rgba(240,228,207,0.72); font-weight: 700; }
 .mini-badges { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 .mini-badge { display: inline-flex; align-items: center; }
 /* 現手番は枠を強調、自分の手番はやさしく点滅して分かりやすく */

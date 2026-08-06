@@ -554,7 +554,7 @@ describe('CPU victory is reported and revealed correctly to humans', () => {
     expect(winnerName.startsWith('CPU')).toBe(true);
   });
 
-  it('reveals the winner to a non-winner viewer at GAME_OVER, but masks losers', () => {
+  it('reveals every player (winner and losers) to any viewer at GAME_OVER', () => {
     const s = playToGameOver(123);
     const winner = s.winner!;
     const viewer = s.playerOrder.find(p => p !== winner)!; // 別CPUを人間視点の代わりに使う
@@ -562,11 +562,11 @@ describe('CPU victory is reported and revealed correctly to humans', () => {
     // 勝者の手札/発展カードは GAME_OVER で公開される（勝敗内訳の表示用）
     expect(view.players[winner]!.devCards).toEqual(s.players[winner]!.devCards);
     expect(view.players[winner]!.handCount).toBeUndefined(); // マスクされていない
-    // 勝者でも viewer でもない敗者は引き続きマスク（手札中身は0・枚数のみ）
+    // 勝者でも viewer でもない敗者も、ゲーム終了後は同様に公開される（得点カード込みの正しい最終得点を見せるため）
     const loser = s.playerOrder.find(p => p !== winner && p !== viewer);
     if (loser) {
-      expect(RESOURCE_TYPES.reduce((a, r) => a + view.players[loser]!.hand[r], 0)).toBe(0);
-      expect(typeof view.players[loser]!.handCount).toBe('number');
+      expect(view.players[loser]!.devCards).toEqual(s.players[loser]!.devCards);
+      expect(view.players[loser]!.handCount).toBeUndefined();
     }
   });
 });

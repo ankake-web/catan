@@ -2316,8 +2316,9 @@ export function renderUI(
   nameEl.textContent = player.name;
   infoRow.appendChild(nameEl);
   const vpEl = el('span', 'turn-vp');
-  // CPU の内部VP（VPカード込み）は他プレイヤーには非公開
-  vpEl.textContent = `★${player.type === 'human' ? calcVP(state, pid) : calcPublicVP(state, pid)}`;
+  // 自分、またはGAME_OVER後は内部VP（VPカード込み）。プレイ中の他プレイヤーは公開VPのみ（秘匿維持）。
+  const isRevealedTurnVp = pid === selfPid || state.phase === 'GAME_OVER';
+  vpEl.textContent = `★${isRevealedTurnVp ? calcVP(state, pid) : calcPublicVP(state, pid)}`;
   infoRow.appendChild(vpEl);
   turnPanel.appendChild(infoRow);
 
@@ -2529,9 +2530,9 @@ function renderMiniPanels(state: GameState, viewerId?: PlayerId): void {
     const p = state.players[pid];
     if (!p) return;
     const isSelf = viewerId != null ? pid === viewerId : p.type === 'human';
-    const isWinner = state.phase === 'GAME_OVER' && pid === state.winner;
-    // 自分・勝者は内部VP（VPカード込み）、他プレイヤーは公開VPのみ（秘匿維持）。
-    const vp = (isSelf || isWinner) ? calcVP(state, pid as PlayerId) : calcPublicVP(state, pid as PlayerId);
+    // 自分、またはGAME_OVER後は全員内部VP（VPカード込み）。プレイ中の他プレイヤーは公開VPのみ（秘匿維持）。
+    const isRevealed = isSelf || state.phase === 'GAME_OVER';
+    const vp = isRevealed ? calcVP(state, pid as PlayerId) : calcPublicVP(state, pid as PlayerId);
     // 手札枚数は資源＋商品（騎士と商人）。7の捨て札・強盗の対象枚数と一致させる。
     const handTotal = robbableCardCount(state, pid as PlayerId);
     const isCurrent = pid === currentPid && state.phase !== 'GAME_OVER';
@@ -2550,7 +2551,7 @@ function renderMiniPanels(state: GameState, viewerId?: PlayerId): void {
     name.textContent = clipByWidth(p.name, 8);   // 全角4文字相当で単純切り捨て（省略記号なし）
     row1.append(dot, name);
 
-    // 2行目: ★点数 手札枚数（カードアイコン）＋ 称号アイコン（道=CSS / 騎士=画像）
+    // 2行目: ★点数 手札枚数（カードアイコン）＋ 伏せ札枚数 ＋ 称号アイコン（道=CSS / 騎士=画像）
     const row2 = el('div', 'mini-row2');
     const stat = el('span', 'mini-stat');
     stat.append(
@@ -2558,6 +2559,16 @@ function renderMiniPanels(state: GameState, viewerId?: PlayerId): void {
       el('span', 'stat-glyph ic-cards'),
       Object.assign(el('span'), { textContent: String(handTotal) }),
     );
+    // 伏せ札（発展カード＋進歩カード）の枚数は公開情報。盤面の四隅パネルにも出して、
+    // スマホ縦持ちで「相手が何枚持っているか」が常に見えるようにする。
+    const hiddenCards = (p.devCardCount ?? p.devCards.length)
+      + (p.progressCardCount ?? p.progressCards?.length ?? 0);
+    if (hiddenCards > 0) {
+      const hc = el('span', 'mini-dev');
+      hc.textContent = `🃏${hiddenCards}`;
+      hc.title = '発展カード・進歩カードの枚数（中身は非公開）';
+      stat.appendChild(hc);
+    }
     row2.appendChild(stat);
     if (p.hasLongestRoad || p.hasLargestArmy) {
       const badges = el('span', 'mini-badges');
@@ -2584,11 +2595,12 @@ function buildPlayerPanel(
   dispatch: (a: Action) => void,
   viewerId?: PlayerId,
 ): HTMLDivElement {
-  // GAME_OVER時の勝者はVPカード・内訳のみ開示。資源・他発展カードは非公開のまま。
   const isWinner = state.phase === 'GAME_OVER' && pId === state.winner;
   // LAN対戦では viewerId（自分のID）基準で自分のみ全公開。
   // 単一端末プレイ（viewerId 未指定）では従来どおり human=自分。
   const isSelf = viewerId != null ? (pId === viewerId) : (player.type === 'human');
+  // GAME_OVER時は秘匿を続ける意味が無いため、全員の内部VP（VPカード込み）を開示する。
+  const isRevealed = isSelf || state.phase === 'GAME_OVER';
 
   // スマホ縦持ちでは自分のパネルを大きく上段・他を小さく下段横並びにするため自他を区別する。
   const div = el('div', `player-panel${isSelf ? ' panel-self' : ' panel-opp'}${isActive ? ' active' : ''}${isActive && isSelf && state.phase !== 'GAME_OVER' ? ' your-turn' : ''}${isWinner ? ' winner-glow' : ''}`);
@@ -2606,8 +2618,11 @@ function buildPlayerPanel(
     div.style.boxShadow = `0 6px 20px rgba(0,0,0,0.45), 0 0 14px ${color}66, inset 0 1px 0 rgba(255,238,206,0.07)`;
   }
 
-  // 順位バッジ: 公開VPを基準にする（VP カードは非公開のため）
-  const vpByPlayer = state.playerOrder.map(p => ({ pid: p, vp: calcPublicVP(state, p as PlayerId) }));
+  // 順位バッジ: 公開VPを基準にする（VP カードは非公開のため）。GAME_OVER後は内部VPで正しい最終順位にする。
+  const vpByPlayer = state.playerOrder.map(p => ({
+    pid: p,
+    vp: state.phase === 'GAME_OVER' ? calcVP(state, p as PlayerId) : calcPublicVP(state, p as PlayerId),
+  }));
   vpByPlayer.sort((a, b) => b.vp - a.vp);
   const rank = vpByPlayer.findIndex(x => x.pid === pId) + 1;
   const rankLabel = rank === 1 ? '👑' : `${rank}位`;
@@ -2629,8 +2644,8 @@ function buildPlayerPanel(
   const handTotal = robbableCardCount(state, pId);
   const statRow = el('span', 'panel-stat-row');
   const vpSpan = el('span', 'panel-vp');
-  // 自分: 内部VP（VPカード込み）、他プレイヤー: 公開VPのみ
-  vpSpan.textContent = `★${isSelf ? calcVP(state, pId) : calcPublicVP(state, pId)}`;
+  // 自分、またはGAME_OVER後は内部VP（VPカード込み）。それ以外（プレイ中の他プレイヤー）は公開VPのみ。
+  vpSpan.textContent = `★${isRevealed ? calcVP(state, pId) : calcPublicVP(state, pId)}`;
   statRow.appendChild(vpSpan);
   const rankEl = el('span', `rank-badge${rank === 1 ? ' rank-1' : ''}`);
   rankEl.textContent = rankLabel;
@@ -2654,8 +2669,8 @@ function buildPlayerPanel(
   div.appendChild(h3);
 
   // ボーナスVP内訳（最長/最大/VPカード）。開拓地・都市数は stat-row に集約済み。
-  // GAME_OVER時は勝者のVPカード枚数も開示する（他プレイヤーは非公開のまま）。
-  const showVpCards = (isSelf || isWinner) && bd.vpCards > 0;
+  // GAME_OVER時は全員のVPカード枚数も開示する（プレイ中は自分のみ）。
+  const showVpCards = isRevealed && bd.vpCards > 0;
   if (bd.lr || bd.la || bd.islandBonus > 0 || bd.regionBonus || showVpCards || bd.tokenVp > 0 || bd.cloth > 0 || bd.wonderLevel > 0) {
     const vpRow = el('div', 'vp-breakdown');
     if (bd.islandBonus > 0) {
@@ -2795,7 +2810,15 @@ function buildPlayerPanel(
   // 発展カードUI
   // 他プレイヤーは秘匿マスクで devCards が空・devCardCount に枚数が入る場合がある。
   const devCount = isSelf ? player.devCards.length : (player.devCardCount ?? player.devCards.length);
-  if (devCount > 0) {
+  // 騎士と商人の伏せ札（進歩カード・商品）も「枚数だけ」は公開情報。
+  // スマホでも相手が何枚抱えているかは戦況判断に必須なので、他プレイヤー分も必ず出す。
+  const progCount = isSelf
+    ? (player.progressCards?.length ?? 0)
+    : (player.progressCardCount ?? player.progressCards?.length ?? 0);
+  const commCount = isSelf
+    ? COMMODITY_TYPES.reduce((s, c) => s + (player.commodities?.[c] ?? 0), 0)
+    : (player.commodityCount ?? COMMODITY_TYPES.reduce((s, c) => s + (player.commodities?.[c] ?? 0), 0));
+  if (devCount > 0 || (!isSelf && (progCount > 0 || commCount > 0))) {
     const devPanel = el('div', 'dev-card-panel');
     if (isSelf) {
       // 自分: 種別・使用可否を表示
@@ -2816,10 +2839,16 @@ function buildPlayerPanel(
         devPanel.appendChild(chip);
       }
     } else {
-      // 他プレイヤー: 枚数のみ（種類・VPカード枚数は非表示）
-      const chip = el('span', 'dev-card-chip hidden');
-      chip.textContent = `🃏 ×${devCount}`;
-      devPanel.appendChild(chip);
+      // 他プレイヤー: 伏せ札の「枚数だけ」を並べる（種類・VPカード枚数は秘匿のまま）。
+      const hiddenChip = (text: string, title: string): void => {
+        const chip = el('span', 'dev-card-chip hidden');
+        chip.textContent = text;
+        chip.title = title;
+        devPanel.appendChild(chip);
+      };
+      if (devCount > 0) hiddenChip(`🃏 ×${devCount}`, '発展カード（未使用の枚数のみ公開）');
+      if (progCount > 0) hiddenChip(`📜 ×${progCount}`, '進歩カード（手札の枚数のみ公開）');
+      if (commCount > 0) hiddenChip(`💰 ×${commCount}`, '商品（枚数のみ公開。手札合計に含まれる）');
     }
     div.appendChild(devPanel);
   }

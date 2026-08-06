@@ -6,13 +6,13 @@
 // ゲーム開始（started 受信）で onGameStart を呼び、以降は main 側が描画する。
 // 既存の CPU 対戦フォームには一切触れない（このモジュールは LAN 専用）。
 
-import { LanClient } from './lanClient';
+import { LanClient, warmUpLanServer, lanHealthUrl } from './lanClient';
 import type { ServerMessage, LobbyPlayer, LanOrderMode } from './protocol';
 import type { ScenarioId } from '../engine/scenarios';
 import { buildScenarioSelect } from '../renderer/scenarioSelect';
 import type { GameState, PlayerId, PlayerColor, AiDifficulty } from '../types';
 import { attachNameField, savePlayerName } from './nameField';
-import { saveResume, clearResume } from './resume';
+import { saveResume, clearResume, loadResume, saveSnapshot, loadSnapshot } from './resume';
 import type { ResumeInfo } from './resume';
 
 // 盤面/パネル/スコアボードと同じ正準パレットに合わせる（ロビーのドット色を統一）。
@@ -51,6 +51,8 @@ export function renderLanLobby(container: HTMLElement, cb: LanLobbyCallbacks, re
   let stage: 'idle' | 'connecting' | 'lobby' | 'resuming' = 'idle';
   let connectTimer: ReturnType<typeof setTimeout> | null = null;
   let connectMsg = '';
+  // 復帰対象（リロード/切断からの resume）。restorable 応答で復元を送るために保持する。
+  let pendingResume: ResumeInfo | null = null;
 
   const root = document.createElement('div');
   root.className = 'lan-lobby';
@@ -77,6 +79,32 @@ export function renderLanLobby(container: HTMLElement, cb: LanLobbyCallbacks, re
         break;
       case 'started':
         if (client) cb.onGameStart(msg.state, msg.you, client);
+        break;
+      case 'snapshot':
+        // 復元用の封印スナップショット（中身は読めない）。次に落ちたときのために預かる。
+        saveSnapshot(msg.code, msg.sealed, msg.turn);
+        break;
+      case 'restorable': {
+        // サーバ側にルームが無い（再起動・スリープ明け）。預かったスナップショットがあれば
+        // 差し戻して対局を復元する。無ければ素直に入り直してもらう。
+        const info = pendingResume;
+        const sealed = loadSnapshot(msg.code);
+        if (info && sealed && client) {
+          stage = 'resuming'; connectMsg = '♻️ 対局を復元中…'; render();
+          client.send({ t: 'restore', code: msg.code, you: info.you, token: info.token, sealed });
+        } else {
+          clearResume();
+          client?.close(); client = null;
+          stage = 'idle';
+          view.error = '前回の対局は終了しました（サーバが再起動したか、時間が経ちすぎています）。';
+          render();
+        }
+        break;
+      }
+      case 'bye':
+        // サーバの計画停止。ロビー段階では復帰先が無いので案内だけ出す。
+        view.error = `${msg.reason}。少し待ってからもう一度お試しください。`;
+        render();
         break;
       case 'error':
         if (msg.fatal) {
@@ -107,17 +135,29 @@ export function renderLanLobby(container: HTMLElement, cb: LanLobbyCallbacks, re
   function clearConnectTimer(): void {
     if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
   }
+  // 別オリジンの対戦サーバ（無料枠）はアクセスが無いとスリープする。復帰に数十秒かかる間に
+  // WebSocket を張ろうとしても失敗し「サーバに繋がらない」と誤解されるため、先に HTTP で起こす。
+  async function wakeServer(): Promise<void> {
+    if (!lanHealthUrl()) return; // 同一オリジン（dev / LAN 内対戦）は不要
+    const prev = connectMsg;
+    connectMsg = '🔌 対戦サーバを起動中…（初回は1分ほどかかることがあります）'; render();
+    await warmUpLanServer();
+    connectMsg = prev; render();
+  }
+
   // 接続〜サーバ応答までローディング表示。応答が来ない場合は一定時間でタイムアウト。
   async function beginConnect(label: string, send: () => void): Promise<void> {
     stage = 'connecting'; connectMsg = label; view.error = ''; render();
     clearConnectTimer();
+    await wakeServer();
+    if (stage !== 'connecting') return; // 待っている間に画面が変わった
     connectTimer = setTimeout(() => {
       connectTimer = null;
       if (stage !== 'connecting') return;
       client?.close(); client = null;
       view.error = 'サーバが応答しません。少し待ってから再試行してください。';
       stage = 'idle'; render();
-    }, 9000);
+    }, 25_000);
     if (await ensureClient()) {
       send();
     } else {
@@ -150,17 +190,44 @@ export function renderLanLobby(container: HTMLElement, cb: LanLobbyCallbacks, re
   }
 
   // 再接続（resume 情報があれば、同一プレイヤーとして復帰を試みる）。
+  // サーバが寝ている可能性があるので先に起こす。失敗しても保存情報は消さず、
+  // 手動で「対局に戻る」を押して再試行できるようにする。
   async function startResume(info: ResumeInfo): Promise<void> {
+    pendingResume = info;
     stage = 'resuming'; view.error = ''; render();
+    await wakeServer();
+    if (stage !== 'resuming') return;
     if (await ensureClient()) {
       client!.send({ t: 'resume', code: info.code, you: info.you, token: info.token });
     } else {
-      clearResume();
-      stage = 'idle'; render();
+      stage = 'idle';
+      view.error = 'サーバに接続できませんでした。「前回の対局に戻る」でもう一度お試しください。';
+      render();
     }
   }
 
   function renderIdle(): void {
+    // 進行中だった対局の情報が残っていれば、まず「戻る」導線を出す。
+    // 自動復帰に失敗した後でも、ここから何度でもやり直せる（＝閉じ込められない）。
+    const saved = loadResume();
+    if (saved) {
+      const back = document.createElement('button');
+      back.className = 'home-start-btn lan-resume-btn';
+      back.textContent = `▶ 前回の対局に戻る（ルーム ${saved.code}）`;
+      back.addEventListener('click', () => { void startResume(saved); });
+      root.appendChild(back);
+      const drop = document.createElement('button');
+      drop.className = 'lan-resume-drop';
+      drop.type = 'button';
+      drop.textContent = '戻らない（この対局を破棄）';
+      drop.addEventListener('click', () => { clearResume(); render(); });
+      root.appendChild(drop);
+      const div = document.createElement('div');
+      div.className = 'lan-divider';
+      div.textContent = 'または';
+      root.appendChild(div);
+    }
+
     const nameField = field('プレイヤー名');
     const nameRow = document.createElement('div');
     nameRow.className = 'name-input-row';
