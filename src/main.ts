@@ -24,7 +24,7 @@ import { LanClient } from './net/lanClient';
 import { LAN_SYNCED_ACTIONS } from './net/protocol';
 import { generateRandomPlayerName, pickCpuNames } from './net/names';
 import { attachNameField, savePlayerName } from './net/nameField';
-import { saveResume, loadResume, clearResume } from './net/resume';
+import { saveResume, loadResume, clearResume, saveSnapshot, loadSnapshot, encodeResumeCode } from './net/resume';
 import type { ResumeInfo } from './net/resume';
 import { canBuildRoad, canBuildShip, canBuildSettlement, canBuildCity, canMoveShip, isShipMovable } from './engine/actions';
 import { isKnightMovable, canMoveKnight, robberAdjacentChasableVertexIds, isCk, computeCkProduction, canBuildKnight, canActivateKnight, canUpgradeKnight, plainCityVertexIds, merchantTileIds, inventorTiles, bishopTileIds, diplomatRemovableRoads, deserterTargets, deserterPlacementTargets, medicineSettlements, metropolisCityChoices, improvementTakesMetropolis, craneEligibleTracks, craneTrack, smithKnightTargets, engineerWallCities, intrigueKnightTargets } from './engine/citiesKnights';
@@ -1272,6 +1272,30 @@ const CPU_SPEED_LABELS: Record<CpuSpeed, string> = {
   slow: 'ゆっくり', normal: '普通', fast: '速い', instant: '最速',
 };
 
+// クリップボードへコピーし、押したボタンのラベルを一時的に結果表示に差し替える。
+// navigator.clipboard は https/localhost 限定なので、LAN 内の http アクセス（例 http://192.168.x.x:5173）
+// でも動くよう、隠し textarea + execCommand をフォールバックに持つ。
+async function copyToClipboard(text: string, btn: HTMLElement, restoreLabel: string): Promise<void> {
+  let ok = false;
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); ok = true; }
+  } catch { ok = false; }
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      ta.remove();
+    } catch { ok = false; }
+  }
+  btn.textContent = ok ? '✅ コピーしました' : '⚠ 長押しで選んでコピーしてください';
+  setTimeout(() => { btn.textContent = restoreLabel; }, 1800);
+}
+
 function updateGameNav(): void {
   gameNav.innerHTML = '';
 
@@ -1305,6 +1329,49 @@ function updateGameNav(): void {
     dd.style.display = gameMenuOpen ? 'flex' : 'none';
   });
   dd.addEventListener('click', (e) => e.stopPropagation());
+
+  // ---- オンライン対戦: ルーム情報（対局中でも確認できる場所に置く）----
+  // 同じ端末なら自動で戻れるが、ルームNo は「今どの部屋にいるか」を人に伝えるのに要る。
+  // 別端末へ移る/履歴を消した場合はルームNo だけでは戻れないので、鍵つきの復帰コードも配る。
+  if (netMode) {
+    const info = loadResume();
+    if (info) {
+      const room = document.createElement('div');
+      room.className = 'game-menu-room';
+
+      const codeRow = document.createElement('div');
+      codeRow.className = 'game-menu-row';
+      const codeLbl = document.createElement('span');
+      codeLbl.className = 'game-menu-label';
+      codeLbl.textContent = '🔢 ルームNo';
+      const codeVal = document.createElement('button');
+      codeVal.className = 'room-code-copy';
+      codeVal.textContent = info.code;
+      codeVal.title = 'タップでコピー';
+      codeVal.addEventListener('click', () => { void copyToClipboard(info.code, codeVal, info.code); });
+      codeRow.append(codeLbl, codeVal);
+      room.appendChild(codeRow);
+
+      const linkRow = document.createElement('div');
+      linkRow.className = 'game-menu-row';
+      const linkBtn = document.createElement('button');
+      linkBtn.className = 'game-menu-btn';
+      linkBtn.textContent = '🔑 復帰コードをコピー';
+      linkBtn.title = '別のスマホ/PCから、この席に戻るための合言葉';
+      linkBtn.addEventListener('click', () => {
+        void copyToClipboard(encodeResumeCode(info), linkBtn, '🔑 復帰コードをコピー');
+      });
+      linkRow.appendChild(linkBtn);
+      room.appendChild(linkRow);
+
+      const note = document.createElement('div');
+      note.className = 'game-menu-note';
+      note.textContent = '同じ端末なら切断しても自動で戻ります。別の端末から戻るときだけ復帰コードを使ってください（他人に渡すと席を乗っ取られます）。';
+      room.appendChild(note);
+
+      dd.appendChild(room);
+    }
+  }
 
   // 初心者モード（ゲーム中でも切替可。ヒント/おすすめ⭐/遊び方ボタンを即反映）。
   {
@@ -2115,15 +2182,13 @@ function scoreChipIcon(icon: string | null | undefined, text: string, bonus = fa
   return s;
 }
 
-// 終了後スコアボード: 全員の順位・名前・最終VP・公開内訳・プレイ講評を表示する。
-// 表示VPは「自分・勝者は内部VP（VPカード込み）、それ以外は公開VPのみ」。
-// 講評・内訳は公開情報のみ（相手の非公開VPカード内容はばらさない＝秘匿維持）。
+// 終了後スコアボード: 全員の順位・名前・最終VP・内訳・プレイ講評を表示する。
+// ゲーム終了後は秘匿を続ける意味が無いため、全員のVPカード込み内部VPを開示する。
 function buildVictoryScoreboard(): HTMLDivElement {
   const me = selfPlayerId();
   const rows = state.playerOrder.map(pid => {
-    const isRevealed = pid === me || pid === state.winner;
-    const vp = isRevealed ? calcVP(state, pid) : calcPublicVP(state, pid);
-    return { pid, vp, isRevealed, recap: buildPlayerRecap(state, pid) };
+    const vp = calcVP(state, pid);
+    return { pid, vp, recap: buildPlayerRecap(state, pid) };
   });
   // 表示VPの降順。同点はゲーム手番順で安定させる。
   rows.sort((a, b) => b.vp - a.vp || state.playerOrder.indexOf(a.pid) - state.playerOrder.indexOf(b.pid));
@@ -2176,9 +2241,9 @@ function buildVictoryScoreboard(): HTMLDivElement {
     if (r.isCk && r.progressVP > 0) bd.appendChild(scoreChipIcon(null, `★永久+${r.progressVP}`, true, '進歩カードの永久勝利点（印刷/立憲など・各+1点）'));
     // 航海者: 新しい島への入植（各+2点）。専用素材が無いため記号で表示。
     if (r.islandBonus > 0) bd.appendChild(scoreChipIcon(null, `🏝+${r.islandBonus * 2}`, true, '新しい島への入植（各+2点）'));
-    // VPカード枚数は自分・勝者のみ開示（他プレイヤーは秘匿のまま）。
-    const vpCards = row.isRevealed ? p.devCards.filter(c => c.type === 'victory_point').length : 0;
-    if (vpCards > 0) bd.appendChild(scoreChipIcon(null, `★カード×${vpCards}`, false, '勝利点カード（各1点・秘匿）'));
+    // VPカード枚数はゲーム終了後なので全員開示する。
+    const vpCards = p.devCards.filter(c => c.type === 'victory_point').length;
+    if (vpCards > 0) bd.appendChild(scoreChipIcon(null, `★カード×${vpCards}`, false, '勝利点カード（各1点）'));
     if (bd.childElementCount > 0) rowEl.appendChild(bd);
 
     const cm = document.createElement('div');
@@ -2192,7 +2257,7 @@ function buildVictoryScoreboard(): HTMLDivElement {
 }
 
 function showVictoryOverlay(winnerId: PlayerId, causeAction: string): void {
-  document.querySelector('.victory-overlay')?.remove(); document.querySelector('.dicestats-overlay')?.remove(); document.getElementById('cpu-status')?.remove();
+  document.querySelector('.victory-overlay')?.remove(); document.getElementById('victory-reopen-btn')?.remove(); document.querySelector('.dicestats-overlay')?.remove(); document.getElementById('cpu-status')?.remove();
   vibrate([20, 40, 20, 40, 50]); // 勝利の触覚（多くは建設経由で勝つため DECLARE_VICTORY 以外でも鳴らす）
   if (!state) return;
   const winner = state.players[winnerId];
@@ -2278,6 +2343,12 @@ function showVictoryOverlay(winnerId: PlayerId, causeAction: string): void {
   statsBtn.textContent = '🎲 出目分布';
   statsBtn.addEventListener('click', () => showDiceStatsModal());
   btnRow.appendChild(statsBtn);
+  // 結果モーダルを一時的に隠して最終盤面をゆっくり見る（感想戦用）。フローティングボタンで結果に戻せる。
+  const viewBoardBtn = document.createElement('button');
+  viewBoardBtn.className = 'btn-nav';
+  viewBoardBtn.textContent = '🗺 最終盤面を見る';
+  viewBoardBtn.addEventListener('click', () => hideVictoryOverlayForBoardView(overlay));
+  btnRow.appendChild(viewBoardBtn);
   modal.appendChild(btnRow);
   overlay.appendChild(modal);
 
@@ -2312,6 +2383,21 @@ function showVictoryOverlay(winnerId: PlayerId, causeAction: string): void {
   };
   if (splashMs > 0) window.setTimeout(reveal, splashMs);
   // 勝者パネルの発光は buildPlayerPanel 側で付与（再描画後も維持される）
+}
+
+// 勝利モーダルを一時的に隠し、最終盤面をゆっくり見られるようにする（感想戦用）。
+// フローティングの再表示ボタンを残し、いつでも結果画面へ戻れる。
+function hideVictoryOverlayForBoardView(overlay: HTMLDivElement): void {
+  overlay.classList.add('victory-hidden');
+  document.getElementById('victory-reopen-btn')?.remove();
+  const reopen = document.createElement('button');
+  reopen.id = 'victory-reopen-btn';
+  reopen.textContent = '🏆 結果を見る';
+  reopen.addEventListener('click', () => {
+    overlay.classList.remove('victory-hidden');
+    reopen.remove();
+  });
+  document.body.appendChild(reopen);
 }
 
 // ============================================================
@@ -4237,10 +4323,13 @@ const LAN_CLIENT_ALLOWED = new Set<Action['type']>(LAN_SYNCED_ACTIONS);
 function startLanGame(initial: GameState, viewerId: PlayerId, client: LanClient): void {
   // CPU 系タイマーを無効化（LANはCPU不使用）
   gameGeneration++;
-  document.querySelector('.victory-overlay')?.remove(); document.querySelector('.dicestats-overlay')?.remove(); document.getElementById('cpu-status')?.remove();
+  document.querySelector('.victory-overlay')?.remove(); document.getElementById('victory-reopen-btn')?.remove(); document.querySelector('.dicestats-overlay')?.remove(); document.getElementById('cpu-status')?.remove();
 
   netMode = true;
   inGame = true;
+  reconnectTries = 0;
+  reconnecting = false;
+  reconnectSince = 0;
   viewerPlayerId = viewerId;
   lanClient = client;
   state = initial;
@@ -4273,11 +4362,22 @@ function startLanGame(initial: GameState, viewerId: PlayerId, client: LanClient)
 }
 
 // ============================================================
-// LAN 再接続（一時切断・リロード復帰）
+// LAN 再接続（一時切断・リロード復帰・サーバ再起動からの復元）
 // ============================================================
+//
+// 方針: 対局中に接続が切れても「こちらからは絶対に諦めない」。
+//   - 回数上限を設けず、間隔だけ広げて延々と再接続を試す（トンネル・機内モード・
+//     ホテルWi-Fi・端末スリープなど、数分後に戻ってくるケースを取りこぼさない）。
+//   - 画面復帰/オンライン復帰イベントで即座に試行する（バックグラウンドではタイマーが
+//     絞られるため、時間任せだと「戻ってきた瞬間」に間に合わない）。
+//   - サーバ側にルームが無くなっていたら、預かった封印スナップショットで復元を試みる。
+//   - 諦めるのはユーザーが「やめる」を押したときと、サーバが明確に拒否したときだけ。
 
 let reconnectTries = 0;
-const MAX_RECONNECT = 6;
+// バックオフ（ms）。最後の値以降はその値で打ち止め＝無期限に試し続ける。
+const RECONNECT_DELAYS = [400, 800, 1500, 3000, 5000, 8000, 12000, 15000];
+let reconnecting = false;         // 再接続の試行が進行中（多重起動の抑止）
+let reconnectSince = 0;           // 切断が始まった時刻（バナー表示用）
 
 // 再接続のスケジュールを一本化する。WebSocket の接続失敗は error と close の両方が
 // 発火するため、素朴に両方から setTimeout すると試行が指数的に分岐し、複数ソケットが
@@ -4286,20 +4386,60 @@ let reconnectTimer: number | null = null;
 function scheduleReconnect(): void {
   if (!netMode) return;
   if (reconnectTimer != null) return; // 既にスケジュール済みなら重複させない
-  const delay = Math.min(500 * Math.max(1, reconnectTries), 3000);
+  const delay = RECONNECT_DELAYS[Math.min(reconnectTries, RECONNECT_DELAYS.length - 1)]!;
   reconnectTimer = window.setTimeout(() => {
     reconnectTimer = null;
     attemptReconnect();
   }, delay);
 }
 
-function showReconnecting(): void {
+// 「今すぐ試す」系のトリガ（画面復帰・オンライン復帰・手動ボタン）。
+// バックオフをリセットして即時に1回試す。
+function kickReconnect(): void {
+  if (!netMode) return;
+  if (lanClient?.isOpen()) { lanClient.checkAlive(); return; } // 生きていれば生存確認だけ
+  reconnectTries = 0;
+  if (reconnectTimer != null) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  attemptReconnect();
+}
+
+// 端末の状態変化に反応して即座に張り直す。
+// スマホはバックグラウンドで setTimeout が大きく間引かれるため、
+// 「復帰した瞬間のイベント」を拾えるかどうかが体感の分かれ目になる。
+window.addEventListener('online', kickReconnect);
+window.addEventListener('focus', kickReconnect);
+window.addEventListener('pageshow', kickReconnect); // bfcache からの復帰
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') kickReconnect();
+});
+
+function showReconnecting(message?: string): void {
   let el = document.getElementById('reconnect-banner');
   if (!el) {
     el = document.createElement('div');
     el.id = 'reconnect-banner';
-    el.textContent = '🔄 再接続中…';
+    const txt = document.createElement('span');
+    txt.id = 'reconnect-text';
+    const retry = document.createElement('button');
+    retry.id = 'reconnect-retry';
+    retry.type = 'button';
+    retry.textContent = '今すぐ再試行';
+    retry.addEventListener('click', kickReconnect);
+    const quit = document.createElement('button');
+    quit.id = 'reconnect-quit';
+    quit.type = 'button';
+    quit.textContent = 'やめる';
+    quit.addEventListener('click', () => {
+      if (!window.confirm('対戦から抜けてホームに戻りますか？（この対局には戻れなくなります）')) return;
+      abandonNetGame();
+    });
+    el.append(txt, retry, quit);
     document.body.appendChild(el);
+  }
+  const txt = el.querySelector('#reconnect-text');
+  if (txt) {
+    const secs = reconnectSince ? Math.floor((Date.now() - reconnectSince) / 1000) : 0;
+    txt.textContent = message ?? (secs >= 5 ? `🔄 再接続中…（${secs}秒）` : '🔄 再接続中…');
   }
   el.style.display = '';
 }
@@ -4309,19 +4449,26 @@ function hideReconnecting(): void {
 }
 
 // ゲーム中に WebSocket が切れたとき、保存した resume 情報で同一プレイヤー復帰を試みる。
+// 失敗しても諦めず、バックオフしながら試し続ける（打ち切りはユーザー操作のみ）。
 function attemptReconnect(): void {
   if (!netMode) return;
   const info = loadResume();
-  if (!info) { reconnectFailed(); return; }
+  // resume 情報が無いと同一プレイヤーとして戻れない（＝この対局は続行不能）。
+  if (!info) { reconnectFailed('この対局に戻るための情報が失われました。'); return; }
+  if (reconnecting) return;         // 進行中の試行があるなら任せる
+  if (lanClient?.isOpen()) return;  // 既に繋がっている
+  reconnecting = true;
   reconnectTries++;
-  if (reconnectTries > MAX_RECONNECT) { reconnectFailed(); return; }
+  if (!reconnectSince) reconnectSince = Date.now();
   showReconnecting();
   const client = new LanClient(handleNetMessage);
   client.setOnClose(() => {
     // 再接続中にまた切れたらバックオフして再試行（error/close の二重発火は scheduleReconnect が吸収）。
+    reconnecting = false;
     scheduleReconnect();
   });
   client.connect().then(() => {
+    reconnecting = false;
     // ハンドシェイク中にホーム復帰やローカル新ゲーム開始（netMode=false）が起きた場合、
     // この接続は誰からも参照されておらず returnToHome/startGame の後始末では閉じられない。
     // ここで resume を送ると放棄した LAN ゲームが 'started' で復活し、進行中のローカル
@@ -4333,32 +4480,50 @@ function attemptReconnect(): void {
     lanClient = client;
     client.send({ t: 'resume', code: info.code, you: info.you, token: info.token });
   }).catch(() => {
+    reconnecting = false;
     scheduleReconnect();
   });
 }
 
-function reconnectFailed(): void {
+// 復帰不能と判明したときだけ呼ぶ（サーバが拒否した／復元データが無い）。
+function reconnectFailed(reason = '接続が切れました。ルームに入り直してください。'): void {
   if (!netMode) return;
   netMode = false;
   reconnectTries = 0;
+  reconnecting = false;
+  reconnectSince = 0;
   clearResume();
   hideReconnecting();
-  window.alert('接続が切れました。ルームに入り直してください。');
+  window.alert(reason);
+  returnToHome();
+}
+
+// ユーザーが自分の意思で対戦を降りる（再接続バナーの「やめる」）。
+function abandonNetGame(): void {
+  netMode = false;
+  reconnecting = false;
+  reconnectTries = 0;
+  reconnectSince = 0;
+  if (reconnectTimer != null) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  clearResume();
+  hideReconnecting();
   returnToHome();
 }
 
 function handleNetMessage(msg: import('./net/protocol').ServerMessage): void {
   switch (msg.t) {
     case 'joined':
-      // 再接続成功（resume）でも届く。トークンを保存し、再接続UIを閉じる。
+      // 再接続成功（resume/restore）でも届く。トークンを保存し、再接続UIを閉じる。
       viewerPlayerId = msg.you;
       saveResume({ code: msg.code, you: msg.you, token: msg.token });
       reconnectTries = 0;
+      reconnectSince = 0;
       hideReconnecting();
       break;
     case 'started':
       // 開始 or 再接続復帰: viewer と state を更新（再接続時はゲーム画面へ復帰）。
       reconnectTries = 0;
+      reconnectSince = 0;
       hideReconnecting();
       if (!netMode) { startLanGame(msg.state, msg.you, lanClient!); break; }
       viewerPlayerId = msg.you;
@@ -4372,16 +4537,34 @@ function handleNetMessage(msg: import('./net/protocol').ServerMessage): void {
       hideReconnecting();
       applyNetState(msg.action, msg.state);
       break;
+    case 'snapshot':
+      // サーバ再起動に備えた封印スナップショット（中身は読めない）。次の復元まで預かる。
+      saveSnapshot(msg.code, msg.sealed, msg.turn);
+      break;
+    case 'restorable': {
+      // サーバにルームが無い（再起動・スリープ明け）。預かったスナップショットで復元を試みる。
+      const info = loadResume();
+      const sealed = loadSnapshot(msg.code);
+      if (info && sealed && lanClient) {
+        showReconnecting('♻️ 対局を復元しています…');
+        lanClient.send({ t: 'restore', code: msg.code, you: info.you, token: info.token, sealed });
+      } else {
+        reconnectFailed('サーバが再起動したため、この対局は終了しました。ルームを作り直してください。');
+      }
+      break;
+    }
+    case 'bye':
+      // サーバの計画停止（デプロイ等）。すぐ戻ってくるので、案内だけ出して再接続に任せる。
+      if (netMode) {
+        reconnectSince = reconnectSince || Date.now();
+        showReconnecting(`🔄 ${msg.reason}。自動で復帰します…`);
+        reconnectTries = 0;
+      }
+      break;
     case 'error':
       if (msg.fatal) {
-        // サーバが resume を拒否した等（接続は開いている）。再接続せずホームへ。
-        if (netMode) {
-          netMode = false;
-          clearResume();
-          hideReconnecting();
-          window.alert(`LAN対戦: ${msg.message}`);
-          returnToHome();
-        }
+        // サーバが resume/restore を明確に拒否した（接続は開いている）。再接続せずホームへ。
+        if (netMode) reconnectFailed(`LAN対戦: ${msg.message}`);
       } else {
         // 操作拒否など非致命: 進行は継続（次の state 配信で UI は整合する）。
         console.warn('LAN操作エラー:', msg.message);
@@ -4529,6 +4712,13 @@ function applyNetState(action: Action | undefined, newState: GameState): void {
 function netDispatch(action: Action): void {
   if (diceAnimating) return;
   if (!lanClient || !viewerPlayerId) return;
+  // 切断中に押された操作は握りつぶさず、再接続を促す（「押しても無反応」を作らない）。
+  // 復帰後はサーバの正本 state が配信されるので、ここで送らなくても盤面はズレない。
+  if (!lanClient.isOpen()) {
+    showReconnecting();
+    kickReconnect();
+    return;
+  }
   if (!LAN_CLIENT_ALLOWED.has(action.type)) return; // 未対応操作は送らない
   // actor（操作者）が自分か。多人数解決（捨て札/金/都市格下げ/進歩カード捨て）は手番に関係なく
   // action.playerId が操作者。交易応答は応答者。それ以外は手番プレイヤー。
@@ -4561,7 +4751,7 @@ function netDispatch(action: Action): void {
 function startGame(cfg: HomeConfig): void {
   // 新しいゲーム世代 → 前の AI setTimeout を無効化
   gameGeneration++;
-  document.querySelector('.victory-overlay')?.remove(); document.querySelector('.dicestats-overlay')?.remove(); document.getElementById('cpu-status')?.remove();
+  document.querySelector('.victory-overlay')?.remove(); document.getElementById('victory-reopen-btn')?.remove(); document.querySelector('.dicestats-overlay')?.remove(); document.getElementById('cpu-status')?.remove();
 
   // CPU対戦はローカル完結。LAN終了画面からの「もう一度プレイ」等で LAN セッションが残って
   // いると、古いハンドラに後続の 'state' 配信が届いてローカルゲームを上書きするため確実に破棄する。
@@ -4572,6 +4762,8 @@ function startGame(cfg: HomeConfig): void {
   }
   netMode = false;
   reconnectTries = 0;
+  reconnecting = false;
+  reconnectSince = 0;
   if (reconnectTimer != null) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   hideReconnecting();
   clearResume();
@@ -4613,7 +4805,7 @@ function returnToHome(): void {
   gameGeneration++;
   inGame = false;
   pendingNetStates = [];
-  document.querySelector('.victory-overlay')?.remove(); document.querySelector('.dicestats-overlay')?.remove(); document.getElementById('cpu-status')?.remove();
+  document.querySelector('.victory-overlay')?.remove(); document.getElementById('victory-reopen-btn')?.remove(); document.querySelector('.dicestats-overlay')?.remove(); document.getElementById('cpu-status')?.remove();
   document.getElementById('zoom-reset')?.remove(); document.getElementById('board-zoom')?.remove(); document.getElementById('place-confirm')?.remove(); document.getElementById('ship-help')?.remove();
   boardViewport = { scale: 1, tx: 0, ty: 0 };
   diceAnimating = false;
@@ -4631,6 +4823,8 @@ function returnToHome(): void {
   }
   // 明示的にホームへ戻ったので再接続情報は破棄（自動復帰しない）。
   reconnectTries = 0;
+  reconnecting = false;
+  reconnectSince = 0;
   if (reconnectTimer != null) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   hideReconnecting();
   clearResume();

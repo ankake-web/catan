@@ -50,6 +50,15 @@ export interface LobbyPlayer {
   readonly isCpu: boolean;        // CPU プレイヤーか（混合対戦用）
 }
 
+// ---- 接続の生存確認（keepalive）----
+// ブラウザの WebSocket API は protocol レベルの ping を送れないため、アプリ層で往復させる。
+// 目的は2つ:
+//   1. 無通信のまま放置してモバイル回線/リバースプロキシにアイドル切断されるのを防ぐ。
+//   2. 「TCPは生きているが実質死んでいる」半死接続をクライアント側が検知して自分から張り直す。
+export const PING_INTERVAL_MS = 20_000;   // クライアントが ping を送る間隔
+export const PONG_TIMEOUT_MS = 45_000;    // これだけサーバ無応答なら切断とみなす
+export const SERVER_PING_INTERVAL_MS = 25_000; // サーバが protocol ping を打つ間隔
+
 // ---- クライアント → サーバ ----
 export type ClientMessage =
   | { t: 'create'; name: string }                       // ルーム作成（作成者がホスト）
@@ -59,6 +68,8 @@ export type ClientMessage =
   | { t: 'setConfig'; cpuDifficulty?: AiDifficulty; orderMode?: LanOrderMode; scenario?: ScenarioId } // CPU強さ/手番順/盤面（ホストのみ）
   | { t: 'start' }                                       // ホストがゲーム開始
   | { t: 'resume'; code: string; you: PlayerId; token: string } // 再接続（同一プレイヤーとして復帰）
+  | { t: 'restore'; code: string; you: PlayerId; token: string; sealed: string } // ルーム消失後の復元（封印スナップショット提示）
+  | { t: 'ping' }                                        // 生存確認（サーバは pong を返す）
   | { t: 'action'; action: Action };                     // 操作（MVP3 以降）
 
 // ---- サーバ → クライアント ----
@@ -70,4 +81,14 @@ export type ServerMessage =
       cpuDifficulty: AiDifficulty; orderMode: LanOrderMode; scenario: ScenarioId } // ホスト設定（参加者は表示のみ）
   | { t: 'started'; you: PlayerId; state: GameState }               // 開始（state はマスク済み）
   | { t: 'state';   state: GameState; action?: Action; by?: PlayerId } // 状態更新（MVP3 以降）
+  // 復元用の封印スナップショット。サーバが暗号化した正本 state で、クライアントは中身を
+  // 読めない（＝手札は漏れない・改竄できない）。各端末が localStorage に預かり、
+  // サーバ再起動でルームが消えたときに restore で差し戻して対局を復元する。
+  | { t: 'snapshot'; code: string; sealed: string; turn: number }
+  // resume したがサーバにそのルームが無い（再起動・スリープ明け等）。
+  // 端末が封印スナップショットを持っているなら restore を送ってほしい、という誘導。
+  | { t: 'restorable'; code: string }
+  // サーバが計画的に停止する（デプロイ等）。すぐ復帰するので再接続して、という予告。
+  | { t: 'bye'; reason: string }
+  | { t: 'pong' }                                                     // ping への応答
   | { t: 'error';   message: string; fatal?: boolean };               // fatal=true で接続断などの致命的エラー
