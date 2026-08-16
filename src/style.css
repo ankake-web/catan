@@ -34,7 +34,11 @@ body {
   background-attachment: fixed;
   font-family: var(--font);
   color: var(--text);
+  /* dvh = アドレスバーを除いた「実際に見えている高さ」。未対応環境は直前の vh にフォールバック。 */
   min-height: 100vh;
+  min-height: 100dvh;
+  /* ノッチ・ホームバーに UI が潜らないようにする（viewport-fit=cover 併用）。 */
+  padding-bottom: env(safe-area-inset-bottom);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -81,6 +85,7 @@ h1 {
      max-height で縦も抑え、操作パネルがスクロールなしで見えやすいようにする。 */
   max-width: 100%;
   max-height: 78vh;   /* 盤面を主役に。標準的な画面でほぼ最大(800×700)まで表示 */
+  max-height: 78dvh;  /* アドレスバーぶんを含めない実高さ基準（未対応環境は上の vh） */
   width: auto;
   height: auto;
   filter: drop-shadow(0 6px 22px rgba(0,0,0,0.55));
@@ -186,16 +191,19 @@ h1 {
     max-width: 216px;
     margin: 0;
     max-height: 46vh;
+    max-height: 46dvh;
     overflow-y: auto;
   }
   /* CPU γ(player4)=左上 / CPU α(player2)=右上 / P1=左下 / CPU β(player3)=右下 */
   #board-area.corner-panels .player-panel[data-pid="player4"] { grid-column: 1; grid-row: 1; justify-self: end;   align-self: start; }
   #board-area.corner-panels .player-panel[data-pid="player1"] { grid-column: 1; grid-row: 2; justify-self: end;   align-self: end; }
-  #board-area.corner-panels .player-panel[data-pid="player2"] { grid-column: 3; grid-row: 1; justify-self: start; align-self: start; }
+  /* 右上のパネルだけ、固定表示の ☰ メニュー（top:8・高さ約34px）を避けて下げる。
+     下げないと名前・得点にメニューが重なって読めない（横持ちでも同じ対処をしている）。 */
+  #board-area.corner-panels .player-panel[data-pid="player2"] { grid-column: 3; grid-row: 1; justify-self: start; align-self: start; margin-top: 48px; }
   #board-area.corner-panels .player-panel[data-pid="player3"] { grid-column: 3; grid-row: 2; justify-self: start; align-self: end; }
 }
 
-/* ボトムシートのハンドルは既定で非表示（横持ちの media query 内でのみ表示）。
+/* ボトムシートのハンドルは既定で非表示（スマホ用 media query 内でのみ表示）。
    ※ media query より前に置く（後ろだと display:block を上書きしてしまう）。 */
 #ui-sheet-handle { display: none; }
 
@@ -203,7 +211,7 @@ h1 {
 @media (orientation: landscape) and (max-height: 600px) and (max-width: 1199.98px) {
   body { align-items: stretch; }
   #app { padding: 2px; gap: 2px; }
-  #board { max-height: 92vh; max-width: 100%; }
+  #board { max-height: 92vh; max-height: 92dvh; max-width: 100%; }
 
   #board-area.corner-panels {
     display: grid;
@@ -231,6 +239,7 @@ h1 {
     max-width: min(27vw, 186px);
     margin: 0;
     max-height: 38vh;
+    max-height: 38dvh;
     overflow-y: auto;
     font-size: 0.62rem;
     line-height: 1.25;
@@ -253,7 +262,23 @@ h1 {
   #board-area.corner-panels .player-panel[data-pid="player2"] { grid-column: 3; grid-row: 1; justify-self: start; align-self: start; margin-top: 50px; }
   #board-area.corner-panels .player-panel[data-pid="player3"] { grid-column: 3; grid-row: 2; justify-self: start; align-self: end; }
 
-  /* === 操作パネルをボトムシート化（collapsed/expanded） === */
+  /* 横持ちは四隅にフルパネルが出るので、シート内の重複表示は省く。 */
+  #ui .turn-order-bar, #ui .turn-titles { display: none; }
+  #ui > .player-panels { display: none; }
+
+  /* シート展開中は body 側に下方向のスクロール余地を確保し、
+     盤面を上へスクロールしてシート裏を覗けるようにする（内部スクロール依存を減らす）。 */
+  body.lsheet-open #app { padding-bottom: 58vh; padding-bottom: 58dvh; }
+  body.lsheet-open { scroll-padding-bottom: 58vh; scroll-padding-bottom: 58dvh; }
+}
+
+/* ---- 操作パネルのボトムシート（横持ち／縦持ちのスマホで共用） ----
+   縦持ちは「盤面 約314px ＋ 操作パネル 約487px」が可視域(約650px)に収まらず、
+   建設のたびに上下スクロールが必要だった。横持ち用に作ったこのシートを
+   縦持ちにもそのまま適用して、盤面と操作を同時に見えるようにする。
+   ※ 開閉は main.ts の updateLandscapeSheet()（body.lsheet-open）が担当。向きに依存しない。 */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1199.98px),
+       (orientation: portrait) and (pointer: coarse) {
   #ui-sheet-handle {
     display: block;
     position: fixed;
@@ -305,14 +330,13 @@ h1 {
   }
   body.lsheet-open #ui {
     max-height: 56vh;                 /* expanded: 盤面を覆いすぎない上限 */
+    max-height: 56dvh;
     overflow-y: auto;
     opacity: 1;
     pointer-events: auto;
     padding: 8px;
   }
   #ui > .turn-panel { padding: 6px 8px; min-width: 0; max-width: none; flex: 0 0 auto; }
-  #ui .turn-order-bar, #ui .turn-titles { display: none; }
-  #ui > .player-panels { display: none; } /* 四隅にあるので #ui 側には出さない */
 
   /* 操作パネル内の余白・間隔を詰めて内部スクロールを減らす */
   #ui .turn-info-row, #ui .turn-phase-text, #ui .dice-result { margin: 1px 0; }
@@ -327,11 +351,32 @@ h1 {
   #ui .modal-res-info { font-size: 0.7rem; }
   #ui .trade-target-row { gap: 4px; }
   #ui .trade-response-btns { gap: 6px; }
+}
 
-  /* シート展開中は body 側に下方向のスクロール余地を確保し、
-     盤面を上へスクロールしてシート裏を覗けるようにする（内部スクロール依存を減らす）。 */
-  body.lsheet-open #app { padding-bottom: 58vh; }
-  body.lsheet-open { scroll-padding-bottom: 58vh; }
+/* ---- 縦持ちスマホ向けのシート調整（横持ちとの差分だけ） ----
+   縦は横幅に余裕があるのでハンドル・シートを広く取り、ホームバー(safe-area)を避ける。
+   四隅フルパネルが出ないレイアウトなので、プレイヤーパネルはシート内に残す。 */
+@media (orientation: portrait) and (pointer: coarse) {
+  /* ハンドルは毎ターン押す主要ボタン。44px 以上を確保する。 */
+  #ui-sheet-handle {
+    width: min(94vw, 520px);
+    bottom: max(4px, env(safe-area-inset-bottom));
+    min-height: 46px;
+    padding: 10px 14px;
+    font-size: 0.92rem;
+  }
+  #ui {
+    width: min(96vw, 560px);
+    max-width: 560px;
+    bottom: calc(54px + env(safe-area-inset-bottom));
+  }
+  body.lsheet-open #ui { max-height: 54vh; max-height: 54dvh; }
+  /* 縦持ちは盤面下に回り込むレイアウト＝四隅フルパネルが無いので、シート内で見せる。 */
+  #ui > .player-panels { display: flex; }
+  /* ハンドルの下に盤面が潜らないよう、固定シートぶんの余白を確保する。 */
+  #app { padding-bottom: calc(58px + env(safe-area-inset-bottom)); }
+  /* 盤面はハンドル・メニューを避けた高さに収める（縦持ちは横幅が先に効くので通常は無影響）。 */
+  #board { max-height: calc(100vh - 130px); max-height: calc(100dvh - 130px); }
 }
 
 /* ---- タイル ---- */
@@ -457,13 +502,15 @@ html.reduce-motion .building-downgrade { animation: none; filter: drop-shadow(0 
   opacity: 0.75;
 }
 .harbor-label {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: bold;
   text-anchor: middle;
   dominant-baseline: central;
   pointer-events: none;
   letter-spacing: -0.3px;
 }
+/* 港バッジの資源アイコン（絵文字の置き換え）。タップは下の辺へ通す。 */
+.harbor-res-ic { pointer-events: none; }
 /* 港頂点マーカー */
 .harbor-dot {
   fill: rgba(255,255,255,0.6);
@@ -472,11 +519,14 @@ html.reduce-motion .building-downgrade { animation: none; filter: drop-shadow(0 
 }
 
 /* タッチ端末（スマホ等）では数字・港ラベルのフォントを大きく読みやすく（PCは不変）。
-   円/バッジのジオメトリは board.ts 側で拡大している。 */
+   円/バッジのジオメトリは board.ts 側で拡大している。
+   ※ フォント値は SVG ユーザー単位。viewBox 752 を 375px 幅の端末では約360pxで描くため、
+     実効サイズは約 0.51 倍になる。実画面で 12px 以上になる値を選ぶこと
+     （25px × 0.51 ≒ 12.7px / 24px × 0.51 ≒ 12.2px）。 */
 @media (pointer: coarse) {
-  .token-number { font-size: 18px; }
-  .token-dots   { font-size: 9px; }
-  .harbor-label { font-size: 13px; letter-spacing: -0.2px; }
+  .token-number { font-size: 26px; }
+  .token-dots   { font-size: 11px; }
+  .harbor-label { font-size: 24px; letter-spacing: -0.2px; }
 }
 
 /* ---- 頂点（開拓地/都市の建設候補点） ---- */
@@ -694,6 +744,71 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
 .place-confirm-ok:hover { background: #34a247; }
 .place-confirm-cancel { background: rgba(255,255,255,0.14); color: #fff; }
 .place-confirm-cancel:hover { background: rgba(255,255,255,0.24); }
+
+/* ============================================================
+   インラインSVGアイコン（絵文字の置き換え。ui.ts の icon() が出力）
+   ============================================================ */
+.ui-icon {
+  width: 1.15em; height: 1.15em;
+  flex: 0 0 auto;
+  vertical-align: -0.2em;
+}
+/* アイコン＋ラベルのボタン（ヘッダー・メニュー）。中身を横並びで揃える。 */
+.has-ui-icon { display: inline-flex; align-items: center; gap: 6px; }
+.game-menu-btn.has-ui-icon { justify-content: flex-start; }
+/* summary は display を変えると三角マーカーが消えるので inline-flex にしない。 */
+summary.has-ui-icon { display: list-item; }
+summary.has-ui-icon .ui-icon { margin-right: 6px; }
+
+/* ============================================================
+   確認シート（取り消せない操作の前に1枚挟む）
+   #place-confirm と同じ見た目・語彙。ui.ts の showConfirmSheet() が出力。
+   ============================================================ */
+.confirm-overlay {
+  position: fixed; inset: 0; z-index: 10050;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  background: rgba(0,0,0,0.62);
+  backdrop-filter: blur(2px);
+}
+.confirm-sheet {
+  width: min(380px, 94vw);
+  max-height: 84vh; max-height: 84dvh;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px 16px 14px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(32,42,46,0.98), rgba(13,20,23,0.98));
+  border: 1px solid rgba(208,168,108,0.3);
+  box-shadow: 0 16px 44px rgba(0,0,0,0.65);
+  color: var(--text);
+}
+.confirm-title { font-size: 1.05rem; font-weight: 800; line-height: 1.4; text-align: center; }
+.confirm-lines { display: flex; flex-direction: column; gap: 6px; }
+/* 「何を失うか」を実数で並べる行。色で失う/得る/注意を見分けられるようにする。 */
+.confirm-line {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  border-left: 3px solid rgba(255,255,255,0.22);
+  font-size: 0.86rem; line-height: 1.4;
+}
+.confirm-line.tone-lose { border-left-color: #d3553f; background: rgba(211,85,63,0.14); }
+.confirm-line.tone-gain { border-left-color: #4e9a52; background: rgba(78,154,82,0.14); }
+.confirm-line.tone-warn { border-left-color: #d99a3a; background: rgba(217,154,58,0.15); color: #ffdca5; }
+.confirm-line.tone-note { border-left-color: rgba(255,255,255,0.18); color: var(--text-dim); }
+.confirm-line-text { min-width: 0; }
+.confirm-ic { width: 20px; height: 20px; object-fit: contain; flex: 0 0 auto; }
+/* 確認シートのボタンは中身がアイコン＋文字なので中央寄せの flex にする。 */
+.confirm-sheet .place-confirm-ok,
+.confirm-sheet .place-confirm-cancel {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  max-width: none;
+}
+.confirm-sheet .place-confirm-ok.confirm-danger { background: #b4402c; }
+.confirm-sheet .place-confirm-ok.confirm-danger:hover { background: #cc4d36; }
 
 /* ---- UI レイアウト ---- */
 #ui {
@@ -1424,7 +1539,8 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
   cursor: pointer;
 }
 .menu-toggle:hover { background: rgba(208,168,108,0.18); color: #fff; }
-/* スマホ縦持ち: メニューを少し小さく（safe-area 考慮・右上維持・押しやすさは確保）。
+/* スマホ縦持ち: メニューは文字を小さくしつつ、タップ領域は 44px を割らないようにする
+   （以前は 26px 高さで押しにくかった）。safe-area 考慮・右上維持。
    端ギリギリで見切れないよう、右端・上端から少し内側へ寄せる。 */
 @media (orientation: portrait) and (pointer: coarse) {
   #game-nav {
@@ -1432,7 +1548,15 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
     right: max(12px, env(safe-area-inset-right));
     gap: 5px;
   }
-  .menu-toggle { padding: 4px 9px; font-size: 0.74rem; border-radius: 7px; }
+  .menu-toggle {
+    padding: 6px 12px; font-size: 0.78rem; border-radius: 9px;
+    min-height: 44px; min-width: 44px;
+    justify-content: center;
+  }
+  /* ドロップダウンは画面外へはみ出さない範囲で広く（項目のタップ領域も確保）。 */
+  .game-menu { max-width: min(86vw, 300px); }
+  .game-menu-btn { min-height: 44px; }
+  .game-menu-select { min-height: 40px; }
 }
 .game-menu {
   position: absolute;
@@ -1442,6 +1566,12 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
   gap: 8px;
   padding: 10px;
   min-width: 210px;
+  /* #game-nav が position:fixed なので、はみ出した項目はページスクロールでは追えない。
+     メニュー自身を画面内に収め、内部スクロールで最下段（ホームに戻る）まで届くようにする。 */
+  max-height: calc(100vh - 64px);
+  max-height: calc(100dvh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: linear-gradient(160deg, rgba(32,42,46,0.98), rgba(13,20,23,0.98));
   border: 1px solid rgba(208,168,108,0.26);
   border-radius: 12px;
@@ -1577,8 +1707,10 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
-  padding: 24px 16px;
+  /* ノッチ/ホームバーを避ける（ホームは縦スクロールするので上下とも）。 */
+  padding: calc(24px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
 }
 
 .home-title {
@@ -1635,6 +1767,7 @@ html.reduce-motion .vertex-preview, html.reduce-motion .edge-preview-casing { an
 .rule-body {
   padding: 4px 18px 16px;
   max-height: 60vh;
+  max-height: 60dvh;
   overflow-y: auto;
 }
 .rule-section { margin-bottom: 12px; }
@@ -2267,7 +2400,7 @@ html.reduce-motion .lan-spinner { animation-duration: 2.4s; }
 
 /* コマ・カード図鑑 */
 .gallery-overlay { position: fixed; inset: 0; z-index: 10001; background: rgba(0,0,0,0.62); display: flex; align-items: center; justify-content: center; padding: 14px; }
-.gallery-modal { background: #161b27; color: #fff; border: 1px solid rgba(255,255,255,0.14); border-radius: 14px; width: min(680px, 96vw); max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,0.7); }
+.gallery-modal { background: #161b27; color: #fff; border: 1px solid rgba(255,255,255,0.14); border-radius: 14px; width: min(680px, 96vw); max-height: 90vh; max-height: 90dvh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,0.7); }
 .gallery-header { font-size: 1.1rem; font-weight: 800; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.1); color: #ffe34d; }
 .gallery-body { overflow-y: auto; padding: 6px 16px 12px; }
 .gallery-section-title { font-size: 0.92rem; font-weight: 800; color: rgba(255,255,255,0.85); margin: 14px 0 8px; border-left: 3px solid #d0a86c; padding-left: 8px; }
@@ -2491,6 +2624,7 @@ html.reduce-motion #played-progress { animation: none; }
   animation: victPop 0.5s cubic-bezier(0.2, 1.5, 0.4, 1);
   /* スコアボードで縦に伸びても画面内に収め、スクロールで全員分を読めるようにする */
   max-height: 92vh;
+  max-height: 92dvh;
   overflow-y: auto;
 }
 @keyframes victPop { 0% { transform: scale(0.6); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
@@ -2512,12 +2646,19 @@ html.reduce-motion #played-progress { animation: none; }
   animation: victSplashPop 0.6s cubic-bezier(0.2,1.5,0.4,1) both;
   word-break: break-word; padding: 0 18px;
 }
-.victory-splash-trophy { font-size: clamp(2.6rem, 14vw, 5.4rem); line-height: 1; margin-bottom: 6px; }
+/* トロフィーは絵文字ではなくインラインSVG（.ui-icon は 1.15em）。font-size で大きさを決める。 */
+.victory-splash-trophy { font-size: clamp(2.6rem, 14vw, 5.4rem); line-height: 1; margin-bottom: 6px; color: #ffd24a; }
+.victory-splash-trophy .ui-icon { filter: drop-shadow(0 4px 16px rgba(0,0,0,0.7)); }
 @keyframes victSplashPop { 0% { opacity: 0; transform: scale(0.55); } 100% { opacity: 1; transform: scale(1); } }
 .victory-trophy {
   font-size: 2.6rem; line-height: 1; margin-bottom: 6px;
+  color: #ffd24a;
   animation: victTrophy 1.4s ease-in-out infinite;
 }
+/* 自分の勝ちは金色をより強く光らせる（絵文字の🎉に代わる祝祭表現）。 */
+.victory-trophy.mine .ui-icon,
+.victory-splash-trophy.mine .ui-icon { filter: drop-shadow(0 0 14px rgba(255,215,80,0.95)) drop-shadow(0 3px 10px rgba(0,0,0,0.6)); }
+html.reduce-motion .victory-trophy { animation: none; }
 @keyframes victTrophy {
   0%,100% { transform: translateY(0) rotate(-4deg); }
   50% { transform: translateY(-6px) rotate(4deg); }
@@ -2588,8 +2729,14 @@ html.reduce-motion #played-progress { animation: none; }
 }
 .score-row.self { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22); }
 .score-head { display: flex; align-items: center; gap: 8px; }
-.score-rank { font-size: 1.05rem; min-width: 1.7em; text-align: center; flex: 0 0 auto; }
-.score-rank.rank-1 { font-size: 1.25rem; }
+/* 順位バッジ。1位のみ王冠SVG（絵文字メダルの置き換え）を数字の前に置く。 */
+.score-rank {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 0.95rem; font-weight: 700; white-space: nowrap;
+  flex: 0 0 auto;
+}
+.score-rank.rank-1 { font-size: 1.05rem; color: #ffd700; }
+.rank-crown { width: 1.25em; height: 1.25em; }
 .score-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.6); flex: 0 0 auto; }
 .score-name {
   font-weight: 700; font-size: 0.95rem; flex: 1 1 auto;
@@ -2643,7 +2790,7 @@ html.reduce-motion #played-progress { animation: none; }
 }
 .dicestats-modal {
   width: 100%; max-width: min(92vw, 420px);
-  max-height: 88vh; overflow-y: auto;
+  max-height: 88vh; max-height: 88dvh; overflow-y: auto;
   box-sizing: border-box;
   background: linear-gradient(160deg, rgba(32,42,46,0.98), rgba(13,20,23,0.98));
   border: 1px solid rgba(208,168,108,0.28);
@@ -3203,6 +3350,7 @@ html.reduce-motion .mini-panel.mine.bonus-flash { animation: none; }
    既定値に従来の式（#board は max-width:100% / max-height:78vh・縦横比 800:700）を残す。 */
 #board-area.mini-mode {
   --board-draw-width: min(100%, calc(78vh * 800 / 700));
+  --board-draw-width: min(100%, calc(78dvh * 800 / 700));
 }
 /* ミニパネルは四隅(.corner-*)に絶対配置で重ねる。中央寄せ＋盤面実描画幅に合わせる。 */
 #board-area.mini-mode .mini-panels {
@@ -3235,6 +3383,12 @@ html.reduce-motion .mini-panel.mine.bonus-flash { animation: none; }
 .corner-tr { top: 32px;    right: 5px; }
 .corner-bl { bottom: 6px;  left: 5px; }
 .corner-br { bottom: 6px;  right: 5px; }
+/* スマホ縦持ち: 右上の ☰ メニューがミニパネル（プレイヤー名）に重なって読めなかったので、
+   上段2枚をメニューの下まで下げる。左右で高さが揃うよう tl/tr を同じ値にする。
+   ノッチ端末では #game-nav 自体が safe-area ぶん下がるので、その量も足す。 */
+@media (orientation: portrait) and (pointer: coarse) {
+  .corner-tl, .corner-tr { top: calc(46px + env(safe-area-inset-top)); }
+}
 .mini-row1, .mini-row2 { display: flex; align-items: center; gap: 4px; max-width: 100%; }
 .mini-dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.6); flex: 0 0 auto; }
 .mini-name {

@@ -325,6 +325,154 @@ function makeBtn(
   return btn;
 }
 
+// ============================================================
+// インラインSVGアイコン（絵文字の置き換え・共通スプライト）
+// ============================================================
+// 絵文字は端末のフォント次第で豆腐(□)になる（Windows の 🖼 など実害あり）ため、
+// ヘッダー・主要ボタン・結果画面などの目立つ箇所は自前のSVGで描く。
+// 仕様: 24×24 viewBox / stroke-width:2 / stroke・fill とも currentColor（親の文字色に追従）。
+// ここ1か所で定義し、icon() 経由でのみ使う。
+
+/** 線で描くアイコンのパス定義（name → d 配列）。 */
+const ICON_PATHS: Record<string, string[]> = {
+  // 汎用
+  check:  ['M4 12.6l5.4 5.4L20 6.4'],
+  close:  ['M6 6l12 12', 'M18 6L6 18'],
+  menu:   ['M4 7h16', 'M4 12h16', 'M4 17h16'],
+  home:   ['M3.5 11.5L12 4l8.5 7.5', 'M5.8 10.2V20h12.4v-9.8', 'M10 20v-5h4v5'],
+  alert:  ['M12 3.2L22.2 20.4H1.8L12 3.2z', 'M12 9.6v4.6', 'M12 17.3v.01'],
+  // ホーム/ヘッダー
+  book:   ['M12 6.6C10.4 5.2 8.2 4.5 4 4.5v13.4c4.2 0 6.4.7 8 2.1 1.6-1.4 3.8-2.1 8-2.1V4.5c-4.2 0-6.4.7-8 2.1z', 'M12 6.6v13.4'],
+  gallery: ['M3.2 5.2h17.6v13.6H3.2z', 'M20.8 15.4l-4.9-4.9-4 4-2.1-2.1-6.6 6.4'],
+  help:   ['M12 21.2a9.2 9.2 0 1 0 0-18.4 9.2 9.2 0 0 0 0 18.4z', 'M9.3 9.4a2.8 2.8 0 1 1 3.5 2.8c-.6.2-1 .8-1 1.4v.5', 'M12 17.4v.01'],
+  dice:   ['M4.5 4.5h15v15h-15z'],
+  // メニュー内（音・振動・統計・交易・再戦）
+  volume:    ['M11.2 5.2 6.6 9H3.2v6h3.4l4.6 3.8V5.2z', 'M15.4 9.4a3.8 3.8 0 0 1 0 5.2', 'M18.2 6.8a7.6 7.6 0 0 1 0 10.4'],
+  volumeOff: ['M11.2 5.2 6.6 9H3.2v6h3.4l4.6 3.8V5.2z', 'M15.8 9.6l4.8 4.8', 'M20.6 9.6l-4.8 4.8'],
+  bell:      ['M18 9.4a6 6 0 1 0-12 0c0 4.8-2.2 6.2-2.2 6.2h16.4S18 14.2 18 9.4z', 'M13.7 19.2a2 2 0 0 1-3.4 0'],
+  bellOff:   ['M18 9.4a6 6 0 1 0-12 0c0 4.8-2.2 6.2-2.2 6.2h16.4S18 14.2 18 9.4z', 'M13.7 19.2a2 2 0 0 1-3.4 0', 'M3.6 3.6l16.8 16.8'],
+  vibrate:   ['M7.6 3.4h8.8v17.2H7.6z', 'M3.6 9.4v5.2', 'M20.4 9.4v5.2'],
+  trade:     ['M4 8.6h13', 'M13.6 5.2 17 8.6l-3.4 3.4', 'M20 15.4H7', 'M10.4 12 7 15.4l3.4 3.4'],
+  ban:       ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M5.6 5.6l12.8 12.8'],
+  chart:     ['M4 20.4V10.6', 'M9.3 20.4V4.6', 'M14.7 20.4v-8.6', 'M20 20.4V7.6'],
+  refresh:   ['M20.2 12a8.2 8.2 0 1 1-2.5-5.9', 'M20.6 3.4v5h-5'],
+  map:       ['M9 4.4 3.4 6.8v12.8L9 17.2l6 2.4 5.6-2.4V4.4L15 6.8 9 4.4z', 'M9 4.4v12.8', 'M15 6.8v12.8'],
+  // 結果画面
+  trophy: ['M7 4.2h10v5.1a5 5 0 0 1-10 0V4.2z', 'M7 6.2H3.8v1.6a3.4 3.4 0 0 0 3.4 3.4', 'M17 6.2h3.2v1.6a3.4 3.4 0 0 1-3.4 3.4', 'M12 14.4v3.4', 'M8.4 20.8h7.2', 'M9.6 17.8h4.8'],
+  crown:  ['M3.4 7.4l3.8 3.2L12 4.6l4.8 6 3.8-3.2-1.7 10.2H5.1L3.4 7.4z', 'M5.1 19.4h13.8'],
+  medal:  ['M8.6 3.2l3.4 6.4 3.4-6.4', 'M12 21a5.9 5.9 0 1 0 0-11.8A5.9 5.9 0 0 0 12 21z'],
+};
+/** 塗りの点（サイコロの目など）。name → [cx, cy, r] 配列。 */
+const ICON_DOTS: Record<string, [number, number, number][]> = {
+  dice: [[8.6, 8.6, 1.5], [15.4, 15.4, 1.5], [12, 12, 1.5]],
+};
+
+/** 共通インラインSVGアイコンを生成する。cls は .ui-icon に追加されるクラス。 */
+export function icon(name: string, cls = ''): SVGSVGElement {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  svg.setAttribute('class', cls ? `ui-icon ${cls}` : 'ui-icon');
+  for (const d of ICON_PATHS[name] ?? []) {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d);
+    svg.appendChild(p);
+  }
+  for (const [cx, cy, r] of ICON_DOTS[name] ?? []) {
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', String(cx)); c.setAttribute('cy', String(cy)); c.setAttribute('r', String(r));
+    c.setAttribute('fill', 'currentColor'); c.setAttribute('stroke', 'none');
+    svg.appendChild(c);
+  }
+  return svg;
+}
+
+/** アイコン＋ラベルのボタン（ヘッダー・メニュー用。絵文字プレフィックスの置き換え）。 */
+export function iconBtn(iconName: string, label: string, cls: string, onClick: () => void): HTMLButtonElement {
+  const btn = el('button', `${cls} has-ui-icon`);
+  btn.type = 'button';
+  btn.append(icon(iconName), Object.assign(el('span'), { textContent: label }));
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+// ============================================================
+// 確認シート（取り消せない操作の前に1枚挟む）
+// ============================================================
+// 盤面配置の #place-confirm と同じ見た目・同じ語彙（[実行][やめる]）で統一する。
+// OS標準の window.confirm は世界観を壊すうえ文面に何も添えられないので使わない。
+
+/** 確認シートに並べる1行。数量は必ず実数で見せる（何を失うかが分かるように）。 */
+export interface ConfirmLine {
+  /** 行頭アイコン: 素材画像のURL、または icon()／glyph() 等で作った要素。省略可。 */
+  icon?: string | Element | null;
+  text: string;
+  /** lose=失うもの(赤系) / gain=得るもの(緑系) / warn=注意(橙) / note=補足(淡色) */
+  tone?: 'lose' | 'gain' | 'warn' | 'note';
+}
+
+export interface ConfirmOptions {
+  title: string;
+  lines?: ConfirmLine[];
+  okLabel: string;
+  cancelLabel?: string;
+  /** 取り返しがつかない操作は true（実行ボタンを赤系に）。 */
+  danger?: boolean;
+  onOk: () => void;
+  onCancel?: () => void;
+}
+
+/** 確認シートを1枚表示する。多重表示はしない（前のものを閉じる）。 */
+export function showConfirmSheet(opts: ConfirmOptions): void {
+  document.querySelector('.confirm-overlay')?.remove();
+  const overlay = el('div', 'confirm-overlay');
+  const sheet = el('div', 'confirm-sheet');
+
+  const title = el('div', 'confirm-title');
+  title.textContent = opts.title;
+  sheet.appendChild(title);
+
+  if (opts.lines?.length) {
+    const list = el('div', 'confirm-lines');
+    for (const line of opts.lines) {
+      const row = el('div', `confirm-line${line.tone ? ` tone-${line.tone}` : ''}`);
+      if (line.icon) {
+        row.appendChild(typeof line.icon === 'string' ? inlineIc(line.icon, 'confirm-ic') : line.icon);
+      }
+      row.append(Object.assign(el('span', 'confirm-line-text'), { textContent: line.text }));
+      list.appendChild(row);
+    }
+    sheet.appendChild(list);
+  }
+
+  const close = (): void => { overlay.remove(); };
+  const ok = el('button', `place-confirm-ok${opts.danger ? ' confirm-danger' : ''}`);
+  ok.type = 'button';
+  ok.append(icon('check'), Object.assign(el('span'), { textContent: opts.okLabel }));
+  ok.addEventListener('click', () => { close(); opts.onOk(); });
+
+  const cancel = el('button', 'place-confirm-cancel');
+  cancel.type = 'button';
+  cancel.append(icon('close'), Object.assign(el('span'), { textContent: opts.cancelLabel ?? 'やめる' }));
+  cancel.addEventListener('click', () => { close(); opts.onCancel?.(); });
+
+  const actions = el('div', 'place-confirm-actions');
+  actions.append(ok, cancel);
+  sheet.appendChild(actions);
+
+  overlay.appendChild(sheet);
+  // 背景タップ＝やめる（誤って実行しない側に倒す）。
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) { close(); opts.onCancel?.(); } });
+  document.body.appendChild(overlay);
+}
+
 function modeBtn(
   label: string,
   mode: Exclude<BuildMode, 'idle'>,
@@ -1768,7 +1916,8 @@ export function showAssetGallery(): void {
   const overlay = el('div', 'gallery-overlay');
   const modal = el('div', 'gallery-modal');
   const header = el('div', 'gallery-header');
-  header.textContent = '🖼 コマ・カード図鑑（都市と騎士）';
+  header.classList.add('has-ui-icon');
+  header.append(icon('gallery'), Object.assign(el('span'), { textContent: 'コマ・カード図鑑（都市と騎士）' }));
   modal.appendChild(header);
   const body = el('div', 'gallery-body');
 
@@ -2149,7 +2298,7 @@ function buildActionButtons(
     // Catan for Two の「2つの生産フェーズの間」は騎士も使えない（エンジンが拒否）ため出さない。
     if (!tb2Second) appendDevCardButtons(div, state, player, setUIPhase, dispatch);
     if (calcVP(state, pid) >= victoryTarget(state)) {
-      div.appendChild(makeBtn('🏆 勝利宣言！', 'btn-primary', false, () => dispatch({ type: 'DECLARE_VICTORY' })));
+      div.appendChild(iconBtn('trophy', '勝利宣言！', 'action-btn btn-primary', () => dispatch({ type: 'DECLARE_VICTORY' })));
     }
     return div;
   }
@@ -2233,9 +2382,21 @@ function buildActionButtons(
     }
   }
   // 発展カードは騎士と商人では使わない（進歩カードに置換）。基本/航海者のみ表示。
+  // 購入は資源3枚を払って中身が分からないカードを1枚引く＝取り消せないので、確認を1枚挟む。
   if (!isCk(state)) {
     div.appendChild(makeImgBtn(glyph('ic-cards'), [costLabel('発展カード', resCostParts(BUILD_COSTS.dev_card))], canDev ? 'btn-build' : 'btn-disabled', !canDev,
-      () => dispatch({ type: 'BUY_DEV_CARD' })));
+      () => showConfirmSheet({
+        title: '発展カードを1枚買う？',
+        lines: [
+          ...resCostParts(BUILD_COSTS.dev_card).map(([img, n]): ConfirmLine => ({
+            icon: img, text: `${n}枚 支払う`, tone: 'lose',
+          })),
+          { icon: glyph('ic-cards'), text: `山札の残り ${state.devDeck.length} 枚から1枚（中身は引くまで分かりません）`, tone: 'gain' },
+          { text: '騎士カードは買ったターンには使えません', tone: 'note' },
+        ],
+        okLabel: '買う',
+        onOk: () => dispatch({ type: 'BUY_DEV_CARD' }),
+      })));
   }
 
   // 騎士と商人: 都市改善・騎士・城壁。
@@ -2255,13 +2416,42 @@ function buildActionButtons(
   appendDevCardButtons(div, state, player, setUIPhase, dispatch);
 
   if (calcVP(state, pid) >= victoryTarget(state)) {
-    div.appendChild(makeBtn('🏆 勝利宣言！', 'btn-primary', false, () => dispatch({ type: 'DECLARE_VICTORY' })));
+    div.appendChild(iconBtn('trophy', '勝利宣言！', 'action-btn btn-primary', () => dispatch({ type: 'DECLARE_VICTORY' })));
   }
 
   // ターン終了は「手番を進める／戻れない操作」なので、建設ボタン群から区切り線＋余白で離して
   // 全幅の独立行にし、まだ建設したいのに誤って押す事故を防ぐ。
+  // さらに確認シートを1枚挟み、「まだ建てられるもの」「7が出たら捨てる枚数」を実数で見せる。
   div.appendChild(el('div', 'action-sep'));
-  div.appendChild(makeBtn('ターン終了', 'btn-end btn-end-turn', false, () => dispatch({ type: 'END_TURN' })));
+  div.appendChild(makeBtn('ターン終了', 'btn-end btn-end-turn', false, () => {
+    const lines: ConfirmLine[] = [];
+    // まだ払える建設（＝このターンを捨てることで失う機会）を実数で並べる。
+    const buildable: string[] = [];
+    if (canRoad) buildable.push('道');
+    if (hasSea && canShip) buildable.push('船');
+    if (canSettl) buildable.push('開拓地');
+    if (canCity) buildable.push('都市');
+    if (!isCk(state) && canDev) buildable.push('発展カード');
+    if (buildable.length > 0) {
+      lines.push({ icon: ASSETS.action.road, text: `いま建てられます：${buildable.join('・')}`, tone: 'warn' });
+    }
+    // 手札が多いと 7 で半分捨てる。次の 7 で何枚失うかを先に見せる。
+    const held = robbableCardCount(state, pid);
+    const willDiscard = discardCount(state, pid);
+    lines.push({
+      icon: glyph('ic-cards'),
+      text: willDiscard > 0
+        ? `手札 ${held}枚 — 次に7が出ると ${willDiscard}枚 捨てます`
+        : `手札 ${held}枚 は持ち越します`,
+      tone: willDiscard > 0 ? 'lose' : 'note',
+    });
+    showConfirmSheet({
+      title: 'ターンを終える？',
+      lines,
+      okLabel: 'ターン終了',
+      onOk: () => dispatch({ type: 'END_TURN' }),
+    });
+  }));
   return div;
 }
 

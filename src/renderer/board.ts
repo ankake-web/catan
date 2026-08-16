@@ -93,6 +93,34 @@ export interface BoardViewport {
 // コマの上に覗くようにする（数字の視認性確保）。
 const ROBBER_DY = 31;
 
+// 数字チップの半径（タッチ端末）。viewBox 752 を約360px に縮小するため、
+// 実画面で 12px 以上の数字（CSS: .token-number 25px × 縮小率 ≒ 12.6px）が収まる大きさにする。
+const TOKEN_R_TOUCH = 24;
+
+// タップ領域の実寸目標（px）。実画面で 44px を確保するため、viewBox の縮小率で割り戻す。
+const TAP_TARGET_PX = 44;
+// 割り戻した結果が隣の候補まで飲み込まないための上限（HEX_SIZE=60 基準）。
+// 誤タップしても仮置きプレビュー＋確認バー（#place-confirm）で取り消せるので、
+// 隣接候補と多少重なる大きさまでは許容する。
+//   頂点: 半径42（直径84）→ 375px幅で実効 約42px。隣の頂点とは 60 離れているので、
+//         重なるのは外周側だけで、狙った点が最前面に来やすい。
+//   辺:   線幅60 → 実効 約30px。辺の長さ自体が実画面で約30px しかないため、
+//         44px まで太らせると隣の辺を完全に飲み込んでしまう。長さと同じ 60 が実用上の上限。
+const VERTEX_HIT_MAX = 42;   // 半径
+const EDGE_HIT_MAX   = 60;   // 線幅
+const VERTEX_HIT_MIN = 24;   // 半径（従来値＝最低ライン）
+const EDGE_HIT_MIN   = 22;   // 線幅（従来値＝最低ライン）
+
+/** 実画面 44px 相当の当たり判定サイズ（盤面ユーザー単位）。unitPx = 1ユーザー単位あたりの実px。 */
+function tapUnits(unitPx: number, half: boolean, min: number, max: number): number {
+  const want = (half ? TAP_TARGET_PX / 2 : TAP_TARGET_PX) / (unitPx > 0 ? unitPx : 1);
+  return Math.max(min, Math.min(max, want));
+}
+
+/** 当たり判定のサイズ（頂点=半径 / 辺=線幅）。renderBoard が実測から算出して各描画へ渡す。 */
+interface HitSize { vertexR: number; edgeW: number; }
+const DEFAULT_HIT: HitSize = { vertexR: VERTEX_HIT_MIN, edgeW: EDGE_HIT_MIN };
+
 // タッチ端末（スマホ等）か。港・数字チップを少し大きくして見やすくする。
 function isTouchDevice(): boolean {
   return typeof window !== 'undefined'
@@ -137,13 +165,23 @@ const DOTS: Record<number, string> = {
 // 港ラベル
 // ============================================================
 
-const HARBOR_LABEL: Record<HarborType, string> = {
-  generic: '⚓3:1',
-  wood:    '🌲2:1',
-  brick:   '🧱2:1',
-  wool:    '🐑2:1',
-  grain:   '🌾2:1',
-  ore:     '⛰2:1',
+// 港ラベルは「資源アイコン画像＋レート文字」で描く。絵文字は端末によって豆腐(□)になるうえ、
+// viewBox 752 を約360px に縮小する都合で実効6px程度まで潰れて読めなかったため。
+const HARBOR_RATE: Record<HarborType, string> = {
+  generic: '3:1',
+  wood:    '2:1',
+  brick:   '2:1',
+  wool:    '2:1',
+  grain:   '2:1',
+  ore:     '2:1',
+};
+// 専門港の資源アイコン（汎用港=3:1 は資源を問わないのでアイコンなし）。
+const HARBOR_RES_IMG: Partial<Record<HarborType, string>> = {
+  wood:  ASSETS.resource.lumber,
+  brick: ASSETS.resource.brick,
+  wool:  ASSETS.resource.wool,
+  grain: ASSETS.resource.grain,
+  ore:   ASSETS.resource.ore,
 };
 
 const HARBOR_COLOR: Record<HarborType, string> = {
@@ -268,7 +306,7 @@ function renderTile(
     const circle = svgEl('circle');
     circle.classList.add('token-circle');
     circle.classList.add('token-pending');
-    setAttrs(circle, { cx, cy: cy - 2, r: String(isTouchDevice() ? 21 : 18) });
+    setAttrs(circle, { cx, cy: cy - 2, r: String(isTouchDevice() ? TOKEN_R_TOUCH : 18) });
     g.appendChild(circle);
     const q = svgEl('text');
     q.classList.add('token-number');
@@ -281,8 +319,8 @@ function renderTile(
   if (tile.number != null) {
     const isRed = tile.number === 6 || tile.number === 8;
     const touch = isTouchDevice();
-    const RADIUS = touch ? 21 : 18;
-    const dotsY = touch ? 16 : 14;
+    const RADIUS = touch ? TOKEN_R_TOUCH : 18;
+    const dotsY = touch ? 18 : 14;
 
     const circle = svgEl('circle');
     circle.classList.add('token-circle');
@@ -411,7 +449,7 @@ function renderHarbor(
     const c = axialToPixel(sharedTile.coord);
     let dx = mx - (c.x + ox), dy = my - (c.y + oy);
     const len = Math.hypot(dx, dy) || 1;
-    const off = touch ? 22 : 18;
+    const off = touch ? 27 : 18;
     lx = mx + (dx / len) * off;
     ly = my + (dy / len) * off;
   }
@@ -437,21 +475,39 @@ function renderHarbor(
     stroke: HARBOR_COLOR[harbor.type], 'stroke-width': 1.5, opacity: 0.7 });
   g.appendChild(lead);
 
-  // 背景バッジ（タッチ端末では大きめに：中心(lx,ly)基準なので拡大しても中央のまま）
-  const badgeW = touch ? 52 : 44;
-  const badgeH = touch ? 22 : 18;
+  // 背景バッジ（タッチ端末では大きめに：中心(lx,ly)基準なので拡大しても中央のまま）。
+  // 資源アイコン＋「2:1」を横並びで収める幅を確保する（文字は CSS の .harbor-label で拡大）。
+  const resImg = HARBOR_RES_IMG[harbor.type];
+  const icoW = touch ? 22 : 16;        // 資源アイコンの一辺
+  const gap = touch ? 3 : 2;           // アイコンと文字の間隔
+  const textW = touch ? 40 : 27;       // 「2:1」の概算幅（フォント拡大ぶんを見込む）
+  const padX = touch ? 6 : 5;
+  const badgeW = padX * 2 + textW + (resImg ? icoW + gap : 0);
+  const badgeH = touch ? 30 : 22;
   const bg = svgEl('rect');
   setAttrs(bg, { x: lx - badgeW / 2, y: ly - badgeH / 2, width: badgeW, height: badgeH,
-    rx: 4, fill: 'rgba(0,0,0,0.82)', stroke: HARBOR_COLOR[harbor.type], 'stroke-width': 1.5 });
+    rx: 5, fill: 'rgba(0,0,0,0.82)', stroke: HARBOR_COLOR[harbor.type], 'stroke-width': 1.5 });
   g.appendChild(bg);
 
-  // ラベルテキスト（大きめ）
+  // 資源アイコン（専門港のみ）。バッジ左端に寄せ、右側にレート文字を置く。
+  if (resImg) {
+    const ico = svgEl('image');
+    setAttrs(ico, { x: lx - badgeW / 2 + padX, y: ly - icoW / 2, width: icoW, height: icoW,
+      preserveAspectRatio: 'xMidYMid meet' });
+    ico.setAttribute('href', resImg);
+    ico.setAttributeNS('http://www.w3.org/1999/xlink', 'href', resImg); // 旧ブラウザ互換
+    ico.classList.add('harbor-res-ic');
+    g.appendChild(ico);
+  }
+
+  // レート文字（2:1 / 3:1）。アイコンぶんだけ右へ寄せた中央に置く。
+  const tx = resImg ? lx - badgeW / 2 + padX + icoW + gap + textW / 2 : lx;
   const label = svgEl('text');
   label.classList.add('harbor-label');
-  setAttrs(label, { x: lx, y: ly,
+  setAttrs(label, { x: tx, y: ly,
     fill: HARBOR_COLOR[harbor.type],
     'text-anchor': 'middle', 'dominant-baseline': 'central' });
-  label.textContent = HARBOR_LABEL[harbor.type];
+  label.textContent = HARBOR_RATE[harbor.type];
   g.appendChild(label);
 
   return g;
@@ -466,6 +522,7 @@ function renderEdges(
   ox: number,
   oy: number,
   opts?: BoardRenderOptions,
+  hit: HitSize = DEFAULT_HIT,
 ): SVGGElement {
   const g = svgEl('g');
   // 道のプレビュー中は、選択した道だけが目立つよう他候補を暗くする目印クラス。
@@ -568,19 +625,22 @@ function renderEdges(
         drawBoat(curPid ? (BUILDING_COLOR_KEY[curPid] ?? 'red') : 'red');
       }
       // タッチ用の透明な太い当たり判定（候補のみ）。CSSでタッチ端末のみ有効化。
+      // 線幅は実画面44pxになるよう viewBox の縮小率から逆算した値（CSS既定値をインラインで上書き）。
       if (isValid) {
-        const hit = svgEl('line');
-        hit.classList.add('edge-hit');
-        hit.setAttribute('data-edge-id', edge.id);
-        setAttrs(hit, { x1, y1, x2, y2 });
-        g.appendChild(hit);
+        const hitLine = svgEl('line');
+        hitLine.classList.add('edge-hit');
+        hitLine.setAttribute('data-edge-id', edge.id);
+        setAttrs(hitLine, { x1, y1, x2, y2 });
+        hitLine.style.strokeWidth = String(hit.edgeW);
+        g.appendChild(hitLine);
       }
       if (isValidShip) {
-        const hit = svgEl('line');
-        hit.classList.add('edge-hit');
-        hit.setAttribute('data-ship-edge-id', edge.id);
-        setAttrs(hit, { x1, y1, x2, y2 });
-        g.appendChild(hit);
+        const hitLine = svgEl('line');
+        hitLine.classList.add('edge-hit');
+        hitLine.setAttribute('data-ship-edge-id', edge.id);
+        setAttrs(hitLine, { x1, y1, x2, y2 });
+        hitLine.style.strokeWidth = String(hit.edgeW);
+        g.appendChild(hitLine);
       }
     }
 
@@ -637,6 +697,7 @@ function renderVertices(
   ox: number,
   oy: number,
   opts?: BoardRenderOptions,
+  hit: HitSize = DEFAULT_HIT,
 ): SVGGElement {
   const g = svgEl('g');
   // 頂点プレビュー中は、選択した頂点だけが目立つよう他候補(緑ドット)を暗くする。
@@ -770,11 +831,12 @@ function renderVertices(
 
     // タッチ用の透明な大きめ当たり判定（候補のみ）。CSSでタッチ端末のみ有効化。
     // 開拓地候補・都市候補（建物あり）の両方に付与する。
+    // 半径は実画面44px（直径）になるよう viewBox の縮小率から逆算した値。
     if (isValid) {
-      const hit = svgEl('circle');
-      hit.classList.add('vertex-hit');
-      setAttrs(hit, { cx: vx, cy: vy, r: 24 });
-      vg.appendChild(hit);
+      const hitDot = svgEl('circle');
+      hitDot.classList.add('vertex-hit');
+      setAttrs(hitDot, { cx: vx, cy: vy, r: hit.vertexR });
+      vg.appendChild(hitDot);
     }
 
     g.appendChild(vg);
@@ -876,6 +938,23 @@ export function renderBoard(
     content.setAttribute('transform', `translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`);
   }
 
+  // --- タップ領域: 実画面 44px を確保する ---
+  // 盤面ユーザー単位1あたりの実px = (SVGの描画幅 / viewBox幅) × コンテンツ拡大率。
+  // 375px幅では約0.51 なので、従来の r=24（実効24px）では指で押しにくかった。
+  // ピンチズーム(viewport)は判定を大きくする方向にしか効かないので、ここでは考慮しない。
+  // 描画幅は「実測 → 親要素 → ウィンドウ幅 → viewBox幅」の順にフォールバック。
+  // 初回描画で SVG のレイアウトが未確定（clientWidth=0）でも当たり判定が最小値に落ちないようにする。
+  const drawW = svgEl_.getBoundingClientRect?.().width
+    || svgEl_.clientWidth
+    || svgEl_.parentElement?.clientWidth
+    || (typeof window !== 'undefined' ? window.innerWidth : 0)
+    || W;
+  const unitPx = (drawW / W) * scale;
+  const hit: HitSize = {
+    vertexR: tapUnits(unitPx, true, VERTEX_HIT_MIN, VERTEX_HIT_MAX),
+    edgeW: tapUnits(unitPx, false, EDGE_HIT_MIN, EDGE_HIT_MAX),
+  };
+
   // --- タイル（最下層） ---
   // 騎士と商人: 商人コマの位置・所有者色を opts に注入（renderTile で描画）。
   const merchant = state.merchant;
@@ -892,7 +971,7 @@ export function renderBoard(
   content.appendChild(tileGroup);
 
   // --- 辺（道）。港ラベルより先に描いて、港表示を道より前面にする ---
-  content.appendChild(renderEdges(state, ox, oy, opts));
+  content.appendChild(renderEdges(state, ox, oy, opts, hit));
 
   // --- 港（道より後＝前面に描画して、2:1/3:1 や資源アイコンを読めるようにする） ---
   const harborGroup = svgEl('g');
@@ -903,7 +982,7 @@ export function renderBoard(
   content.appendChild(harborGroup);
 
   // --- 頂点（建物。最前面） ---
-  content.appendChild(renderVertices(state, ox, oy, opts));
+  content.appendChild(renderVertices(state, ox, oy, opts, hit));
 
   // --- 航海者 S7「海賊の島々」: 海賊要塞（🏰＋ラホ数）と海賊艦隊（🏴‍☠️）のマーカー（最前面） ---
   if (state.fortresses || state.pirateFleet) {

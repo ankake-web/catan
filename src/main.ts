@@ -35,8 +35,8 @@ import type { BoardRenderOptions, BoardViewport } from './renderer/board';
 import { installHexTooltip } from './renderer/hexTooltip';
 import { beginnerHint, recommendedSetupVertices } from './renderer/beginnerHints';
 import { openBeginnerHelp } from './renderer/beginnerHelp';
-import { renderUI, syncBoardDrawWidth, showAssetGallery } from './renderer/ui';
-import type { UIPhase } from './renderer/ui';
+import { renderUI, syncBoardDrawWidth, showAssetGallery, showConfirmSheet, icon, iconBtn } from './renderer/ui';
+import type { UIPhase, ConfirmLine } from './renderer/ui';
 import { attachBoardEvents, attachBoardGestures, resolvePlacePreviewAction, centeredZoom, ZOOM_LIMITS } from './renderer/events';
 import { buildScenarioSelect, getScenarioSelectValue } from './renderer/scenarioSelect';
 import type { BuildMode } from './renderer/events';
@@ -361,10 +361,8 @@ function renderHome(
   screen.appendChild(buildRulePanel());
 
   // ---- コマ・カード図鑑（騎士と商人の全画像を名前・説明つきで一覧） ----
-  const galleryBtn = document.createElement('button');
-  galleryBtn.className = 'gallery-open-btn';
-  galleryBtn.textContent = '🖼 コマ・カード図鑑を見る';
-  galleryBtn.addEventListener('click', () => showAssetGallery());
+  // ラベル頭の絵文字（🖼）は Windows のフォントで豆腐(□)になっていたためインラインSVGへ。
+  const galleryBtn = iconBtn('gallery', 'コマ・カード図鑑を見る', 'gallery-open-btn', () => showAssetGallery());
   screen.appendChild(galleryBtn);
 
   container.appendChild(screen);
@@ -499,8 +497,8 @@ function buildRulePanel(): HTMLDetailsElement {
   const details = document.createElement('details');
   details.className = 'rule-panel';
   const summary = document.createElement('summary');
-  summary.className = 'rule-summary';
-  summary.textContent = '📖 はじめての人へ（ルール説明）';
+  summary.className = 'rule-summary has-ui-icon';
+  summary.append(icon('book'), Object.assign(document.createElement('span'), { textContent: 'はじめての人へ（ルール説明）' }));
   details.appendChild(summary);
 
   const body = document.createElement('div');
@@ -1153,7 +1151,16 @@ function redraw(skipBoard = false): void {
 // ============================================================
 
 // ユーザーが手動で開いた状態。交易依頼/捨て札中は強制で開く（mustAct）。
-let landscapeSheetUserOpen = false;
+// ボトムシートの開閉。null = ユーザーがまだ触っていない＝向きごとの既定に従う。
+// 縦持ちスマホは「盤面と操作を同時に見せる」のが目的なので既定は開（建設モードに入ると
+// setBuildMode が自動で畳んで盤面全体を見せる）。横持ちは盤面が主役なので既定は閉。
+let landscapeSheetUserOpen: boolean | null = null;
+
+/** 向きに応じたシートの既定開閉。縦持ちのタッチ端末だけ既定で開く。 */
+function defaultSheetOpen(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(orientation: portrait) and (pointer: coarse)').matches;
+}
 let sheetHandleEl: HTMLButtonElement | null = null;
 
 // 横持ちの操作対象プレイヤー（LAN=自分、ローカル=人間）。
@@ -1170,74 +1177,74 @@ function computeSheetStatus(): { text: string; alert: boolean } {
   const tr = state.pendingTrade;
   if (viewer && tr && tr.targetPlayerIds.includes(viewer) && !tr.responses[viewer]
       && (tr.state === 'TRADE_OFFER' || tr.state === 'TRADE_RESPONSE')) {
-    return { text: '🤝 交易依頼！', alert: true };
+    return { text: '交易依頼！', alert: true };
   }
   if (viewer && state.phase === 'MAIN' && state.turnPhase === 'DISCARD') {
     const h = state.players[viewer]?.hand;
     const total = h ? RESOURCE_TYPES.reduce((s, r) => s + h[r], 0) : 0;
     if (total >= 8 && !(state.discardedThisRound ?? []).includes(viewer)) {
-      return { text: '🗑 捨て札！', alert: true };
+      return { text: '捨て札！', alert: true };
     }
   }
   // 航海者: 自分が金タイル産出の選択待ちなら案内（手番でなくても出す）。
   if (viewer && state.phase === 'MAIN' && state.turnPhase === 'GOLD'
       && ((state.pendingGoldChoice ?? {})[viewer] ?? 0) > 0) {
     // T&B イベント（豊作の年など）でも GOLD を流用しているため文言を出し分ける。
-    return { text: state.tbPendingEventNumber != null ? '✨ 資源を選択！' : '✨ 金を選択！', alert: true };
+    return { text: state.tbPendingEventNumber != null ? '資源を選択！' : '金を選択！', alert: true };
   }
   // 交易と蛮族イベント: 自分が選択待ちなら案内（手番でなくても出す）。
   if (viewer && state.phase === 'MAIN') {
     if (state.turnPhase === 'EVENT_GIVE' && (state.tbPendingEventGive ?? {})[viewer])
-      return { text: '🎁 左隣へ渡す資源を選択！', alert: true };
+      return { text: '左隣へ渡す資源を選択！', alert: true };
     if (state.turnPhase === 'EVENT_HELPFUL' && (state.tbPendingEventHelpful ?? []).includes(viewer))
-      return { text: '🎁 渡す相手と資源を選択！', alert: true };
+      return { text: '渡す相手と資源を選択！', alert: true };
     if (state.turnPhase === 'EVENT_STEAL' && state.tbPendingEventSteal?.playerId === viewer)
-      return { text: '⚔ 奪う相手を選択！', alert: true };
+      return { text: '奪う相手を選択！', alert: true };
     if (state.turnPhase === 'EVENT_DAMAGE' && (state.tbPendingEventDamage ?? []).includes(viewer))
-      return { text: '🚧 損傷させる自分の道をタップ', alert: true };
+      return { text: '損傷させる自分の道をタップ', alert: true };
   }
   if (viewer && cur === viewer) {
     if (state.phase === 'SETUP_FORWARD' || state.phase === 'SETUP_BACKWARD') {
       if (state.setupSubPhase === 'PLACE_ROAD') {
         // 航海者: 海岸の開拓地なら道の代わりに船を置ける → その場合は選択を促す。
         const canShip = Object.keys(state.edges).some(eid => canBuildShip(state, cur, eid));
-        return { text: canShip ? '🛤 道 か ⛵ 船 を配置（海岸はどちらでもOK）' : '🛤 道を配置', alert: false };
+        return { text: canShip ? '道 か 船 を配置（海岸はどちらでもOK）' : '道を配置', alert: false };
       }
-      return { text: '🏠 開拓地を配置', alert: false };
+      return { text: '開拓地を配置', alert: false };
     }
-    if (state.turnPhase === 'PRE_ROLL') return { text: state.tbEventCards ? '🃏 イベントカードをめくる' : '🎲 ダイス', alert: false };
-    if (state.turnPhase === 'ROBBER')   return { text: '🦹 盗賊を移動するタイルをタップ', alert: true };
-    if (state.turnPhase === 'CITY_DOWNGRADE') return { text: '⚔ 格下げする自分の都市をタップ', alert: true };
-    if (state.turnPhase === 'PROGRESS_DISCARD') return { text: '📜 進歩カードが5枚 — 捨てる1枚を選択', alert: true };
+    if (state.turnPhase === 'PRE_ROLL') return { text: state.tbEventCards ? 'イベントカードをめくる' : 'ダイス', alert: false };
+    if (state.turnPhase === 'ROBBER')   return { text: '盗賊を移動するタイルをタップ', alert: true };
+    if (state.turnPhase === 'CITY_DOWNGRADE') return { text: '格下げする自分の都市をタップ', alert: true };
+    if (state.turnPhase === 'PROGRESS_DISCARD') return { text: '進歩カードが5枚 — 捨てる1枚を選択', alert: true };
     if (state.turnPhase === 'TRADE_BUILD') {
-      if (buildMode === 'road')       return { text: '🛤 道を配置', alert: false };
-      if (buildMode === 'ship')       return { text: '🚢 船を配置', alert: false };
-      if (buildMode === 'moveShip')   return { text: moveShipFrom ? '⛵ 移動先をタップ' : '⛵ 動かす船を選択', alert: false };
-      if (buildMode === 'moveKnight') return { text: moveKnightFrom ? '🛡 移動先をタップ' : '🛡 動かす騎士を選択', alert: false };
-      if (buildMode === 'chaseRobber') return { text: '🦹 追い払う騎士を選択', alert: false };
-      if (buildMode === 'buildKnight') return { text: '🛡 騎士を置く頂点をタップ', alert: false };
-      if (buildMode === 'activateKnight') return { text: '⚡ 起動する騎士をタップ', alert: false };
-      if (buildMode === 'upgradeKnight') return { text: '⬆ 昇格する騎士をタップ', alert: false };
-      if (buildMode === 'placeMerchant') return { text: '🏪 商人を置く資源タイルをタップ', alert: true };
-      if (buildMode === 'inventorSwap') return { text: inventorFirstTile ? '🔄 入れ替え先のタイルをタップ' : '🔄 入れ替える1つ目のタイルをタップ', alert: true };
-      if (buildMode === 'placeBishop') return { text: '⛪ 盗賊を置くタイルをタップ', alert: true };
-      if (buildMode === 'selectDiplomatRoad') return { text: '📜 撤去する道をタップ（自分の道は建て直し可）', alert: true };
-      if (buildMode === 'selectDeserterKnight') return { text: deserterRemoveVid ? '🏃 得た騎士を置く頂点をタップ' : '🏃 消す相手の騎士をタップ', alert: true };
-      if (buildMode === 'selectMedicineSettlement') return { text: '💊 都市にする開拓地をタップ', alert: true };
-      if (buildMode === 'selectMetropolis') return { text: '🏛 メトロポリスにする都市をタップ', alert: true };
-      if (buildMode === 'selectSmithKnight') return { text: smithFirstKnight ? '⚒ 昇格する2体目の騎士をタップ' : '⚒ 昇格する騎士をタップ（最大2体）', alert: true };
-      if (buildMode === 'selectEngineerCity') return { text: '🧱 城壁を建てる都市をタップ', alert: true };
-      if (buildMode === 'selectWallCity') return { text: '🧱 城壁を建てる都市をタップ', alert: true };
-      if (buildMode === 'selectIntrigueKnight') return { text: '🗡 退去させる敵騎士をタップ', alert: true };
-      if (buildMode === 'settlement') return { text: '🏠 開拓地を配置', alert: false };
-      if (buildMode === 'city')       return { text: '🏙 都市を配置', alert: false };
-      return { text: '🛠 建設・交易', alert: false };
+      if (buildMode === 'road')       return { text: '道を配置', alert: false };
+      if (buildMode === 'ship')       return { text: '船を配置', alert: false };
+      if (buildMode === 'moveShip')   return { text: moveShipFrom ? '移動先をタップ' : '動かす船を選択', alert: false };
+      if (buildMode === 'moveKnight') return { text: moveKnightFrom ? '移動先をタップ' : '動かす騎士を選択', alert: false };
+      if (buildMode === 'chaseRobber') return { text: '追い払う騎士を選択', alert: false };
+      if (buildMode === 'buildKnight') return { text: '騎士を置く頂点をタップ', alert: false };
+      if (buildMode === 'activateKnight') return { text: '起動する騎士をタップ', alert: false };
+      if (buildMode === 'upgradeKnight') return { text: '昇格する騎士をタップ', alert: false };
+      if (buildMode === 'placeMerchant') return { text: '商人を置く資源タイルをタップ', alert: true };
+      if (buildMode === 'inventorSwap') return { text: inventorFirstTile ? '入れ替え先のタイルをタップ' : '入れ替える1つ目のタイルをタップ', alert: true };
+      if (buildMode === 'placeBishop') return { text: '盗賊を置くタイルをタップ', alert: true };
+      if (buildMode === 'selectDiplomatRoad') return { text: '撤去する道をタップ（自分の道は建て直し可）', alert: true };
+      if (buildMode === 'selectDeserterKnight') return { text: deserterRemoveVid ? '得た騎士を置く頂点をタップ' : '消す相手の騎士をタップ', alert: true };
+      if (buildMode === 'selectMedicineSettlement') return { text: '都市にする開拓地をタップ', alert: true };
+      if (buildMode === 'selectMetropolis') return { text: 'メトロポリスにする都市をタップ', alert: true };
+      if (buildMode === 'selectSmithKnight') return { text: smithFirstKnight ? '昇格する2体目の騎士をタップ' : '昇格する騎士をタップ（最大2体）', alert: true };
+      if (buildMode === 'selectEngineerCity') return { text: '城壁を建てる都市をタップ', alert: true };
+      if (buildMode === 'selectWallCity') return { text: '城壁を建てる都市をタップ', alert: true };
+      if (buildMode === 'selectIntrigueKnight') return { text: '退去させる敵騎士をタップ', alert: true };
+      if (buildMode === 'settlement') return { text: '開拓地を配置', alert: false };
+      if (buildMode === 'city')       return { text: '都市を配置', alert: false };
+      return { text: '建設・交易', alert: false };
     }
   }
   if (cur) {
     const p = state.players[cur];
     // CPU/人間を問わず控えめに「○○ の番」とだけ表示（CPUを強調しすぎない）。
-    return { text: `⏳ ${p?.name ?? ''} の番`, alert: false };
+    return { text: `${p?.name ?? ''} の番`, alert: false };
   }
   return { text: '', alert: false };
 }
@@ -1249,7 +1256,7 @@ function updateLandscapeSheet(): void {
     sheetHandleEl.id = 'ui-sheet-handle';
     sheetHandleEl.type = 'button';
     sheetHandleEl.addEventListener('click', () => {
-      landscapeSheetUserOpen = !landscapeSheetUserOpen;
+      landscapeSheetUserOpen = !(landscapeSheetUserOpen ?? defaultSheetOpen());
       updateLandscapeSheet();
     });
     appDiv.appendChild(sheetHandleEl);
@@ -1257,7 +1264,7 @@ function updateLandscapeSheet(): void {
   if (!state) return;
   const st = computeSheetStatus();
   // 交易/捨て札は自動展開。建設モード中は盤面をタップさせたいので自動収納。
-  const open = st.alert || (landscapeSheetUserOpen && buildMode === 'idle');
+  const open = st.alert || ((landscapeSheetUserOpen ?? defaultSheetOpen()) && buildMode === 'idle');
   document.body.classList.toggle('lsheet-open', open);
   sheetHandleEl.classList.toggle('alert', st.alert);
   const arrow = open ? '▼ 閉じる' : '▲ 操作';
@@ -1315,10 +1322,12 @@ function updateGameNav(): void {
     gameNav.appendChild(homeBtn);
   }
 
-  // 右上の「☰ メニュー」（補助操作をまとめてメイン操作の邪魔をしない）
+  // 右上の「メニュー」（補助操作をまとめてメイン操作の邪魔をしない）。
+  // 対戦中のヘッダーはこのボタン1個だけにする（遊び方・ホーム等は中に入れる）。
   const menuBtn = document.createElement('button');
-  menuBtn.className = 'menu-toggle';
-  menuBtn.textContent = '☰ メニュー';
+  menuBtn.className = 'menu-toggle has-ui-icon';
+  menuBtn.type = 'button';
+  menuBtn.append(icon('menu'), Object.assign(document.createElement('span'), { textContent: 'メニュー' }));
   menuBtn.setAttribute('aria-label', 'メニュー');
   const dd = document.createElement('div');
   dd.className = 'game-menu';
@@ -1379,7 +1388,8 @@ function updateGameNav(): void {
     begRow.className = 'game-menu-row';
     const lbl = document.createElement('span');
     lbl.className = 'game-menu-label';
-    lbl.textContent = '🔰 初心者モード';
+    lbl.classList.add('has-ui-icon');
+    lbl.append(icon('help'), Object.assign(document.createElement('span'), { textContent: '初心者モード' }));
     const sel = document.createElement('select');
     sel.className = 'game-menu-select';
     ([['on', 'ON'], ['off', 'OFF']] as [string, string][]).forEach(([v, t]) => {
@@ -1464,12 +1474,18 @@ function updateGameNav(): void {
   const bgmRow = document.createElement('div');
   bgmRow.className = 'game-menu-row';
   const bgmBtn = document.createElement('button');
-  bgmBtn.className = 'game-menu-btn';
-  bgmBtn.textContent = isBgmEnabled() ? '🔊 BGM ON' : '🔇 BGM OFF';
+  bgmBtn.className = 'game-menu-btn has-ui-icon';
+  // アイコン（SVG）＋ラベルを入れ直すヘルパ。絵文字は使わない。
+  const setBgmLabel = (): void => {
+    bgmBtn.textContent = '';
+    bgmBtn.append(icon(isBgmEnabled() ? 'volume' : 'volumeOff'),
+      Object.assign(document.createElement('span'), { textContent: isBgmEnabled() ? 'BGM ON' : 'BGM OFF' }));
+  };
+  setBgmLabel();
   bgmBtn.addEventListener('click', () => {
     setBgmEnabled(!isBgmEnabled());
     if (isBgmEnabled()) bgmStart(); else bgmStop();
-    bgmBtn.textContent = isBgmEnabled() ? '🔊 BGM ON' : '🔇 BGM OFF';
+    setBgmLabel();
   });
   const volSlider = document.createElement('input');
   volSlider.type = 'range'; volSlider.min = '0'; volSlider.max = '100';
@@ -1504,11 +1520,16 @@ function updateGameNav(): void {
   const seRow = document.createElement('div');
   seRow.className = 'game-menu-row';
   const seBtn = document.createElement('button');
-  seBtn.className = 'game-menu-btn';
-  seBtn.textContent = isSeEnabled() ? '🔔 効果音 ON' : '🔕 効果音 OFF';
+  seBtn.className = 'game-menu-btn has-ui-icon';
+  const setSeLabel = (): void => {
+    seBtn.textContent = '';
+    seBtn.append(icon(isSeEnabled() ? 'bell' : 'bellOff'),
+      Object.assign(document.createElement('span'), { textContent: isSeEnabled() ? '効果音 ON' : '効果音 OFF' }));
+  };
+  setSeLabel();
   seBtn.addEventListener('click', () => {
     setSeEnabled(!isSeEnabled());
-    seBtn.textContent = isSeEnabled() ? '🔔 効果音 ON' : '🔕 効果音 OFF';
+    setSeLabel();
   });
   const seVol = document.createElement('input');
   seVol.type = 'range'; seVol.min = '0'; seVol.max = '100';
@@ -1525,20 +1546,22 @@ function updateGameNav(): void {
   // 触覚フィードバック（対応端末のみ表示。設定は localStorage に永続）。
   if (hapticsSupported()) {
     const hapBtn = document.createElement('button');
-    hapBtn.className = 'game-menu-btn';
-    hapBtn.textContent = isHapticsEnabled() ? '📳 振動 ON' : '📴 振動 OFF';
+    hapBtn.className = 'game-menu-btn has-ui-icon';
+    const setHapLabel = (): void => {
+      hapBtn.textContent = '';
+      hapBtn.append(icon('vibrate'),
+        Object.assign(document.createElement('span'), { textContent: isHapticsEnabled() ? '振動 ON' : '振動 OFF' }));
+    };
+    setHapLabel();
     hapBtn.addEventListener('click', () => {
       setHapticsEnabled(!isHapticsEnabled());
-      hapBtn.textContent = isHapticsEnabled() ? '📳 振動 ON' : '📴 振動 OFF';
+      setHapLabel();
     });
     dd.appendChild(hapBtn);
   }
 
   // 出目分布グラフ
-  const statsBtn = document.createElement('button');
-  statsBtn.className = 'game-menu-btn';
-  statsBtn.textContent = '🎲 出目分布';
-  statsBtn.addEventListener('click', () => {
+  const statsBtn = iconBtn('chart', '出目分布', 'game-menu-btn', () => {
     gameMenuOpen = false;
     dd.style.display = 'none';
     showDiceStatsModal();
@@ -1547,35 +1570,60 @@ function updateGameNav(): void {
 
   // 交易の自動拒否（人間向け。ONなら他プレイヤーからの提案を自動で拒否）
   const autoRejBtn = document.createElement('button');
-  autoRejBtn.className = 'game-menu-btn';
-  autoRejBtn.textContent = autoRejectTrades ? '🚫 交易を自動拒否 ON' : '🤝 交易を自動拒否 OFF';
+  autoRejBtn.className = 'game-menu-btn has-ui-icon';
+  const setAutoRejLabel = (): void => {
+    autoRejBtn.textContent = '';
+    autoRejBtn.append(icon(autoRejectTrades ? 'ban' : 'trade'),
+      Object.assign(document.createElement('span'), { textContent: autoRejectTrades ? '交易を自動拒否 ON' : '交易を自動拒否 OFF' }));
+  };
+  setAutoRejLabel();
   autoRejBtn.addEventListener('click', () => {
     autoRejectTrades = !autoRejectTrades;
-    autoRejBtn.textContent = autoRejectTrades ? '🚫 交易を自動拒否 ON' : '🤝 交易を自動拒否 OFF';
+    setAutoRejLabel();
     // ONにした瞬間、保留中の提案があれば適用する
     if (autoRejectTrades) scheduleHumanTradeAutoReject();
   });
   dd.appendChild(autoRejBtn);
 
-  // ホームに戻る（誤クリック防止のため最下部・確認ダイアログ付き。ゲーム中のみ）
+  // 「遊び方」（目的・手番の流れ・建設コスト＋このゲーム固有ルールの早見表）。
+  // 以前は盤面右上に独立ボタンで出していたが、数字タイルに重なって盤面を隠していたため
+  // ☰ メニューの中へ移した（対戦中のヘッダーは ☰ 1個だけにする）。
   if (state.phase !== 'GAME_OVER') {
-    const homeBtn = document.createElement('button');
-    homeBtn.className = 'game-menu-btn game-menu-danger';
-    homeBtn.textContent = '🏠 ホームに戻る';
-    homeBtn.addEventListener('click', () => {
-      if (window.confirm('ホームに戻りますか？現在のゲームは終了します。')) returnToHome();
+    const helpBtn = iconBtn('help', '遊び方', 'game-menu-btn beginner-help-nav-btn', () => {
+      gameMenuOpen = false;
+      dd.style.display = 'none';
+      openBeginnerHelp(state);
     });
-    dd.appendChild(homeBtn);
+    dd.appendChild(helpBtn);
   }
 
-  // 「🔰 遊び方」ボタン（目的・手番の流れ・建設コスト＋このゲーム固有ルールの早見表）。
-  // 初心者モードに限らず常時表示（シナリオ別の詳細ルールを誰でも確認できるように）。
+  // ホームに戻る（誤クリック防止のため最下部・確認シート付き。ゲーム中のみ）
   if (state.phase !== 'GAME_OVER') {
-    const helpBtn = document.createElement('button');
-    helpBtn.className = 'btn-nav beginner-help-nav-btn';
-    helpBtn.textContent = '🔰 遊び方';
-    helpBtn.addEventListener('click', () => openBeginnerHelp(state));
-    gameNav.appendChild(helpBtn);
+    const homeBtn = iconBtn('home', 'ホームに戻る', 'game-menu-btn game-menu-danger', () => {
+      gameMenuOpen = false;
+      dd.style.display = 'none';
+      const me = selfPlayerId();
+      const lines: ConfirmLine[] = [
+        { icon: icon('alert'), text: '進行中のこの対局は破棄されます（あとから戻れません）', tone: 'lose' },
+      ];
+      if (me) {
+        const p = state.players[me];
+        const built = (init: number, left: number): number => Math.max(0, init - left);
+        lines.push({
+          text: `${p?.name ?? 'あなた'}：${calcVP(state, me)}点`
+            + `／開拓地 ${built(5, p?.remainingSettlements ?? 5)}・都市 ${built(4, p?.remainingCities ?? 4)}`,
+          tone: 'note',
+        });
+      }
+      showConfirmSheet({
+        title: 'ホームに戻る？',
+        lines,
+        okLabel: '破棄してホームへ',
+        danger: true,
+        onOk: returnToHome,
+      });
+    });
+    dd.appendChild(homeBtn);
   }
 
   const wrap = document.createElement('div');
@@ -2163,8 +2211,15 @@ const VICTORY_REASON: Record<string, string> = {
   BUY_DEV_CARD:     '勝利点カードで勝利！',
 };
 
-// 終了画面の順位ラベル。
-const RANK_LABEL: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉', 4: '4位' };
+// 終了画面の順位バッジ。メダル絵文字(🥇🥈🥉)は端末のフォント差が大きいので、
+// 1位だけ自前の王冠SVG＋「N位」のテキストで統一する。
+function rankBadge(rank: number): HTMLSpanElement {
+  const s = document.createElement('span');
+  s.className = `score-rank rank-${rank}`;
+  if (rank === 1) s.appendChild(icon('crown', 'rank-crown'));
+  s.appendChild(document.createTextNode(`${rank}位`));
+  return s;
+}
 
 function scoreChip(text: string, bonus = false): HTMLSpanElement {
   const s = document.createElement('span');
@@ -2211,9 +2266,7 @@ function buildVictoryScoreboard(): HTMLDivElement {
 
     const head = document.createElement('div');
     head.className = 'score-head';
-    const rankEl = document.createElement('span');
-    rankEl.className = `score-rank rank-${rank}`;
-    rankEl.textContent = RANK_LABEL[rank] ?? `${rank}位`;
+    const rankEl = rankBadge(rank);
     const dot = document.createElement('span'); dot.className = 'score-dot'; dot.style.background = color;
     const name = document.createElement('span'); name.className = 'score-name';
     name.textContent = `${p.name}${p.type === 'ai' ? '（CPU）' : ''}${row.pid === me ? '〔あなた〕' : ''}`;
@@ -2298,9 +2351,10 @@ function showVictoryOverlay(winnerId: PlayerId, causeAction: string): void {
   modal.className = 'victory-modal';
   modal.style.borderColor = color;
 
+  // 優勝トロフィー。絵文字（🎉🏆）は端末差で豆腐になるためインラインSVGで描く。
   const trophy = document.createElement('div');
-  trophy.className = 'victory-trophy';
-  trophy.textContent = isHuman ? '🎉🏆🎉' : '🏆';
+  trophy.className = `victory-trophy${isHuman ? ' mine' : ''}`;
+  trophy.appendChild(icon('trophy'));
   modal.appendChild(trophy);
 
   const dot = document.createElement('span'); dot.className = 'victory-dot'; dot.style.background = color;
@@ -2326,28 +2380,17 @@ function showVictoryOverlay(winnerId: PlayerId, causeAction: string): void {
   const btnRow = document.createElement('div');
   btnRow.className = 'victory-btns';
   if (lastConfig) {
-    const again = document.createElement('button');
-    again.className = 'btn-nav btn-nav-primary';
-    again.textContent = '🔄 もう一度遊ぶ';
-    again.addEventListener('click', () => { overlay.remove(); if (lastConfig) startGame(lastConfig); });
+    const again = iconBtn('refresh', 'もう一度遊ぶ', 'btn-nav btn-nav-primary',
+      () => { overlay.remove(); if (lastConfig) startGame(lastConfig); });
     btnRow.appendChild(again);
   }
-  const home = document.createElement('button');
-  home.className = 'btn-nav';
-  home.textContent = '🏠 ホームに戻る';
-  home.addEventListener('click', () => { overlay.remove(); returnToHome(); });
+  const home = iconBtn('home', 'ホームに戻る', 'btn-nav', () => { overlay.remove(); returnToHome(); });
   btnRow.appendChild(home);
   // 勝利後でもこのゲームの出目分布を見られるように
-  const statsBtn = document.createElement('button');
-  statsBtn.className = 'btn-nav';
-  statsBtn.textContent = '🎲 出目分布';
-  statsBtn.addEventListener('click', () => showDiceStatsModal());
+  const statsBtn = iconBtn('chart', '出目分布', 'btn-nav', () => showDiceStatsModal());
   btnRow.appendChild(statsBtn);
   // 結果モーダルを一時的に隠して最終盤面をゆっくり見る（感想戦用）。フローティングボタンで結果に戻せる。
-  const viewBoardBtn = document.createElement('button');
-  viewBoardBtn.className = 'btn-nav';
-  viewBoardBtn.textContent = '🗺 最終盤面を見る';
-  viewBoardBtn.addEventListener('click', () => hideVictoryOverlayForBoardView(overlay));
+  const viewBoardBtn = iconBtn('map', '最終盤面を見る', 'btn-nav', () => hideVictoryOverlayForBoardView(overlay));
   btnRow.appendChild(viewBoardBtn);
   modal.appendChild(btnRow);
   overlay.appendChild(modal);
@@ -2363,7 +2406,7 @@ function showVictoryOverlay(winnerId: PlayerId, causeAction: string): void {
     const big = document.createElement('div');
     big.className = 'victory-splash-title';
     big.style.color = color;
-    const t = document.createElement('div'); t.className = 'victory-splash-trophy'; t.textContent = isHuman ? '🎉🏆🎉' : '🏆';
+    const t = document.createElement('div'); t.className = `victory-splash-trophy${isHuman ? ' mine' : ''}`; t.appendChild(icon('trophy'));
     const n = document.createElement('div'); n.textContent = `${winner.name} 勝利！`;
     big.append(t, n);
     splash.appendChild(big);
@@ -2392,7 +2435,9 @@ function hideVictoryOverlayForBoardView(overlay: HTMLDivElement): void {
   document.getElementById('victory-reopen-btn')?.remove();
   const reopen = document.createElement('button');
   reopen.id = 'victory-reopen-btn';
-  reopen.textContent = '🏆 結果を見る';
+  reopen.className = 'has-ui-icon';
+  reopen.type = 'button';
+  reopen.append(icon('trophy'), Object.assign(document.createElement('span'), { textContent: '結果を見る' }));
   reopen.addEventListener('click', () => {
     overlay.classList.remove('victory-hidden');
     reopen.remove();
@@ -3845,10 +3890,12 @@ function dispatch(action: Action): void {
 
 function setBuildMode(mode: BuildMode): void {
   buildMode = mode;
-  // 建設モードに入ったら横持ちシートは畳み、盤面へ自動スクロール（操作対象を必ず見せる）。
-  // 解除('idle')やトグルOFFでは動かさない。setBuildMode の呼び出し元は人間のUIボタンと
-  // dispatch の進歩カード/メトロポリス割込みのみ（CPUは通らない）なので人間操作時だけ働く。
+  // 建設モードに入ったらシートは畳み、盤面へ自動スクロール（操作対象を必ず見せる）。
+  // 解除('idle')に戻ったら向きごとの既定へ戻す（縦持ちは開＝盤面と操作を同時に見せる）。
+  // setBuildMode の呼び出し元は人間のUIボタンと dispatch の進歩カード/メトロポリス割込みのみ
+  // （CPUは通らない）なので人間操作時だけ働く。
   if (mode !== 'idle') { landscapeSheetUserOpen = false; scrollToBoard(); }
+  else landscapeSheetUserOpen = null;
   // モード変更で仮置きプレビューは破棄（別の建設物を選び直したとみなす）。
   if (uiPhase.type === 'placePreview') uiPhase = { type: 'idle' };
   // 船移動モード以外へ移ったら選択中の移動元を解除。
@@ -4335,7 +4382,7 @@ function startLanGame(initial: GameState, viewerId: PlayerId, client: LanClient)
   state = initial;
   buildMode = 'idle';
   uiPhase = { type: 'idle' };
-  landscapeSheetUserOpen = false;
+  landscapeSheetUserOpen = null;   // 向きごとの既定に戻す
   diceAnimating = false;
   clearTransientFx();
   pendingNetStates = [];
@@ -4430,8 +4477,17 @@ function showReconnecting(message?: string): void {
     quit.type = 'button';
     quit.textContent = 'やめる';
     quit.addEventListener('click', () => {
-      if (!window.confirm('対戦から抜けてホームに戻りますか？（この対局には戻れなくなります）')) return;
-      abandonNetGame();
+      // OS標準ダイアログは世界観を壊すので、盤面配置と同じ自作の確認シートを使う。
+      showConfirmSheet({
+        title: '対戦から抜ける？',
+        lines: [
+          { icon: icon('alert'), text: 'この対局には戻れなくなります（席は失われます）', tone: 'lose' },
+          { text: '再接続を続けたい場合は「やめる」を選んでください', tone: 'note' },
+        ],
+        okLabel: '抜けてホームへ',
+        danger: true,
+        onOk: abandonNetGame,
+      });
     });
     el.append(txt, retry, quit);
     document.body.appendChild(el);
@@ -4773,7 +4829,7 @@ function startGame(cfg: HomeConfig): void {
   state = initGameState(cfg);
   buildMode = 'idle';
   uiPhase = { type: 'idle' };
-  landscapeSheetUserOpen = false;
+  landscapeSheetUserOpen = null;   // 向きごとの既定に戻す
   diceAnimating = false;
   clearTransientFx();
   cpuPlayerTradeOfferedThisTurn = false;
@@ -4811,7 +4867,7 @@ function returnToHome(): void {
   diceAnimating = false;
   clearTransientFx();
   // 横持ちボトムシートの状態をリセット
-  landscapeSheetUserOpen = false;
+  landscapeSheetUserOpen = null;   // 向きごとの既定に戻す
   document.body.classList.remove('lsheet-open');
 
   // LAN対戦の後片付け（接続を閉じてローカルモードへ戻す）

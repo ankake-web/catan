@@ -6,19 +6,20 @@
   <meta name="description" content="ブラウザで遊べるカタン風ボードゲーム。CPU対戦とオンライン対戦に対応。" />
   <meta name="theme-color" content="#0b242c" />
   <meta name="color-scheme" content="dark" />
-  <!-- 絵文字SVGのインラインfavicon（base path に依存せず GitHub Pages でも有効）。 -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text x='8' y='52' font-size='52'>🎲</text></svg>" />
+  <!-- インラインSVGのfavicon（base path に依存せず GitHub Pages でも有効）。
+       絵文字は端末のフォント次第で豆腐(□)になるため、サイコロを図形で描いている。 -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect x='6' y='6' width='52' height='52' rx='13' fill='%23f4ead6' stroke='%232a1c08' stroke-width='4'/><circle cx='21' cy='21' r='5.5' fill='%232a1c08'/><circle cx='32' cy='32' r='5.5' fill='%232a1c08'/><circle cx='43' cy='43' r='5.5' fill='%232a1c08'/></svg>" />
   <!-- OGP（SNS共有時の表示） -->
-  <meta property="og:title" content="🎲 カタン" />
+  <meta property="og:title" content="カタン" />
   <meta property="og:description" content="ブラウザで遊べるカタン風ボードゲーム。CPU対戦とオンライン対戦に対応。" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="ja_JP" />
-  <title>🎲 カタン</title>
+  <title>カタン</title>
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
   <div id="home"></div>
-  <h1 id="game-title" style="display:none">🎲 カタン</h1>
+  <h1 id="game-title" style="display:none">カタン</h1>
   <div id="app" style="display:none">
     <div id="game-nav"></div>
     <!-- 盤面を四隅パネルの位置決めコンテキストにするためのラッパー -->
